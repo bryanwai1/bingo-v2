@@ -579,6 +579,30 @@ export function BingoDashAdmin() {
   const [tileSaving, setTileSaving] = useState(false)
 
   // Inline category picker on gallery cards (shows a <select> dropdown)
+  // Collapsed card grids, keyed section+group.
+  //
+  // This is a live-event control, not a preference: with the grid open a
+  // facilitator briefing a room is also showing them every card they are
+  // about to hunt for. Collapse it, talk, reveal on cue.
+  //
+  // Persisted because a mid-event refresh should not silently reveal a board
+  // that was deliberately hidden.
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(() => {
+    try {
+      const raw = localStorage.getItem('bingo-admin-collapsed')
+      return new Set<string>(raw ? JSON.parse(raw) : [])
+    } catch { return new Set<string>() }
+  })
+
+  const toggleGroup = (key: string) => {
+    setCollapsedGroups(prev => {
+      const next = new Set(prev)
+      if (next.has(key)) next.delete(key); else next.add(key)
+      try { localStorage.setItem('bingo-admin-collapsed', JSON.stringify([...next])) } catch { /* private mode */ }
+      return next
+    })
+  }
+
   const [editingCategoryId, setEditingCategoryId] = useState<string | null>(null)
 
   // Category filter for challenges gallery
@@ -2789,6 +2813,26 @@ export function BingoDashAdmin() {
                         <div key={group.key}>
                           {/* Category subheader */}
                           <div className="flex items-center gap-3 mb-3 pl-4">
+                          {(() => {
+                            const gKey = section.id + ':' + group.key
+                            const hidden = collapsedGroups.has(gKey)
+                            return (
+                              <button
+                                type="button"
+                                onClick={() => toggleGroup(gKey)}
+                                aria-expanded={!hidden}
+                                title={hidden ? 'Show these cards' : 'Hide these cards'}
+                                className="flex items-center gap-1.5 px-2 py-1 rounded-lg text-[11px] font-black uppercase tracking-widest a-text-3 hover:a-surface-2 transition-colors flex-shrink-0"
+                              >
+                                <svg viewBox="0 0 16 16" width="11" height="11" aria-hidden="true"
+                                     style={{ transform: hidden ? 'rotate(-90deg)' : 'none', transition: 'transform .18s cubic-bezier(.22,1,.36,1)' }}>
+                                  <path d="M3 6l5 5 5-5" fill="none" stroke="currentColor"
+                                        strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
+                                </svg>
+                                {hidden ? `${group.tasks.length} hidden` : 'Hide'}
+                              </button>
+                            )
+                          })()}
                             <h3 className="text-xs font-black a-text-2 uppercase tracking-widest">{group.label}</h3>
                             <span className="text-xs a-text-2 font-medium">{group.tasks.length}</span>
                             <div className="flex-1 h-px a-surface-2" />
@@ -2812,7 +2856,10 @@ export function BingoDashAdmin() {
                           </div>
 
                           {/* Cards grid */}
-                          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 pl-4">
+                          <div
+                            className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 pl-4"
+                            hidden={collapsedGroups.has(section.id + ':' + group.key)}
+                          >
                             {group.tasks.map(task => {
                               const ink = inkFor(task.hex_code)
                               return (

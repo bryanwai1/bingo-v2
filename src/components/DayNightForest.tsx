@@ -49,7 +49,12 @@ const ART: React.CSSProperties = {
 }
 
 export function DayNightForest() {
-  const [base, setBase] = useState(() => Math.floor(Math.random() * FRAMES))
+  // Start in daylight. Frames 00-02 and 16-19 are all near-black, so a flat
+  // random start dropped roughly a third of arrivals onto a black screen —
+  // the opposite of the pleasant place to wait this screen exists to be.
+  // Frames 4-12 run dawn through golden hour, and the cycle carries on into
+  // night from there for anyone waiting a while.
+  const [base, setBase] = useState(() => 4 + Math.floor(Math.random() * 9))
   const [incoming, setIncoming] = useState<number | null>(null)
   const [fade, setFade] = useState(0)
   const timers = useRef<number[]>([])
