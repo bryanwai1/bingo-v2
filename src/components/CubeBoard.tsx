@@ -38,7 +38,7 @@ export function CubeBoard({
 }) {
   // 7px was unreadable at any size. Scale with the cube and floor it at 9.
   const tileFont = Math.max(9, Math.round(size / 34))
-  const [rot, setRot] = useState<Vec>({ x: -20, y: -28 })
+  const [rot, setRot] = useState<Vec>({ x: -14, y: -22 })
   const [snapping, setSnapping] = useState(false)
   const drag = useRef<{ x: number; y: number; rx: number; ry: number } | null>(null)
 
@@ -55,25 +55,31 @@ export function CubeBoard({
   // Faces sit at 0, -90, -180, 90. Allow a little overshoot past the outermost
   // face so it can be viewed square-on, but not so far that you are staring
   // into the empty side of a partial cube.
-  const MARGIN = 40
+  const MARGIN = 14
   const limitY: [number, number] | null =
     faces.length >= 4 ? null
     : faces.length === 3 ? [-180 - MARGIN, MARGIN]
     : faces.length === 2 ? [-90 - MARGIN, MARGIN]
     : [-MARGIN, MARGIN]
 
+  // Vertical range depends on whether the box is actually closed above and
+  // below. Without a top face, tilting up shows the inside.
+  const hasTop = faces.length >= 5
+  const hasBottom = faces.length >= 6
+  const limitX: [number, number] = [hasBottom ? -80 : -22, hasTop ? 80 : 22]
+
   const onMove = useCallback((e: PointerEvent) => {
     const d = drag.current
     if (!d) return
     // Clamped on X so the cube cannot be tumbled upside down, which is
     // disorienting and makes the labels unreadable.
-    const nx = Math.max(-80, Math.min(80, d.rx - (e.clientY - d.y) * 0.4))
+    const nx = Math.max(limitX[0], Math.min(limitX[1], d.rx - (e.clientY - d.y) * 0.4))
     let ny = d.ry + (e.clientX - d.x) * 0.4
     // With fewer than four faces the far side is open, so free rotation just
     // spins you into empty space. Clamp to the arc that actually has faces.
     if (limitY) ny = Math.max(limitY[0], Math.min(limitY[1], ny))
     setRot({ x: nx, y: ny })
-  }, [limitY])
+  }, [limitY, limitX])
 
   const onUp = useCallback(() => { drag.current = null }, [])
 
@@ -120,6 +126,7 @@ export function CubeBoard({
               className="absolute inset-0 rounded-2xl overflow-hidden"
               style={{
                 transform: faceTransform(f, size),
+                backfaceVisibility: 'hidden',
                 background: 'rgba(8,18,18,0.96)',
                 border: `2px solid ${faceColor(f)}77`,
                 boxShadow: `0 0 50px ${faceColor(f)}44, inset 0 0 60px rgba(0,0,0,.5)`,
