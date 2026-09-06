@@ -2360,6 +2360,32 @@ export function BingoDashAdmin() {
                   Grid — drag to reorder
                 </p>
 
+                {/* Open faces. This also lives in Settings, but it belongs
+                    here too — you decide how many faces a board has while
+                    looking at the board, not three screens away. */}
+                <div className="flex items-center gap-2 mb-3 flex-wrap">
+                  <span className="text-[10px] font-bold a-text-3 uppercase tracking-widest">Open faces</span>
+                  {[1, 2, 3, 4, 5, 6].map(n => {
+                    const on = normaliseFaceCount(currentBoard?.face_count) === n
+                    return (
+                      <button
+                        key={n}
+                        onClick={() => { if (!on) { updateBoardSettings({ face_count: n }); setEditFace(0) } }}
+                        title={`${n} face${n > 1 ? 's' : ''} — ${n * 25} slots`}
+                        className="w-8 h-8 rounded-lg text-xs font-black transition-colors"
+                        style={on
+                          ? { background: 'var(--a-brand)', color: '#fff' }
+                          : { background: 'var(--a-surface-2)', color: 'var(--a-text-2)' }}
+                      >
+                        {n}
+                      </button>
+                    )
+                  })}
+                  <span className="text-[10px] a-text-3">
+                    {normaliseFaceCount(currentBoard?.face_count) * 25} slots · 5×5 each
+                  </span>
+                </div>
+
                 {/* Face tabs. Shown only when the board actually opens more
                     than one face, so a normal board looks untouched. Editing
                     stays a flat 5x5 — the cube is a projector effect, not a
