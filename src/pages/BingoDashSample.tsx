@@ -2,7 +2,8 @@ import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 're
 import { Link } from 'react-router-dom'
 import { QRCodeSVG } from 'qrcode.react'
 import { supabase } from '../lib/supabase'
-import { fetchBoardTasks } from '../lib/boardCards'
+import { fetchBoardTasks, tasksForFace } from '../lib/boardCards'
+import { activeFaces, faceName, faceColor, normaliseFaceCount } from '../lib/cubeFaces'
 import { buildBingoSlots, completedBingoLines } from '../lib/bingoLines'
 import { useSampleRemote, makeRemoteCode, type RemoteCommand, type RemoteState, type SampleView, type DetailStep } from '../hooks/useSampleRemote'
 import { useBingoTaskPages } from '../hooks/useBingoTaskPages'
@@ -511,14 +512,21 @@ function BoardScreen({
   const boardNoteEvery = section?.board_note_every ?? 0
   const tileDisplay = normalizeTileDisplay(section?.tile_display)
 
+  // Which cube face this player is looking at — matches the real player view
+  // (Front/Right/Back/Left/Top/Bottom); a one-face board never shows the tabs.
+  const [face, setFace] = useState(0)
+  const faceCount = normaliseFaceCount(section?.face_count)
+  const visibleTasks = faceCount > 1 ? tasksForFace(gridTasks, face) : gridTasks
+
   const getStatus = (taskId: string): TileStatus => {
     const st = scanState[taskId]
     if (!st) return 'locked'
     return st === 'completed' ? 'completed' : 'scanned'
   }
 
-  const completedCount = gridTasks.filter(t => scanState[t.id] === 'completed').length
-  const slots = buildSlots(gridTasks)
+  const gridTaskIds = new Set(visibleTasks.map(t => t.id))
+  const completedCount = gridTasks.filter(t => scanState[t.id] === 'completed' && gridTaskIds.has(t.id)).length
+  const slots = buildSlots(visibleTasks)
 
   const completedLineIndices = BINGO_LINES.reduce((acc, line, i) => {
     const allDone = line.every(slotIdx => {
@@ -575,7 +583,7 @@ function BoardScreen({
             <p className="text-purple-400 text-[10px] font-black uppercase tracking-widest">Bingo Dash</p>
             <h1 className="text-white text-xl font-black tracking-tight leading-tight">{teamName}</h1>
             <div className="flex items-center gap-2 mt-0.5">
-              <span className="text-green-400 text-xs font-bold">{completedCount}/{gridTasks.length} completed</span>
+              <span className="text-green-400 text-xs font-bold">{completedCount}/{visibleTasks.length} completed</span>
               {lettersEarned && (
                 <span className="text-purple-300 text-xs font-black tracking-widest">{lettersEarned}!</span>
               )}
@@ -614,7 +622,34 @@ function BoardScreen({
 
       <main className="relative z-10 px-3 pb-8">
         <div className="max-w-md mx-auto">
-          {gridTasks.length === 0 ? (
+          {/* Face tabs. Only rendered on a cube board, so a normal game is
+              visually unchanged — mirrors the real player view exactly. */}
+          {faceCount > 1 && (
+            <div className="flex gap-1.5 mb-3 flex-wrap justify-center">
+              {activeFaces(faceCount).map(f => {
+                const on = face === f
+                const ft = tasksForFace(gridTasks, f)
+                const doneOnFace = ft.filter(t => getStatus(t.id) === 'completed').length
+                return (
+                  <button
+                    key={f}
+                    onClick={() => setFace(f)}
+                    className="px-3 py-1.5 rounded-xl text-xs font-black transition-all active:scale-95"
+                    style={on
+                      ? { background: faceColor(f), color: '#fff' }
+                      : { background: 'rgba(255,255,255,0.06)', color: 'rgba(255,255,255,0.55)', border: '1px solid rgba(255,255,255,0.12)' }}
+                  >
+                    {faceName(f)}
+                    <span className={on ? 'text-white/70 ml-1.5' : 'text-white/35 ml-1.5'}>
+                      {doneOnFace}/{ft.length}
+                    </span>
+                  </button>
+                )
+              })}
+            </div>
+          )}
+
+          {visibleTasks.length === 0 ? (
             <div className="text-center py-20 text-gray-500">
               <div className="text-4xl mb-3">📋</div>
               <p className="font-bold">No grid set up on this board yet</p>
