@@ -679,6 +679,7 @@ export type SampleTaskDetailHandle = {
   prevPage: () => void
   fillMarshal: () => void
   submitComplete: () => void
+  scroll: (direction: 'up' | 'down') => void
 }
 
 const SampleTaskDetail = forwardRef<SampleTaskDetailHandle, {
@@ -706,6 +707,7 @@ const SampleTaskDetail = forwardRef<SampleTaskDetailHandle, {
   const [photoSubmitted, setPhotoSubmitted] = useState(false)
   const [answerInputs, setAnswerInputs] = useState<string[]>([])
   const letterRefs = useRef<(HTMLInputElement | null)[][]>([])
+  const scrollRef = useRef<HTMLDivElement | null>(null)
 
   const answerRows = task.task_type === 'answer' && task.answer_text
     ? task.answer_text.split('\n').map(r => r.trim()).filter(Boolean)
@@ -754,6 +756,7 @@ const SampleTaskDetail = forwardRef<SampleTaskDetailHandle, {
     prevPage: () => setCurrentPage(p => Math.max(0, p - 1)),
     fillMarshal: () => { setMarshalInput(marshalPassword); setMarshalError('') },
     submitComplete: () => doComplete(),
+    scroll: direction => scrollRef.current?.scrollBy({ top: direction === 'down' ? 400 : -400, behavior: 'smooth' }),
   }))
 
   // Report the current step up so the controller renders the right buttons.
@@ -802,6 +805,7 @@ const SampleTaskDetail = forwardRef<SampleTaskDetailHandle, {
   // ── Main view ──
   return (
     <div
+      ref={scrollRef}
       className="fixed inset-0 z-50 overflow-y-auto"
       style={{ backgroundColor: `color-mix(in srgb, ${task.hex_code} 50%, #0a0a0a)` }}
     >
@@ -1268,7 +1272,10 @@ function SampleProjector() {
       case 'prevPage': detailRef.current?.prevPage(); break
       case 'fillMarshal': detailRef.current?.fillMarshal(); break
       case 'submitComplete': detailRef.current?.submitComplete(); break
-      case 'scroll': window.scrollBy({ top: c.direction === 'down' ? 400 : -400, behavior: 'smooth' }); break
+      case 'scroll':
+        if (openTask && detailRef.current) detailRef.current.scroll(c.direction)
+        else window.scrollBy({ top: c.direction === 'down' ? 400 : -400, behavior: 'smooth' })
+        break
       case 'requestState': sendState(snapshot()); break
     }
   }
