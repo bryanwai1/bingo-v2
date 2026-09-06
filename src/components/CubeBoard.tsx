@@ -58,11 +58,17 @@ export function CubeBoard({
 
   // Yaw limits for partial cubes: 1 face is nearly fixed, 2 sweeps one corner,
   // 3 sweeps an open box. From 4 faces on it is a closed ring, so free spin.
+  // Faces sit at 0, -90, -180, 90 (front, right, back, left). The viewer may
+  // swing to either side of the outermost face by a little, and no further.
+  // Faces sit at 0, -90, -180, 90. Allow a little overshoot past the outermost
+  // face so it can be viewed square-on, but not so far that you are staring
+  // into the empty side of a partial cube.
+  const MARGIN = 40
   const limitY: [number, number] | null =
     faces.length >= 4 ? null
-    : faces.length === 3 ? [-200, 20]
-    : faces.length === 2 ? [-110, 20]
-    : [-35, 35]
+    : faces.length === 3 ? [-180 - MARGIN, MARGIN]
+    : faces.length === 2 ? [-90 - MARGIN, MARGIN]
+    : [-MARGIN, MARGIN]
 
   const onMove = useCallback((e: PointerEvent) => {
     const d = drag.current
@@ -93,9 +99,11 @@ export function CubeBoard({
     const a = FACE_ANGLES[i]
     // Travel to the nearest equivalent angle rather than unwinding the whole
     // way round — spinning 340 degrees to move 20 looks broken.
-    setRot(prev => {
-      const turns = Math.round((prev.y - a.y) / 360)
-      return { x: a.x, y: a.y + turns * 360 }
+    setRot(() => {
+      // Snap to the face's own angle rather than the nearest multiple: with a
+      // clamped arc there is only ever one valid position per face.
+      const y = limitY ? Math.max(limitY[0], Math.min(limitY[1], a.y)) : a.y
+      return { x: a.x, y }
     })
   }
 
@@ -125,12 +133,18 @@ export function CubeBoard({
                 boxShadow: `0 0 50px ${faceColor(f)}44, inset 0 0 60px rgba(0,0,0,.5)`,
               }}
             >
-              {showLabels && (
-                <div className="px-3 py-1.5 text-[10px] font-black uppercase tracking-widest"
-                     style={{ color: faceColor(f), background: `${faceColor(f)}1a` }}>
-                  {faceName(f)}
-                </div>
-              )}
+              {showLabels && (() => {
+                // Angle between this face and the camera; past 90 degrees we
+                // are looking at its reverse and the text would read mirrored.
+                const facing = ((FACE_ANGLES[f].y - rot.y) % 360 + 540) % 360 - 180
+                if (Math.abs(facing) > 88) return null
+                return (
+                  <div className="px-3 py-1.5 text-[10px] font-black uppercase tracking-widest"
+                       style={{ color: faceColor(f), background: `${faceColor(f)}1a` }}>
+                    {faceName(f)}
+                  </div>
+                )
+              })()}
               <div className="grid grid-cols-5 gap-1 p-2"
                    style={{ height: showLabels ? size - 28 : size }}>
                 {Array.from({ length: TILES_PER_FACE }, (_, i) => {

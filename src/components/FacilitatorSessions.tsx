@@ -41,7 +41,7 @@ function CopyButton({ text, label }: { text: string; label: string }) {
         setCopied(true)
         setTimeout(() => setCopied(false), 1500)
       }}
-      className="px-3 py-2 rounded-xl text-xs font-black bg-purple-600 hover:bg-purple-500 text-white transition-colors flex-shrink-0">
+      className="px-3 py-2 rounded-xl text-xs font-black bg-purple-600 hover:bg-purple-500 a-text transition-colors flex-shrink-0">
       {copied ? '✓ Copied' : label}
     </button>
   )
@@ -133,12 +133,12 @@ export function FacilitatorSessions() {
   return (
     <section className="px-4 py-4 rounded-2xl bg-sky-400/5 border border-sky-400/20">
       <div className="flex items-start justify-between gap-3 mb-2">
-        <h2 className="text-white text-sm font-black uppercase tracking-widest">
+        <h2 className="a-text text-sm font-black uppercase tracking-widest">
           🎪 Facilitator sessions
         </h2>
         <button onClick={() => { setLoading(true); load() }}
           title="Check who has joined since this page loaded"
-          className="px-2.5 py-1 rounded-full text-[11px] font-black uppercase tracking-wider text-white/60 border border-white/15 hover:bg-white/10 transition-colors flex-shrink-0">
+          className="px-2.5 py-1 rounded-full text-[11px] font-black uppercase tracking-wider a-text-2 border border-white/15 hover:a-surface-2 transition-colors flex-shrink-0">
           Refresh
         </button>
       </div>
@@ -152,22 +152,22 @@ export function FacilitatorSessions() {
         <input
           value={newLabel} onChange={e => setNewLabel(e.target.value)}
           placeholder="Event name (e.g. Nestlé KL — 15 Aug)"
-          className="flex-1 min-w-[180px] px-3 py-2 rounded-xl bg-black/30 border-2 border-white/15 text-white text-sm placeholder-white/25 focus:border-sky-500 outline-none transition-colors"
+          className="flex-1 min-w-[180px] px-3 py-2 rounded-xl bg-black/30 border-2 border-white/15 a-text text-sm placeholder-white/25 focus:border-sky-500 outline-none transition-colors"
         />
         <select value={newHours} onChange={e => setNewHours(Number(e.target.value))}
-          className="px-3 py-2 rounded-xl bg-black/30 border-2 border-white/15 text-white text-sm focus:border-sky-500 outline-none transition-colors">
+          className="px-3 py-2 rounded-xl bg-black/30 border-2 border-white/15 a-text text-sm focus:border-sky-500 outline-none transition-colors">
           {SESSION_DURATIONS.map(d => <option key={d.hours} value={d.hours}>{d.label}</option>)}
         </select>
         <input
           value={newSeats} onChange={e => setNewSeats(e.target.value.replace(/\D/g, ''))}
           placeholder="Seats" inputMode="numeric"
           title="Maximum facilitators — leave blank for unlimited"
-          className="w-20 px-3 py-2 rounded-xl bg-black/30 border-2 border-white/15 text-white text-sm placeholder-white/25 focus:border-sky-500 outline-none transition-colors"
+          className="w-20 px-3 py-2 rounded-xl bg-black/30 border-2 border-white/15 a-text text-sm placeholder-white/25 focus:border-sky-500 outline-none transition-colors"
         />
         {hostOptions.length > 1 && (
           <select value={newHost || me?.id || ''} onChange={e => setNewHost(e.target.value)}
             title="Whose boards this crew works on"
-            className="px-3 py-2 rounded-xl bg-black/30 border-2 border-white/15 text-white text-sm focus:border-sky-500 outline-none transition-colors">
+            className="px-3 py-2 rounded-xl bg-black/30 border-2 border-white/15 a-text text-sm focus:border-sky-500 outline-none transition-colors">
             {hostOptions.map(h => (
               <option key={h.id} value={h.id}>
                 {h.id === me?.id ? 'My boards' : h.email ?? h.id}
@@ -176,7 +176,7 @@ export function FacilitatorSessions() {
           </select>
         )}
         <button onClick={createSession} disabled={creating}
-          className="px-4 py-2 rounded-xl text-xs font-black bg-sky-600 hover:bg-sky-500 text-white transition-colors disabled:opacity-50">
+          className="px-4 py-2 rounded-xl text-xs font-black bg-sky-600 hover:bg-sky-500 a-text transition-colors disabled:opacity-50">
           {creating ? 'Creating…' : '+ New session'}
         </button>
       </div>
@@ -195,11 +195,11 @@ export function FacilitatorSessions() {
             const hostName = accounts.find(a => a.id === s.host_id)
             return (
               <div key={s.id} className={`px-4 py-3 rounded-2xl border ${
-                dead ? 'bg-white/[0.02] border-white/10 opacity-60' : 'bg-black/20 border-sky-400/25'
+                dead ? 'bg-white/[0.02] a-border opacity-60' : 'bg-black/20 border-sky-400/25'
               }`}>
                 <div className="flex items-start justify-between gap-3 flex-wrap">
                   <div className="min-w-0">
-                    <p className="text-white font-bold text-sm">{s.label}</p>
+                    <p className="a-text font-bold text-sm">{s.label}</p>
                     <p className="text-xs text-gray-500 mt-0.5">
                       {dead
                         ? <span className="text-red-300">{s.revoked ? 'Closed' : 'Expired'} · {fmtExpiry(s.expires_at)}</span>
@@ -214,14 +214,14 @@ export function FacilitatorSessions() {
                         <CopyButton text={shareText(s)} label="Copy invite" />
                         <button onClick={() => endSession(s)} disabled={busyId === s.id}
                           title="Close the pass and immediately sign out everyone who joined it"
-                          className="px-3 py-2 rounded-xl text-xs font-black bg-white/10 hover:bg-red-500/80 text-white transition-colors disabled:opacity-50">
+                          className="px-3 py-2 rounded-xl text-xs font-black a-surface-2 hover:bg-red-500/80 a-text transition-colors disabled:opacity-50">
                           End session
                         </button>
                       </>
                     )}
                     {dead && (
                       <button onClick={() => deleteSession(s)} disabled={busyId === s.id}
-                        className="px-3 py-2 rounded-xl text-xs font-bold text-white/60 border border-white/20 hover:bg-white/10 transition-colors disabled:opacity-50">
+                        className="px-3 py-2 rounded-xl text-xs font-bold a-text-2 border border-white/20 hover:a-surface-2 transition-colors disabled:opacity-50">
                         Delete
                       </button>
                     )}
@@ -230,7 +230,7 @@ export function FacilitatorSessions() {
 
                 {!dead && (
                   <div className="flex items-center gap-2 mt-3">
-                    <code className="flex-1 min-w-0 truncate px-3 py-2 rounded-xl bg-black/40 border border-white/10 text-gray-300 text-xs">
+                    <code className="flex-1 min-w-0 truncate px-3 py-2 rounded-xl bg-black/40 border a-border text-gray-300 text-xs">
                       {crewUrl(s.code)}
                     </code>
                     <div className="px-3 py-2 rounded-xl bg-amber-400/15 border border-amber-400/40 flex-shrink-0">
@@ -241,10 +241,10 @@ export function FacilitatorSessions() {
                 )}
 
                 {crew.length > 0 && (
-                  <div className="flex items-center flex-wrap gap-1.5 mt-3 pt-3 border-t border-white/10">
+                  <div className="flex items-center flex-wrap gap-1.5 mt-3 pt-3 border-t a-border">
                     <span className="text-[11px] text-gray-500 font-bold uppercase tracking-widest mr-1">Crew:</span>
                     {crew.map(c => (
-                      <span key={c.id} className="px-2 py-0.5 rounded-full text-[11px] font-bold bg-white/10 text-gray-300 border border-white/10">
+                      <span key={c.id} className="px-2 py-0.5 rounded-full text-[11px] font-bold a-surface-2 text-gray-300 border a-border">
                         {c.display_name || c.email || 'guest'}
                       </span>
                     ))}

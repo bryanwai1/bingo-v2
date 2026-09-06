@@ -266,7 +266,7 @@ export function PageForm({ page, index, hexCode, onSave, onDelete, onMoveUp, onM
         <div className="flex items-center gap-2">
           <button
             onClick={() => setShowPreview(!showPreview)}
-            className={`px-3 py-1 text-sm rounded font-medium transition-colors ${showPreview ? 'bg-blue-600 text-white' : 'bg-blue-50 text-blue-600 hover:bg-blue-100'}`}
+            className={`px-3 py-1 text-sm rounded font-medium transition-colors ${showPreview ? 'bg-blue-600 a-text' : 'bg-blue-50 text-blue-600 hover:bg-blue-100'}`}
           >
             {showPreview ? 'Hide Preview' : 'Preview'}
           </button>
@@ -337,7 +337,7 @@ export function PageForm({ page, index, hexCode, onSave, onDelete, onMoveUp, onM
               )}
               <button
                 onClick={() => { setMediaUrl(''); setMediaType('') }}
-                className="absolute top-2 right-2 w-6 h-6 bg-red-500 text-white rounded-full text-xs font-bold hover:bg-red-600"
+                className="absolute top-2 right-2 w-6 h-6 bg-red-500 a-text rounded-full text-xs font-bold hover:bg-red-600"
               >
                 ×
               </button>
@@ -443,7 +443,7 @@ export function PageForm({ page, index, hexCode, onSave, onDelete, onMoveUp, onM
         </div>
 
         <div className="flex items-center gap-3">
-          <button onClick={handleSave} disabled={saving} className="self-start px-5 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 text-sm transition-colors">
+          <button onClick={handleSave} disabled={saving} className="self-start px-5 py-2 bg-blue-600 a-text rounded-lg hover:bg-blue-700 disabled:opacity-50 text-sm transition-colors">
             {saving ? 'Saving...' : 'Save Page'}
           </button>
           {saveSuccess && <span className="text-sm text-green-600 font-medium">Saved ✓</span>}

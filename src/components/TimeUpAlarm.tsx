@@ -57,7 +57,7 @@ export function TimeUpAlarm({ settings: settingsProp, sectionId }: { settings?: 
       onWheelCapture={e => e.preventDefault()}
       onTouchMoveCapture={e => e.preventDefault()}
     >
-      <div className="w-full max-w-2xl text-center text-white">
+      <div className="w-full max-w-2xl text-center a-text">
         <div className="text-7xl sm:text-8xl mb-4 animate-alarm-pulse">⏰</div>
         <h1
           className="font-black tracking-tight uppercase animate-alarm-pulse leading-none"
@@ -74,7 +74,7 @@ export function TimeUpAlarm({ settings: settingsProp, sectionId }: { settings?: 
           {(label || mapsHref) && (
             <div className="mt-7 flex flex-col items-center gap-3">
               {label && (
-                <div className="flex items-center gap-2 text-base sm:text-lg font-bold text-white/95">
+                <div className="flex items-center gap-2 text-base sm:text-lg font-bold a-text/95">
                   <span aria-hidden>📍</span>
                   <span>{label}</span>
                 </div>
@@ -94,7 +94,7 @@ export function TimeUpAlarm({ settings: settingsProp, sectionId }: { settings?: 
           )}
         </div>
 
-        <p className="mt-6 text-xs sm:text-sm font-bold uppercase tracking-widest text-white/80">
+        <p className="mt-6 text-xs sm:text-sm font-bold uppercase tracking-widest a-text">
           The game is locked
         </p>
       </div>

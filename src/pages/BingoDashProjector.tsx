@@ -202,16 +202,16 @@ export function BingoDashProjector() {
             {activeSection && (activeSection.timer_end_at || activeSection.timer_seconds > 0) && (
               <div
                 className={`px-6 py-3 rounded-2xl font-black text-4xl tabular-nums transition-colors ${
-                  timerRunning ? 'bg-white/10 text-white' : 'bg-white/5 text-gray-500'
+                  timerRunning ? `bg-white/10 ${theme.heading}` : `bg-white/5 ${theme.muted}`
                 }`}
               >
-                <span className={`mr-3 text-2xl ${timerRunning ? 'text-green-400' : 'text-gray-600'}`}>
+                <span className={`mr-3 text-2xl ${timerRunning ? theme.positive : theme.muted}`}>
                   {timerRunning ? '●' : '■'}
                 </span>
                 {timerDisplay}
               </div>
             )}
-            <p className="text-gray-500 text-sm font-bold">{sectionTeams.length} teams competing</p>
+            <p className={`${theme.muted} text-sm font-bold`}>{sectionTeams.length} teams competing</p>
             <button
               onClick={() => setShowBonus(v => !v)}
               className={`px-5 py-2.5 rounded-xl text-sm font-black uppercase tracking-wider transition-all ${
@@ -231,14 +231,14 @@ export function BingoDashProjector() {
         <div className="max-w-[1600px] mx-auto">
           <div className="flex-1 min-w-0">
           {rows.length === 0 ? (
-            <div className="text-center py-32 text-gray-500">
+            <div className={`text-center py-32 ${theme.muted}`}>
               <div className="text-6xl mb-4">🎯</div>
               <p className="text-2xl font-bold">No teams registered yet</p>
             </div>
           ) : (
             <div className="flex flex-col gap-3">
               {/* Column headers */}
-              <div className="grid grid-cols-[80px_1fr_200px_200px_200px] gap-4 px-6 py-2 text-gray-500 text-xs font-black uppercase tracking-widest">
+              <div className={`grid grid-cols-[80px_1fr_200px_200px_200px] gap-4 px-6 py-2 text-xs font-black uppercase tracking-widest ${theme.muted}`}>
                 <div>Rank</div>
                 <div>Team</div>
                 <div className="text-center">{showBonus ? 'Total (Bingo + Bonus)' : 'Points'}</div>
@@ -269,39 +269,39 @@ export function BingoDashProjector() {
                       {rank === 1 ? '🥇' : rank === 2 ? '🥈' : rank === 3 ? '🥉' : `#${rank}`}
                     </div>
                     <div>
-                      <p className="text-white text-3xl font-black tracking-tight">{row.team.name}</p>
+                      <p className={`${theme.heading} text-3xl font-black tracking-tight`}>{row.team.name}</p>
                     </div>
                     <div className="text-center">
-                      <p className="text-white text-5xl font-black tabular-nums">
+                      <p className={`${theme.heading} text-5xl font-black tabular-nums`}>
                         {showBonus ? row.points + row.bonus : row.points}
                       </p>
                       {showBonus ? (
-                        <p className="text-gray-500 text-xs font-bold uppercase tracking-widest mt-1">
+                        <p className={`${theme.muted} text-xs font-bold uppercase tracking-widest mt-1`}>
                           <span className="text-violet-300">{row.points} bingo</span>
-                          <span className="text-gray-600"> + </span>
+                          <span className={theme.muted}> + </span>
                           <span className="text-amber-400">{row.bonus} bonus</span>
                         </p>
                       ) : row.duelBonus > 0 ? (
                         // Surface duel winnings — otherwise a defender who won
                         // reads as having scored from nowhere.
-                        <p className="text-gray-500 text-xs font-bold uppercase tracking-widest mt-1">
+                        <p className={`${theme.muted} text-xs font-bold uppercase tracking-widest mt-1`}>
                           pts <span className="text-red-300">· incl. {row.duelBonus} duel</span>
                         </p>
                       ) : (
-                        <p className="text-gray-500 text-xs font-bold uppercase tracking-widest mt-1">pts</p>
+                        <p className={`${theme.muted} text-xs font-bold uppercase tracking-widest mt-1`}>pts</p>
                       )}
                     </div>
                     <div className="text-center">
                       <p className="text-amber-400 text-5xl font-black tabular-nums">
-                        {row.bingos}<span className="text-2xl text-gray-600">/12</span>
+                        {row.bingos}<span className={`text-2xl ${theme.muted}`}>/12</span>
                       </p>
-                      <p className="text-gray-500 text-xs font-bold uppercase tracking-widest mt-1">lines</p>
+                      <p className={`${theme.muted} text-xs font-bold uppercase tracking-widest mt-1`}>lines</p>
                     </div>
                     <div className="text-center">
                       <p className="text-green-400 text-5xl font-black tabular-nums">
                         {row.tasksDone}
                       </p>
-                      <p className="text-gray-500 text-xs font-bold uppercase tracking-widest mt-1">completed</p>
+                      <p className={`${theme.muted} text-xs font-bold uppercase tracking-widest mt-1`}>completed</p>
                     </div>
                   </div>
                 )

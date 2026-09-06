@@ -48,7 +48,7 @@ export function PageNavigator({ current, total, onPrev, onNext, hexCode }: PageN
         <button
           onClick={onNext}
           disabled={current === total - 1}
-          className="px-6 py-3 rounded-2xl font-bold text-white transition-all duration-200 disabled:opacity-20 disabled:cursor-not-allowed hover:scale-105 active:scale-95"
+          className="px-6 py-3 rounded-2xl font-bold a-text transition-all duration-200 disabled:opacity-20 disabled:cursor-not-allowed hover:scale-105 active:scale-95"
           style={{ backgroundColor: hexCode }}
         >
           <T>Next</T>

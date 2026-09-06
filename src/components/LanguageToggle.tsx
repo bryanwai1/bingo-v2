@@ -22,8 +22,8 @@ export function LanguageToggle({ className = '', variant = 'dark' }: Props) {
             onClick={() => setLang(l)}
             className={`px-2.5 py-0.5 rounded-full text-[11px] font-black uppercase tracking-wider transition-all ${
               active
-                ? isDark ? 'bg-white text-gray-900' : 'bg-gray-900 text-white'
-                : isDark ? 'text-white/70 hover:text-white' : 'text-gray-500 hover:text-gray-800'
+                ? isDark ? 'bg-white text-gray-900' : 'a-surface a-text'
+                : isDark ? 'a-text-2 hover:a-text' : 'text-gray-500 hover:text-gray-800'
             }`}
             aria-label={l === 'en' ? 'Switch to English' : 'Tukar ke Bahasa Malaysia'}
           >

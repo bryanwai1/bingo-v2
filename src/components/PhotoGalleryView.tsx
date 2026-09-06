@@ -67,15 +67,15 @@ export function PhotoGalleryView({ photos, hexCode }: PhotoGalleryViewProps) {
     <div className="flex flex-col gap-4">
       {/* Header */}
       <div className="flex items-center justify-between">
-        <h2 className="font-black text-white text-lg"><T>Photo Clues</T></h2>
-        <span className="text-sm font-bold text-white/50">
+        <h2 className="font-black a-text text-lg"><T>Photo Clues</T></h2>
+        <span className="text-sm font-bold a-text-3">
           {found.size} / {total} {doneLabel}
         </span>
       </div>
 
       {/* Photo card — fixed 4:3 crop frame */}
       <div
-        className="relative rounded-3xl overflow-hidden bg-gray-900 select-none"
+        className="relative rounded-3xl overflow-hidden a-surface select-none"
         style={{ aspectRatio: '4 / 3', touchAction: 'pan-y' }}
         onTouchStart={handleTouchStart}
         onTouchEnd={handleTouchEnd}
@@ -105,18 +105,18 @@ export function PhotoGalleryView({ photos, hexCode }: PhotoGalleryViewProps) {
         {isCelebrating && (
           <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/50 animate-pulse">
             <div className="text-6xl animate-bounce-in">🎯</div>
-            <p className="text-white font-black text-2xl mt-2 animate-slide-up"><T>Done!</T></p>
+            <p className="a-text font-black text-2xl mt-2 animate-slide-up"><T>Done!</T></p>
           </div>
         )}
 
         {/* Counter badge */}
-        <div className="absolute top-3 left-3 px-3 py-1 rounded-full bg-black/50 text-white text-xs font-black backdrop-blur-sm">
+        <div className="absolute top-3 left-3 px-3 py-1 rounded-full bg-black/50 a-text text-xs font-black backdrop-blur-sm">
           {current + 1} / {total}
         </div>
 
         {isCurrentFound && (
           <div
-            className="absolute top-3 right-3 px-3 py-1 rounded-full text-white text-xs font-black"
+            className="absolute top-3 right-3 px-3 py-1 rounded-full a-text text-xs font-black"
             style={{ backgroundColor: hexCode }}
           >
             ✓ <T>Done</T>
@@ -126,20 +126,20 @@ export function PhotoGalleryView({ photos, hexCode }: PhotoGalleryViewProps) {
         {current > 0 && (
           <button
             onClick={goPrev}
-            className="absolute left-2 top-1/2 -translate-y-1/2 w-9 h-9 rounded-full bg-black/40 text-white flex items-center justify-center text-lg hover:bg-black/60 transition-colors backdrop-blur-sm"
+            className="absolute left-2 top-1/2 -translate-y-1/2 w-9 h-9 rounded-full bg-black/40 a-text flex items-center justify-center text-lg hover:bg-black/60 transition-colors backdrop-blur-sm"
           >‹</button>
         )}
         {current < total - 1 && (
           <button
             onClick={goNext}
-            className="absolute right-2 top-1/2 -translate-y-1/2 w-9 h-9 rounded-full bg-black/40 text-white flex items-center justify-center text-lg hover:bg-black/60 transition-colors backdrop-blur-sm"
+            className="absolute right-2 top-1/2 -translate-y-1/2 w-9 h-9 rounded-full bg-black/40 a-text flex items-center justify-center text-lg hover:bg-black/60 transition-colors backdrop-blur-sm"
           >›</button>
         )}
       </div>
 
       {/* Caption */}
       {photo.caption && (
-        <p className="text-center text-white/80 text-sm font-medium px-2 -mt-1">
+        <p className="text-center a-text text-sm font-medium px-2 -mt-1">
           <T>{photo.caption}</T>
         </p>
       )}
@@ -165,7 +165,7 @@ export function PhotoGalleryView({ photos, hexCode }: PhotoGalleryViewProps) {
       <button
         onClick={handleFound}
         disabled={isCurrentFound || isCelebrating}
-        className="w-full py-4 rounded-2xl text-white text-xl font-black uppercase tracking-wider transition-all active:scale-95 disabled:opacity-40"
+        className="w-full py-4 rounded-2xl a-text text-xl font-black uppercase tracking-wider transition-all active:scale-95 disabled:opacity-40"
         style={{
           backgroundColor: isCurrentFound ? '#9ca3af' : hexCode,
           boxShadow: isCurrentFound ? 'none' : `0 6px 0 ${hexCode}88, 0 8px 20px ${hexCode}44`,
@@ -177,14 +177,14 @@ export function PhotoGalleryView({ photos, hexCode }: PhotoGalleryViewProps) {
       {isCurrentFound && !isCelebrating && (
         <button
           onClick={handleUndo}
-          className="w-full py-2 rounded-xl text-sm font-bold text-white/50 hover:text-red-400 transition-colors"
+          className="w-full py-2 rounded-xl text-sm font-bold a-text-3 hover:text-red-400 transition-colors"
         >
           <T>Undo Done</T>
         </button>
       )}
 
       {total > 1 && (
-        <p className="text-center text-xs text-white/40 font-medium">
+        <p className="text-center text-xs a-text-3 font-medium">
           <T>Swipe left / right to browse photos</T>
         </p>
       )}

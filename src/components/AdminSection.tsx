@@ -28,27 +28,27 @@ export function AdminSection({
   }[accent]
 
   return (
-    <section className={`rounded-2xl border border-white/10 bg-white/[0.025] overflow-hidden transition-colors ${ring}`}>
+    <section className={`rounded-2xl border a-border a-surface-2 overflow-hidden transition-colors ${ring}`}>
       <button
         onClick={() => setOpen(o => !o)}
-        className="w-full flex items-center gap-3 px-5 py-4 text-left hover:bg-white/[0.03] transition-colors"
+        className="w-full flex items-center gap-3 px-5 py-4 text-left hover:a-surface-2 transition-colors"
       >
         <span className="text-xl leading-none flex-shrink-0">{icon}</span>
         <span className="min-w-0 flex-1">
-          <span className="block text-base font-black text-white leading-tight">{title}</span>
+          <span className="block text-base font-black a-text leading-tight">{title}</span>
           {blurb && !open && (
-            <span className="block text-[11px] text-white/35 leading-snug mt-0.5 truncate">{blurb}</span>
+            <span className="block text-[11px] a-text-3 leading-snug mt-0.5 truncate">{blurb}</span>
           )}
         </span>
         {summary && !open && (
-          <span className="hidden sm:block text-xs font-bold text-white/50 flex-shrink-0 mr-1">{summary}</span>
+          <span className="hidden sm:block text-xs font-black flex-shrink-0 mr-2 px-2.5 py-1 rounded-lg" style={{ background: 'var(--a-surface-2)', color: 'var(--a-text-2)' }}>{summary}</span>
         )}
-        <span className={`text-white/30 text-xs transition-transform flex-shrink-0 ${open ? 'rotate-180' : ''}`}>▾</span>
+        <span className={`a-text-3 text-xs transition-transform flex-shrink-0 ${open ? 'rotate-180' : ''}`}>▾</span>
       </button>
 
       {open && (
-        <div className="px-5 pb-5 pt-1 border-t border-white/5 animate-section">
-          {blurb && <p className="text-xs text-white/40 leading-relaxed mb-4">{blurb}</p>}
+        <div className="px-5 pb-5 pt-1 border-t a-border animate-section">
+          {blurb && <p className="text-xs a-text-2 leading-relaxed mb-4">{blurb}</p>}
           {children}
         </div>
       )}

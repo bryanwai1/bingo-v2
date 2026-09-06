@@ -105,7 +105,7 @@ export function BingoAdminPhotoUpload({ taskId }: BingoAdminPhotoUploadProps) {
           <button
             onClick={() => fileRef.current?.click()}
             disabled={uploading || photos.length >= 20}
-            className="px-4 py-2 bg-violet-600 text-white rounded-lg hover:bg-violet-700 disabled:opacity-50 text-sm font-medium transition-colors"
+            className="px-4 py-2 bg-violet-600 a-text rounded-lg hover:bg-violet-700 disabled:opacity-50 text-sm font-medium transition-colors"
           >
             {uploading ? 'Uploading...' : '+ Add Photo'}
           </button>
@@ -133,7 +133,7 @@ export function BingoAdminPhotoUpload({ taskId }: BingoAdminPhotoUploadProps) {
                 draggable={false}
               />
               {index === 0 && (
-                <div className="absolute top-1.5 left-1.5 px-2 py-0.5 rounded-full bg-violet-600 text-white text-xs font-black">Hero</div>
+                <div className="absolute top-1.5 left-1.5 px-2 py-0.5 rounded-full bg-violet-600 a-text text-xs font-black">Hero</div>
               )}
               <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-1.5">
                 <button onClick={() => setEditing(photo)} className="px-3 py-1 bg-white text-gray-800 rounded-lg text-xs font-bold hover:bg-gray-100">✥ Adjust</button>
@@ -141,7 +141,7 @@ export function BingoAdminPhotoUpload({ taskId }: BingoAdminPhotoUploadProps) {
                   <button onClick={() => moveUp(index)} disabled={index === 0} className="w-7 h-7 bg-white/90 text-gray-700 rounded-lg text-xs font-bold disabled:opacity-30">←</button>
                   <button onClick={() => moveDown(index)} disabled={index === photos.length - 1} className="w-7 h-7 bg-white/90 text-gray-700 rounded-lg text-xs font-bold disabled:opacity-30">→</button>
                 </div>
-                <button onClick={() => deletePhoto(photo.id)} className="px-3 py-1 bg-red-500 text-white rounded-lg text-xs font-bold hover:bg-red-600">Delete</button>
+                <button onClick={() => deletePhoto(photo.id)} className="px-3 py-1 bg-red-500 a-text rounded-lg text-xs font-bold hover:bg-red-600">Delete</button>
               </div>
             </div>
           ))}
@@ -187,8 +187,8 @@ export function BingoAdminPhotoUpload({ taskId }: BingoAdminPhotoUploadProps) {
                 style={{ left: `${editing.position_x}%`, top: `${editing.position_y}%`, transform: 'translate(-50%,-50%)' }}
               >
                 <div className="absolute inset-0 rounded-full border-2 border-white shadow-lg" />
-                <div className="absolute top-1/2 left-0 right-0 h-0.5 bg-white/80 -translate-y-1/2" />
-                <div className="absolute left-1/2 top-0 bottom-0 w-0.5 bg-white/80 -translate-x-1/2" />
+                <div className="absolute top-1/2 left-0 right-0 h-0.5 a-surface-20 -translate-y-1/2" />
+                <div className="absolute left-1/2 top-0 bottom-0 w-0.5 a-surface-20 -translate-x-1/2" />
               </div>
             </div>
             <div className="mt-3 flex items-center justify-between">
@@ -212,7 +212,7 @@ export function BingoAdminPhotoUpload({ taskId }: BingoAdminPhotoUploadProps) {
                 maxLength={120}
               />
             </div>
-            <button onClick={() => setEditing(null)} className="mt-3 w-full py-2.5 bg-violet-600 text-white rounded-xl font-bold text-sm hover:bg-violet-700 transition-colors">Done</button>
+            <button onClick={() => setEditing(null)} className="mt-3 w-full py-2.5 bg-violet-600 a-text rounded-xl font-bold text-sm hover:bg-violet-700 transition-colors">Done</button>
           </div>
         </div>
       )}

@@ -174,12 +174,12 @@ export function TemplateUpload({ onComplete, ownerValue = null }: TemplateUpload
             <p><strong>Step 5:</strong> Save the output as a .json file and upload it here</p>
           </div>
           <div className="relative">
-            <pre className="bg-gray-900 text-gray-100 rounded-lg p-4 text-xs overflow-x-auto whitespace-pre-wrap max-h-[300px] overflow-y-auto">{AI_PROMPT}</pre>
+            <pre className="a-surface text-gray-100 rounded-lg p-4 text-xs overflow-x-auto whitespace-pre-wrap max-h-[300px] overflow-y-auto">{AI_PROMPT}</pre>
             <button
               onClick={copyPrompt}
               className={`absolute top-2 right-2 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
                 copied
-                  ? 'bg-green-500 text-white'
+                  ? 'bg-green-500 a-text'
                   : 'bg-white/90 text-gray-700 hover:bg-white'
               }`}
             >
@@ -209,7 +209,7 @@ export function TemplateUpload({ onComplete, ownerValue = null }: TemplateUpload
             {preview.tasks.map((t, i) => (
               <div
                 key={i}
-                className="px-3 py-1.5 rounded-full text-white text-sm font-bold"
+                className="px-3 py-1.5 rounded-full a-text text-sm font-bold"
                 style={{ backgroundColor: t.hex_code }}
               >
                 {t.title}
@@ -219,7 +219,7 @@ export function TemplateUpload({ onComplete, ownerValue = null }: TemplateUpload
           <button
             onClick={handleUpload}
             disabled={uploading}
-            className="px-6 py-3 bg-purple-600 text-white rounded-xl font-bold hover:bg-purple-700 disabled:opacity-50 transition-all hover:scale-105 active:scale-95"
+            className="px-6 py-3 bg-purple-600 a-text rounded-xl font-bold hover:bg-purple-700 disabled:opacity-50 transition-all hover:scale-105 active:scale-95"
           >
             {uploading ? 'Importing...' : `Import ${preview.tasks.length} Tasks`}
           </button>

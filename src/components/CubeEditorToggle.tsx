@@ -35,7 +35,7 @@ export function CubeEditorToggle({ faceCount, tasks, completedSlots, onPickFace,
               key={v}
               onClick={() => setView(v)}
               className={`px-3 py-1.5 rounded-lg text-xs font-black transition-colors ${
-                view === v ? 'text-white' : 'a-text-2 hover:a-text'
+                view === v ? 'a-text' : 'a-text-2 hover:a-text'
               }`}
               style={view === v ? { background: 'var(--a-brand)' } : undefined}
             >
@@ -56,7 +56,7 @@ export function CubeEditorToggle({ faceCount, tasks, completedSlots, onPickFace,
               setView('flat')
             }}
           />
-          <p className="text-center text-[11px] text-white/35 mt-3">
+          <p className="text-center text-[11px] a-text-3 mt-3">
             Drag to spin · tap a tile to edit that face
           </p>
         </div>

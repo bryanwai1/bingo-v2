@@ -99,6 +99,20 @@ export function BingoDashCube() {
 
         <CubeBoard faces={faces} completedSlots={completedSlots} size={360} />
 
+        {/* Fullscreen is what makes this usable on a second screen during a
+            break — the browser chrome is the only thing spoiling it. */}
+        <button
+          onClick={() => {
+            const el = document.documentElement
+            if (document.fullscreenElement) void document.exitFullscreen()
+            else void el.requestFullscreen?.()
+          }}
+          className="mt-8 px-5 py-2.5 rounded-2xl text-sm font-black transition-all active:scale-95"
+          style={{ background: 'rgba(45,212,191,0.14)', border: '1.5px solid rgba(45,212,191,0.4)', color: '#5eead4' }}
+        >
+          ⛶ Fullscreen for the projector
+        </button>
+
         <p className="absolute bottom-6 text-[11px] tracking-widest uppercase text-white/25">
           Powered by <span className="text-teal-300/60 font-bold">Pixels and Purpose Enterprise</span>
         </p>

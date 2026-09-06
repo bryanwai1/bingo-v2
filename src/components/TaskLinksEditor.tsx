@@ -96,7 +96,7 @@ export function TaskLinksEditor({
           <button
             onClick={handleAdd}
             disabled={adding || !newLabel.trim() || !newUrl.trim()}
-            className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50 transition-colors"
+            className="px-4 py-2 bg-blue-600 a-text rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50 transition-colors"
           >
             {adding ? 'Adding...' : '+ Add'}
           </button>
@@ -133,7 +133,7 @@ function LinkRow({
 
   return (
     <div className="flex items-center gap-2 p-2 rounded-lg border border-gray-200 bg-white">
-      <span className="w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold text-white shrink-0" style={{ backgroundColor: hexCode }}>🔗</span>
+      <span className="w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold a-text shrink-0" style={{ backgroundColor: hexCode }}>🔗</span>
       <input
         type="text"
         value={label}

@@ -500,26 +500,33 @@ body {
    Teal is the signature; amber means "live". Declared as CSS
    variables so the light/dark switch is one class on <html>. */
 :root {
-  --a-bg:        #f6f8f8;
+  /* Light. The previous ramp put secondary text at #4a5f5f and tertiary at
+     #879898 — around 3:1 against the surface, which is why the card library
+     read as grey mush. Both are darkened to clear 4.5:1, and the page sits a
+     shade behind the cards so panels read as raised rather than floating on
+     a flat sheet. */
+  --a-bg:        #e8edec;
   --a-surface:   #ffffff;
-  --a-surface-2: #eef2f2;
-  --a-border:    #dde5e5;
-  --a-text:      #0d1b1b;
-  --a-text-2:    #4a5f5f;
-  --a-text-3:    #879898;
-  --a-brand:     #0d9488;
+  --a-surface-2: #f0f4f3;
+  --a-border:    #c3d1ce;
+  --a-text:      #0a1615;
+  --a-text-2:    #3a4d4b;
+  --a-text-3:    #637875;
+  --a-brand:     #0f766e;
   --a-brand-soft:#ccfbf1;
-  --a-live:      #d97706;
+  --a-live:      #b45309;
   --a-live-soft: #fef3c7;
 }
 html.admin-dark {
-  --a-bg:        #0a1414;
-  --a-surface:   #0f1c1c;
-  --a-surface-2: #152525;
-  --a-border:    #1f3535;
-  --a-text:      #eaf5f4;
-  --a-text-2:    #9ab5b3;
-  --a-text-3:    #5d7a78;
+  /* Dark. Same reasoning in reverse: the muted greys were disappearing into
+     the surface, so the whole ramp is lifted. */
+  --a-bg:        #08110f;
+  --a-surface:   #0f1a18;
+  --a-surface-2: #172623;
+  --a-border:    #2a403c;
+  --a-text:      #f0faf8;
+  --a-text-2:    #b3ccc8;
+  --a-text-3:    #7d9995;
   --a-brand:     #2dd4bf;
   --a-brand-soft:#0f3833;
   --a-live:      #fbbf24;
@@ -597,3 +604,13 @@ html.admin-dark {
 }
 .forest-flies { animation: forest-flies 55s linear infinite; }
 @media (prefers-reduced-motion: reduce) { .forest-flies { animation: none; } }
+
+
+/* The page itself must carry the theme background, or a short screen leaves a
+   white strip below the content — which is exactly what the scoreboard and
+   settings pages were doing. */
+html, body, #root {
+  min-height: 100%;
+  background: var(--a-bg);
+  color: var(--a-text);
+}

@@ -57,20 +57,20 @@ export function SharedLibraryPanel({ sectionId, onImported }: {
   if (packs.length === 0) return null
 
   return (
-    <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4 mt-4">
+    <div className="rounded-2xl border a-border a-surface-2 p-4 mt-4">
       <div className="flex items-center justify-between mb-3">
-        <h3 className="text-sm font-black text-white uppercase tracking-wide">Shared packs</h3>
-        <span className="text-[10px] text-white/40">Copied into your board — yours to edit</span>
+        <h3 className="text-sm font-black a-text uppercase tracking-wide">Shared packs</h3>
+        <span className="text-[10px] a-text-3">Copied into your board — yours to edit</span>
       </div>
 
       <div className="flex flex-col gap-2">
         {packs.map(p => (
-          <div key={p.id} className="rounded-xl border border-white/10 bg-black/20 overflow-hidden">
+          <div key={p.id} className="rounded-xl border a-border bg-black/20 overflow-hidden">
             <div className="flex items-center gap-3 px-3 py-2.5">
               <span className="text-xl">{p.emoji}</span>
               <button onClick={() => void openPack(p.id)} className="flex-1 text-left">
-                <p className="text-white font-bold text-sm">{p.name}</p>
-                <p className="text-white/45 text-[11px] leading-snug">{p.description}</p>
+                <p className="a-text font-bold text-sm">{p.name}</p>
+                <p className="a-text-3 text-[11px] leading-snug">{p.description}</p>
               </button>
               <button
                 onClick={() => void importPack(p.id)}
@@ -80,16 +80,16 @@ export function SharedLibraryPanel({ sectionId, onImported }: {
               </button>
             </div>
             {open === p.id && (
-              <div className="border-t border-white/5 divide-y divide-white/5">
+              <div className="border-t a-border divide-y divide-transparent">
                 {cards.map(c => (
                   <div key={c.id} className="px-3 py-2 flex items-center gap-2">
-                    <span className="flex-1 text-white/70 text-xs">{c.title}</span>
+                    <span className="flex-1 a-text-2 text-xs">{c.title}</span>
                     {c.is_contest && (
                       <span className="text-[9px] font-black uppercase text-red-300 border border-red-400/40 rounded px-1.5 py-0.5">
                         Contest
                       </span>
                     )}
-                    <span className="text-white/35 text-[11px]">{c.points} pts</span>
+                    <span className="a-text-3 text-[11px]">{c.points} pts</span>
                   </div>
                 ))}
               </div>
@@ -98,7 +98,7 @@ export function SharedLibraryPanel({ sectionId, onImported }: {
         ))}
       </div>
 
-      {msg && <p className="text-center text-xs text-white/60 mt-3">{msg}</p>}
+      {msg && <p className="text-center text-xs a-text-2 mt-3">{msg}</p>}
     </div>
   )
 }

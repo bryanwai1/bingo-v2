@@ -124,11 +124,11 @@ export function QRScanner({
 
         {/* Framing reticle */}
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-          <div className="w-3/5 h-3/5 rounded-2xl border-2 border-white/80" style={{ boxShadow: '0 0 0 9999px rgba(0,0,0,0.45)' }} />
+          <div className="w-3/5 h-3/5 rounded-2xl border-2 a-border0" style={{ boxShadow: '0 0 0 9999px rgba(0,0,0,0.45)' }} />
         </div>
 
         {(starting || error) && (
-          <div className="absolute inset-0 flex items-center justify-center bg-gray-950/90 px-6 text-center">
+          <div className="absolute inset-0 flex items-center justify-center a-bg/90 px-6 text-center">
             {error
               ? <p className="text-sm font-bold text-red-300">{error}</p>
               : <p className="text-sm font-bold text-gray-400">Starting camera…</p>}
@@ -136,11 +136,11 @@ export function QRScanner({
         )}
       </div>
 
-      <div className="px-4 py-3 flex items-center justify-between gap-3 bg-gray-950">
+      <div className="px-4 py-3 flex items-center justify-between gap-3 a-bg">
         <p className="text-[11px] text-gray-400 font-semibold">
           {hint ?? 'Point at the other team\'s QR code'}
         </p>
-        <button onClick={onCancel} className="text-xs font-bold text-gray-400 hover:text-white transition-colors">
+        <button onClick={onCancel} className="text-xs font-bold text-gray-400 hover:a-text transition-colors">
           Cancel
         </button>
       </div>

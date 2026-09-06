@@ -471,6 +471,26 @@ function boardWriteFailureMessage(dbMessage?: string): string {
 }
 
 // ── Main component ─────────────────────────────────────────────────────────────
+
+/** Readable ink for a given card colour. A challenge can be any hex the
+ *  trainer picked, so neither theme token works — dark cards need light text
+ *  and pale cards need dark text, in either theme. */
+function inkFor(hex: string) {
+  const h = (hex || '#888888').replace('#', '')
+  const v = h.length === 3 ? h.split('').map(c => c + c).join('') : h
+  const r = parseInt(v.slice(0, 2), 16) || 0
+  const g = parseInt(v.slice(2, 4), 16) || 0
+  const b = parseInt(v.slice(4, 6), 16) || 0
+  // Rec. 601 luma: green dominates perceived brightness.
+  const lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255
+  const dark = lum > 0.55
+  return {
+    strong: dark ? 'rgba(0,0,0,0.92)' : 'rgba(255,255,255,0.97)',
+    mid:    dark ? 'rgba(0,0,0,0.68)' : 'rgba(255,255,255,0.78)',
+    faint:  dark ? 'rgba(0,0,0,0.48)' : 'rgba(255,255,255,0.55)',
+  }
+}
+
 const emptySlots = new Set<number>()
 
 export function BingoDashAdmin() {
@@ -1955,7 +1975,7 @@ export function BingoDashAdmin() {
       />
       <div className="flex-1 min-w-0">
       {/* Header */}
-      <header className="sticky top-0 z-30 border-b a-border" style={{ background: 'linear-gradient(135deg, #1a1130 0%, #0f0c1a 60%, #111827 100%)' }}>
+      <header className="sticky top-0 z-40 border-b a-border a-surface shadow-sm">
         <div className="max-w-6xl mx-auto px-6 py-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <button onClick={() => navigate('/')} className="a-text-3 hover:a-text-2 transition-colors">←</button>
@@ -2793,15 +2813,23 @@ export function BingoDashAdmin() {
 
                           {/* Cards grid */}
                           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 pl-4">
-                            {group.tasks.map(task => (
-                              <div key={task.id} className="rounded-2xl overflow-hidden flex flex-col shadow-sm"
-                                style={{ backgroundColor: task.hex_code }}>
+                            {group.tasks.map(task => {
+                              const ink = inkFor(task.hex_code)
+                              return (
+                              <div key={task.id} className="rounded-2xl overflow-hidden flex flex-col transition-shadow"
+                                style={{
+                                  backgroundColor: task.hex_code,
+                                  // A soft bloom in the card's own colour, so a
+                                  // board of cards reads as a set of lit tiles
+                                  // rather than flat swatches.
+                                  boxShadow: `0 2px 10px -2px ${task.hex_code}88, 0 0 0 1px rgba(0,0,0,0.06)`,
+                                }}>
                                 <div className="px-4 pt-4 pb-3 flex-1">
-                                  <p className="a-text-2 text-xs font-bold uppercase tracking-widest mb-1">{task.color}</p>
-                                  <h3 className="a-text font-black text-lg leading-tight">{task.title}</h3>
+                                  <p className="text-xs font-bold uppercase tracking-widest mb-1" style={{ color: ink.mid }}>{task.color}</p>
+                                  <h3 className="font-black text-lg leading-tight" style={{ color: ink.strong }}>{task.title}</h3>
                                   {section.foreign ? (
                                     task.category && (
-                                      <p className="mt-1.5 a-text-3 text-xs">📂 {task.category}</p>
+                                      <p className="mt-1.5 text-xs" style={{ color: ink.faint }}>📂 {task.category}</p>
                                     )
                                   ) : editingCategoryId === task.id ? (
                                     <select
@@ -2809,7 +2837,7 @@ export function BingoDashAdmin() {
                                       defaultValue={task.category || ''}
                                       onChange={e => saveCategoryInline(task.id, e.target.value)}
                                       onBlur={() => setEditingCategoryId(null)}
-                                      className="w-full bg-black/20 a-text text-xs px-2 py-1 rounded border border-white/30 focus:outline-none focus:border-white/60 mt-2"
+                                      className="w-full bg-black/20 text-white text-xs px-2 py-1 rounded border border-white/30 focus:outline-none focus:border-white/60 mt-2"
                                     >
                                       <option value="">— Uncategorized —</option>
                                       {categories.filter(c => c.section_id === task.section_id).map(c => (
@@ -2820,12 +2848,12 @@ export function BingoDashAdmin() {
                                   ) : (
                                     <button
                                       onClick={() => setEditingCategoryId(task.id)}
-                                      className="mt-1.5 a-text-3 text-xs hover:a-text transition-colors text-left block">
+                                      className="mt-1.5 text-xs transition-opacity hover:opacity-70 text-left block" style={{ color: ink.faint }}>
                                       {task.category ? `📂 ${task.category}` : '+ category'}
                                     </button>
                                   )}
                                   <div className="flex items-center gap-2 mt-2">
-                                    <p className="a-text-3 text-xs">
+                                    <p className="text-xs" style={{ color: ink.faint }}>
                                       {scans.filter(s => s.task_id === task.id && s.completed).length} completed ·{' '}
                                       {scans.filter(s => s.task_id === task.id).length} scanned
                                     </p>
@@ -2955,7 +2983,7 @@ export function BingoDashAdmin() {
                                 </div>
                                 )}
                               </div>
-                            ))}
+                            )})}
                           </div>
                         </div>
                       ))

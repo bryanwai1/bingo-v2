@@ -97,7 +97,7 @@ export function InstructionPage({ page, hexCode }: InstructionPageProps) {
                     {icon ? (
                       <span className="text-2xl">{icon}</span>
                     ) : (
-                      <span className="text-white font-black text-lg">{index + 1}</span>
+                      <span className="a-text font-black text-lg">{index + 1}</span>
                     )}
                   </div>
                   {/* Text + button */}

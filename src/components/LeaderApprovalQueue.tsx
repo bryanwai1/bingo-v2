@@ -81,14 +81,14 @@ export function LeaderApprovalQueue({ teamId }: { teamId: string | null }) {
 
   return (
     <div className="fixed inset-x-0 bottom-0 z-40 p-3">
-      <div className="max-w-md mx-auto rounded-3xl border-2 border-emerald-400/60 bg-gray-950 overflow-hidden shadow-2xl">
+      <div className="max-w-md mx-auto rounded-3xl border-2 border-emerald-400/60 a-bg overflow-hidden shadow-2xl">
         <button
           onClick={() => setOpen(o => !o)}
           className="w-full px-4 py-3 flex items-center justify-between bg-emerald-500/20 border-b border-emerald-400/30"
         >
           <span className="flex items-center gap-2">
             <span className="text-xl">👑</span>
-            <span className="text-white font-black text-sm uppercase tracking-wide">Leader approvals</span>
+            <span className="a-text font-black text-sm uppercase tracking-wide">Leader approvals</span>
           </span>
           <span className="flex items-center gap-2">
             <span className="px-2 py-0.5 rounded-full bg-emerald-400 text-gray-950 text-xs font-black">
@@ -99,23 +99,23 @@ export function LeaderApprovalQueue({ teamId }: { teamId: string | null }) {
         </button>
 
         {open && (
-          <div className="max-h-72 overflow-y-auto divide-y divide-white/5">
+          <div className="max-h-72 overflow-y-auto divide-y divide-transparent">
             {pending.map(p => (
               <div key={p.id} className="px-4 py-3">
-                <p className="text-white font-bold text-sm">{p.taskTitle}</p>
-                <p className="text-white/50 text-xs mt-0.5">Submitted by {p.memberName}</p>
+                <p className="a-text font-bold text-sm">{p.taskTitle}</p>
+                <p className="a-text-3 text-xs mt-0.5">Submitted by {p.memberName}</p>
                 <div className="grid grid-cols-2 gap-2 mt-3">
                   <button
                     onClick={() => void act(p.id, false)}
                     disabled={busy === p.id}
-                    className="py-2.5 rounded-xl text-white/60 text-sm font-bold border border-white/15 disabled:opacity-40"
+                    className="py-2.5 rounded-xl a-text-2 text-sm font-bold border border-white/15 disabled:opacity-40"
                   >
                     Reject
                   </button>
                   <button
                     onClick={() => void act(p.id, true)}
                     disabled={busy === p.id}
-                    className="py-2.5 rounded-xl text-white text-sm font-black bg-emerald-500 active:scale-95 transition-transform disabled:opacity-40"
+                    className="py-2.5 rounded-xl a-text text-sm font-black bg-emerald-500 active:scale-95 transition-transform disabled:opacity-40"
                   >
                     {busy === p.id ? '...' : 'Approve ✅'}
                   </button>

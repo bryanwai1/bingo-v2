@@ -178,7 +178,7 @@ export function TeamRegistration({
                     </p>
                   </div>
                   <span
-                    className="px-4 py-2 rounded-xl text-white text-sm font-black shrink-0"
+                    className="px-4 py-2 rounded-xl a-text text-sm font-black shrink-0"
                     style={{ backgroundColor: hexCode }}
                   >
                     <T>Join</T>
@@ -260,7 +260,7 @@ export function TeamRegistration({
             {pw.split('').map((digit, i) => (
               <div
                 key={i}
-                className="w-16 h-20 rounded-2xl flex items-center justify-center text-4xl font-black text-white select-all"
+                className="w-16 h-20 rounded-2xl flex items-center justify-center text-4xl font-black a-text select-all"
                 style={{ backgroundColor: hexCode, boxShadow: `0 6px 20px ${hexCode}55` }}
               >
                 {digit}
@@ -360,7 +360,7 @@ export function TeamRegistration({
             {createdPassword.split('').map((digit, i) => (
               <div
                 key={i}
-                className="w-14 h-16 rounded-2xl flex items-center justify-center text-3xl font-black text-white select-all"
+                className="w-14 h-16 rounded-2xl flex items-center justify-center text-3xl font-black a-text select-all"
                 style={{ backgroundColor: hexCode, boxShadow: `0 6px 16px ${hexCode}44` }}
               >
                 {digit}
@@ -434,7 +434,7 @@ function PrimaryButton({
       type={onClick ? 'button' : 'submit'}
       disabled={disabled || loading}
       onClick={onClick}
-      className="w-full py-4 rounded-2xl text-white font-black text-xl transition-all duration-200 disabled:opacity-40 hover:scale-105 active:scale-95"
+      className="w-full py-4 rounded-2xl a-text font-black text-xl transition-all duration-200 disabled:opacity-40 hover:scale-105 active:scale-95"
       style={{ backgroundColor: hexCode, boxShadow: `0 8px 24px ${hexCode}44` }}
     >
       {children}

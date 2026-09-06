@@ -71,7 +71,7 @@ export function TeamProgressTable({ teams, tasks, scans, onToggleComplete, point
                           onClick={() => onToggleComplete(scan.id, !scan.completed)}
                           className={`w-10 h-10 rounded-full inline-flex items-center justify-center transition-all ${
                             scan.completed
-                              ? 'bg-green-500 text-white hover:bg-green-600'
+                              ? 'bg-green-500 a-text hover:bg-green-600'
                               : 'bg-yellow-100 text-yellow-600 hover:bg-yellow-200'
                           }`}
                           title={scan.completed ? 'Completed — click to undo' : 'Scanned — click to mark complete'}

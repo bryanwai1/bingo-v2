@@ -131,7 +131,7 @@ export function TileFace({
   if (display === 'icon') {
     return (
       <div
-        className="relative z-0 flex items-center justify-center w-full h-full text-white"
+        className="relative z-0 flex items-center justify-center w-full h-full a-text"
         style={{ filter: 'drop-shadow(0 1px 2px rgba(0,0,0,0.45))' }}
       >
         <CategoryIcon category={task.color} className={size === 'sm' ? 'w-[50%] h-[50%]' : 'w-[52%] h-[52%]'} />
@@ -144,7 +144,7 @@ export function TileFace({
 
   return (
     <div
-      className="relative z-0 flex flex-col items-center justify-center text-center px-0.5 w-full h-full text-white"
+      className="relative z-0 flex flex-col items-center justify-center text-center px-0.5 w-full h-full a-text"
       style={{ containerType: 'inline-size', textShadow: '0 1px 2px rgba(0,0,0,0.5)' }}
     >
       {category && (
@@ -157,7 +157,7 @@ export function TileFace({
       )}
       {short && (
         <p
-          className="text-white/80 font-bold leading-[1.15] line-clamp-2 break-words w-full mt-0.5"
+          className="a-text font-bold leading-[1.15] line-clamp-2 break-words w-full mt-0.5"
           style={{ fontSize: fitFontSize(short, 0.52, 13) }}
         >
           {short}

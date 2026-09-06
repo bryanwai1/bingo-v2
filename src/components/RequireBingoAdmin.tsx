@@ -6,15 +6,15 @@ function Gate({ emoji, title, body, email, onSignOut }: {
   emoji: string; title: string; body: string; email?: string | null; onSignOut: () => void
 }) {
   return (
-    <div className="min-h-screen bg-gray-950 flex flex-col items-center justify-center text-center px-6">
+    <div className="min-h-screen a-bg flex flex-col items-center justify-center text-center px-6">
       <div className="max-w-sm">
         <div className="text-5xl mb-4">{emoji}</div>
-        <h2 className="text-white text-2xl font-black mb-2">{title}</h2>
+        <h2 className="a-text text-2xl font-black mb-2">{title}</h2>
         <p className="text-gray-400 text-sm mb-2">{body}</p>
         {email && <p className="text-gray-500 text-xs mb-6">Signed in as {email}</p>}
         <button
           onClick={onSignOut}
-          className="px-5 py-2.5 rounded-2xl text-white/80 font-bold text-sm border border-white/20 hover:bg-white/10 transition-colors"
+          className="px-5 py-2.5 rounded-2xl a-text font-bold text-sm border border-white/20 hover:a-surface-2 transition-colors"
         >
           Sign out
         </button>
@@ -33,7 +33,7 @@ export function RequireBingoAdmin({ children, ownerOnly = false, game }: {
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-950">
+      <div className="min-h-screen flex items-center justify-center a-bg">
         <div className="text-gray-400 text-xl font-bold animate-pulse">Loading…</div>
       </div>
     )

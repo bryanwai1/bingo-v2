@@ -112,7 +112,7 @@ export function AdminPhotoUpload({ taskId }: AdminPhotoUploadProps) {
           <button
             onClick={() => fileRef.current?.click()}
             disabled={uploading || photos.length >= MAX_PHOTOS}
-            className="px-4 py-2 bg-violet-600 text-white rounded-lg hover:bg-violet-700 disabled:opacity-50 text-sm font-medium transition-colors"
+            className="px-4 py-2 bg-violet-600 a-text rounded-lg hover:bg-violet-700 disabled:opacity-50 text-sm font-medium transition-colors"
           >
             {uploading ? 'Uploading...' : '+ Add Photos'}
           </button>
@@ -139,7 +139,7 @@ export function AdminPhotoUpload({ taskId }: AdminPhotoUploadProps) {
                 style={{ objectPosition: `${photo.position_x ?? 50}% ${photo.position_y ?? 50}%` }}
                 draggable={false}
               />
-              <div className="absolute top-1.5 left-1.5 w-6 h-6 rounded-full bg-black/60 text-white text-xs font-black flex items-center justify-center">{index + 1}</div>
+              <div className="absolute top-1.5 left-1.5 w-6 h-6 rounded-full bg-black/60 a-text text-xs font-black flex items-center justify-center">{index + 1}</div>
               <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-1.5">
                 <button
                   onClick={() => setEditing(photo)}
@@ -151,7 +151,7 @@ export function AdminPhotoUpload({ taskId }: AdminPhotoUploadProps) {
                   <button onClick={() => moveUp(index)} disabled={index === 0} className="w-7 h-7 bg-white/90 text-gray-700 rounded-lg text-xs font-bold disabled:opacity-30">←</button>
                   <button onClick={() => moveDown(index)} disabled={index === photos.length - 1} className="w-7 h-7 bg-white/90 text-gray-700 rounded-lg text-xs font-bold disabled:opacity-30">→</button>
                 </div>
-                <button onClick={() => deletePhoto(photo.id)} className="px-3 py-1 bg-red-500 text-white rounded-lg text-xs font-bold hover:bg-red-600">Delete</button>
+                <button onClick={() => deletePhoto(photo.id)} className="px-3 py-1 bg-red-500 a-text rounded-lg text-xs font-bold hover:bg-red-600">Delete</button>
               </div>
             </div>
           ))}
@@ -205,8 +205,8 @@ export function AdminPhotoUpload({ taskId }: AdminPhotoUploadProps) {
                 }}
               >
                 <div className="absolute inset-0 rounded-full border-2 border-white shadow-lg" />
-                <div className="absolute top-1/2 left-0 right-0 h-0.5 bg-white/80 -translate-y-1/2" />
-                <div className="absolute left-1/2 top-0 bottom-0 w-0.5 bg-white/80 -translate-x-1/2" />
+                <div className="absolute top-1/2 left-0 right-0 h-0.5 a-surface-20 -translate-y-1/2" />
+                <div className="absolute left-1/2 top-0 bottom-0 w-0.5 a-surface-20 -translate-x-1/2" />
               </div>
               {/* Grid overlay (rule of thirds) */}
               <div className="absolute inset-0 pointer-events-none" style={{
@@ -243,7 +243,7 @@ export function AdminPhotoUpload({ taskId }: AdminPhotoUploadProps) {
             </div>
             <button
               onClick={() => setEditing(null)}
-              className="mt-3 w-full py-2.5 bg-violet-600 text-white rounded-xl font-bold text-sm hover:bg-violet-700 transition-colors"
+              className="mt-3 w-full py-2.5 bg-violet-600 a-text rounded-xl font-bold text-sm hover:bg-violet-700 transition-colors"
             >
               Done
             </button>

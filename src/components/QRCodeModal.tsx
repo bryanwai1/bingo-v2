@@ -18,13 +18,13 @@ export function QRCodeModal({ task, onClose }: QRCodeModalProps) {
       {/* Big X close button - top right */}
       <button
         onClick={onClose}
-        className="absolute top-6 right-8 text-white/60 hover:text-white text-5xl font-light transition-colors z-10"
+        className="absolute top-6 right-8 a-text-2 hover:a-text text-5xl font-light transition-colors z-10"
       >
         &times;
       </button>
 
       {/* Hint text at top */}
-      <div className="absolute top-6 left-0 right-0 text-center text-white/40 text-lg">
+      <div className="absolute top-6 left-0 right-0 text-center a-text-3 text-lg">
         Tap anywhere to go back
       </div>
 
@@ -47,7 +47,7 @@ export function QRCodeModal({ task, onClose }: QRCodeModalProps) {
         </div>
         <button
           onClick={onClose}
-          className="px-8 py-4 bg-gray-900 text-white rounded-2xl hover:bg-gray-700 transition-all text-lg font-bold hover:scale-105 active:scale-95"
+          className="px-8 py-4 a-surface a-text rounded-2xl hover:bg-gray-700 transition-all text-lg font-bold hover:scale-105 active:scale-95"
         >
           &larr; Back to Cards
         </button>

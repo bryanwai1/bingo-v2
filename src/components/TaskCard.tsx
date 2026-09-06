@@ -16,7 +16,7 @@ export function TaskCard({ task, size = 'large', equal, onClick, children, showQ
     <div
       onClick={onClick}
       className={`
-        relative rounded-3xl text-white cursor-pointer
+        relative rounded-3xl a-text cursor-pointer
         transition-all duration-300 hover:scale-105 hover:-rotate-1
         animate-pulse-glow flex flex-col justify-center items-center text-center
         ${isLarge ? 'p-6' : 'p-4'}
@@ -28,7 +28,7 @@ export function TaskCard({ task, size = 'large', equal, onClick, children, showQ
         boxShadow: `0 8px 32px ${task.hex_code}66`,
       }}
     >
-      <div className="absolute inset-0 rounded-3xl bg-white/10 opacity-0 hover:opacity-100 transition-opacity duration-300" />
+      <div className="absolute inset-0 rounded-3xl a-surface-2 opacity-0 hover:opacity-100 transition-opacity duration-300" />
       <div className={`font-black ${isLarge ? 'text-xl xl:text-3xl' : 'text-lg'} tracking-tight relative z-10 leading-tight`}>
         {task.title}
       </div>

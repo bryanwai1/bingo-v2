@@ -187,7 +187,7 @@ export function ActivityConverter({ onComplete, existingTaskCount, ownerValue = 
           </button>
           <button
             onClick={addActivity}
-            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm font-medium transition-colors"
+            className="px-4 py-2 bg-blue-600 a-text rounded-lg hover:bg-blue-700 text-sm font-medium transition-colors"
           >
             + Add Activity
           </button>
@@ -209,7 +209,7 @@ export function ActivityConverter({ onComplete, existingTaskCount, ownerValue = 
           />
           <button
             onClick={parseRawText}
-            className="mt-2 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 text-sm font-medium transition-colors"
+            className="mt-2 px-4 py-2 bg-purple-600 a-text rounded-lg hover:bg-purple-700 text-sm font-medium transition-colors"
           >
             Convert to Pointers
           </button>
@@ -262,7 +262,7 @@ export function ActivityConverter({ onComplete, existingTaskCount, ownerValue = 
             {/* Preview bar */}
             {act.title && act.color && (
               <div
-                className="rounded-xl px-4 py-2 mb-4 text-white font-bold text-sm flex items-center gap-2"
+                className="rounded-xl px-4 py-2 mb-4 a-text font-bold text-sm flex items-center gap-2"
                 style={{ backgroundColor: act.hex_code }}
               >
                 <span>{act.title}</span>
@@ -338,7 +338,7 @@ export function ActivityConverter({ onComplete, existingTaskCount, ownerValue = 
         <button
           onClick={handleImport}
           disabled={importing || activities.every(a => !a.title.trim() || !a.color)}
-          className="px-8 py-3 bg-gradient-to-r from-purple-600 to-blue-600 text-white rounded-xl font-bold hover:from-purple-700 hover:to-blue-700 disabled:opacity-40 transition-all hover:scale-105 active:scale-95 shadow-lg"
+          className="px-8 py-3 bg-gradient-to-r from-purple-600 to-blue-600 a-text rounded-xl font-bold hover:from-purple-700 hover:to-blue-700 disabled:opacity-40 transition-all hover:scale-105 active:scale-95 shadow-lg"
         >
           {importing ? 'Importing...' : 'Create Cards'}
         </button>

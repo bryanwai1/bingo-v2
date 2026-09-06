@@ -35,8 +35,8 @@ function Menu({ label, icon, children }: { label: string; icon: string; children
         onClick={() => setOpen(o => !o)}
         className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold transition-all
           ${open
-            ? 'bg-white/12 text-white ring-1 ring-white/25'
-            : 'text-white/70 hover:text-white hover:bg-white/8'}`}
+            ? 'a-surface-2 a-text ring-1 ring-white/25'
+            : 'a-text-2 hover:a-text hover:a-surface-2'}`}
       >
         <span className="text-base leading-none">{icon}</span>
         {label}
@@ -46,8 +46,8 @@ function Menu({ label, icon, children }: { label: string; icon: string; children
       {open && (
         <div
           onClick={() => setOpen(false)}
-          className="absolute right-0 top-full mt-2 z-50 min-w-[230px] rounded-2xl border border-white/12
-                     bg-gray-950/98 backdrop-blur-xl shadow-2xl shadow-black/60 overflow-hidden animate-menu"
+          className="absolute right-0 top-full mt-2 z-50 min-w-[230px] rounded-2xl border a-border
+                     a-bg/98 backdrop-blur-xl shadow-2xl shadow-black/60 overflow-hidden animate-menu"
         >
           {children}
         </div>
@@ -61,11 +61,11 @@ export function MenuItem({ icon, label, hint, to, href, onClick }: {
   to?: string; href?: string; onClick?: () => void
 }) {
   const inner = (
-    <span className="flex items-start gap-3 px-4 py-3 hover:bg-white/8 transition-colors w-full text-left">
+    <span className="flex items-start gap-3 px-4 py-3 hover:a-surface-2 transition-colors w-full text-left">
       <span className="text-lg leading-none mt-0.5">{icon}</span>
       <span className="min-w-0">
-        <span className="block text-sm font-bold text-white leading-tight">{label}</span>
-        {hint && <span className="block text-[11px] text-white/40 leading-snug mt-0.5">{hint}</span>}
+        <span className="block text-sm font-bold a-text leading-tight">{label}</span>
+        {hint && <span className="block text-[11px] a-text-3 leading-snug mt-0.5">{hint}</span>}
       </span>
     </span>
   )
@@ -75,7 +75,7 @@ export function MenuItem({ icon, label, hint, to, href, onClick }: {
 }
 
 export function MenuDivider() {
-  return <div className="h-px bg-white/8 mx-3 my-1" />
+  return <div className="h-px a-surface-2 mx-3 my-1" />
 }
 
 export { Menu }

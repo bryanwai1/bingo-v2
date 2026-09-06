@@ -58,19 +58,19 @@ export function AdminSidebar({ view, onView, email, isOwner, onSignOut, pending 
               onClick={() => onView(n.id)}
               className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-left transition-all
                 ${active
-                  ? 'a-brand-bg text-white shadow-sm'
+                  ? 'a-brand-bg a-text shadow-sm'
                   : 'a-text-2 hover:a-surface-2'}`}
               style={active ? undefined : {}}
             >
               <span className="text-lg leading-none w-5 text-center flex-shrink-0">{n.icon}</span>
               <span className="min-w-0 flex-1">
                 <span className="block text-sm font-bold leading-tight">{n.label}</span>
-                <span className={`block text-[10px] leading-snug ${active ? 'text-white/70' : 'a-text-3'}`}>
+                <span className={`block text-[10px] leading-snug ${active ? 'a-text-2' : 'a-text-3'}`}>
                   {n.hint}
                 </span>
               </span>
               {n.id === 'submissions' && pending > 0 && (
-                <span className="a-live-bg text-white text-[10px] font-black px-1.5 py-0.5 rounded-full flex-shrink-0">
+                <span className="a-live-bg a-text text-[10px] font-black px-1.5 py-0.5 rounded-full flex-shrink-0">
                   {pending}
                 </span>
               )}

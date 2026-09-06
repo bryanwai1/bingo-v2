@@ -21,7 +21,7 @@ export function Step({ n, title, blurb, done, warn, action, children }: {
     <div className="flex gap-4">
       <div className="flex flex-col items-center flex-shrink-0">
         <div className={`w-9 h-9 rounded-full grid place-items-center text-sm font-black transition-colors
-          ${done ? 'text-white' : 'a-text-3 border-2 a-border'}`}
+          ${done ? 'a-text' : 'a-text-3 border-2 a-border'}`}
           style={done ? { background: 'var(--a-brand)' } : undefined}>
           {done ? '✓' : n}
         </div>
