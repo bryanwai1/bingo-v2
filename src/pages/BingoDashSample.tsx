@@ -89,6 +89,8 @@ function DemoBar({
   view,
   onToggleView,
   showViewToggle,
+  backHref,
+  backLabel,
 }: {
   sections: BingoSection[]
   selectedId: string | null
@@ -102,6 +104,8 @@ function DemoBar({
   view: SampleView
   onToggleView: () => void
   showViewToggle: boolean
+  backHref: string
+  backLabel: string
 }) {
   return (
     <div className="sticky top-0 z-40 w-full bg-gray-950/95 backdrop-blur border-b border-purple-500/30">
@@ -170,11 +174,11 @@ function DemoBar({
               ↺<span className="hidden sm:inline"> Reset</span>
             </button>
             <Link
-              to="/"
-              title="Back to Game Hub"
+              to={backHref}
+              title={backLabel}
               className="flex-shrink-0 px-2.5 py-2 rounded-lg bg-white/10 text-gray-200 border border-white/15 text-xs font-bold hover:bg-white/20 transition-colors whitespace-nowrap"
             >
-              ←<span className="hidden sm:inline"> Hub</span>
+              ←<span className="hidden sm:inline"> {backLabel}</span>
             </Link>
           </div>
         </div>
@@ -1140,6 +1144,11 @@ export function BingoDashSample() {
 }
 
 function SampleProjector() {
+  // `?board=<sectionId>` lets the admin launch the demo pre-scoped to a
+  // specific event's board (from the Run Event panel); when present it also
+  // swaps the "← Hub" link for a way back to that event's admin page.
+  const boardParam = new URLSearchParams(window.location.search).get('board')
+
   const [sections, setSections] = useState<BingoSection[]>([])
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [gridTasks, setGridTasks] = useState<BingoTask[]>([])
@@ -1175,10 +1184,14 @@ function SampleProjector() {
       const list = (secs ?? []) as BingoSection[]
       setSections(list)
       const active = settings?.active_section_id
-      const initial = list.find(s => s.id === active)?.id ?? list[0]?.id ?? null
+      const initial = (boardParam && list.find(s => s.id === boardParam)?.id)
+        ?? list.find(s => s.id === active)?.id
+        ?? list[0]?.id
+        ?? null
       setSelectedId(initial)
       setLoading(false)
     })()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   // Load the grid whenever the selected board changes; reset the sandbox.
@@ -1295,6 +1308,8 @@ function SampleProjector() {
         view={view}
         onToggleView={() => setView(v => v === 'board' ? 'scoreboard' : 'board')}
         showViewToggle={sections.length > 0}
+        backHref={boardParam ? '/bingo-dash/admin' : '/'}
+        backLabel={boardParam ? 'Back to event' : 'Hub'}
       />
 
       {sections.length === 0 ? (
