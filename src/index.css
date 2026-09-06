@@ -690,3 +690,44 @@ html:not(.admin-dark) .hover\:bg-white:hover { background-color: var(--a-raised)
 /* Stat colours moved from the projector JSX into scoreboardThemes.ts, so the
    scanner no longer sees them literally. Same reason as the block above. */
 @source inline("text-amber-400 text-amber-700 text-red-300 text-red-700 text-green-400");
+
+/* ── Status colours ────────────────────────────────────────────
+   green-400 and red-400 were written for the dark admin and never tokenised,
+   so in light mode the LIVE banner sat at roughly 1.6:1 and Reset Game was
+   pale red on sage. Same failure the projector had. */
+:root {
+  --a-ok:        #15803d;  --a-ok-soft:     #dcfce7;  --a-ok-border:     #86efac;
+  --a-danger:    #b91c1c;  --a-danger-soft: #fee2e2;  --a-danger-border: #fca5a5;
+}
+html.admin-dark {
+  --a-ok:        #4ade80;  --a-ok-soft:     #0d2c1a;  --a-ok-border:     #166534;
+  --a-danger:    #f87171;  --a-danger-soft: #3a1412;  --a-danger-border: #7f1d1d;
+}
+.a-ok-text     { color: var(--a-ok); }
+.a-ok-panel    { background: var(--a-ok-soft); border-color: var(--a-ok-border); }
+.a-danger-text { color: var(--a-danger); }
+.a-danger-btn  { border-color: var(--a-danger-border); color: var(--a-danger); }
+.a-danger-btn:hover:not(:disabled) { background: var(--a-danger-soft); }
+
+/* ── Admin card chips + LED ────────────────────────────────────
+   a-surface/20 was never a real utility — a-surface is a plain class, so the
+   slash-opacity syntax produced nothing and those buttons had no background
+   at all. On the old coloured card that read as passable; on a neutral one it
+   reads as broken. */
+.a-chip-btn    { background: var(--a-surface-2); color: var(--a-text);
+                 border: 1px solid var(--a-border); padding: 0.375rem 0.75rem; }
+.a-chip-btn:hover { background: var(--a-raised); }
+.a-chip-on     { background: var(--a-live-soft); color: var(--a-live); border: 1px solid transparent; }
+.a-chip-off    { background: var(--a-surface-2); color: var(--a-text-3); border: 1px solid var(--a-border); }
+.a-chip-off:hover { color: var(--a-text-2); }
+.a-chip-danger { background: var(--a-danger-soft); color: var(--a-danger); border: 1px solid var(--a-danger-border); }
+.a-chip-danger:hover { background: var(--a-danger); color: #fff; }
+
+@keyframes card-led {
+  0%, 100% { box-shadow: 0 0 0 1.5px var(--led), 0 0 10px -3px var(--led), var(--a-shadow-1); }
+  50%      { box-shadow: 0 0 0 1.5px var(--led), 0 0 22px 0 var(--led), var(--a-shadow-2); }
+}
+@media (prefers-reduced-motion: reduce) {
+  [style*="--led"] { animation: none !important;
+    box-shadow: 0 0 0 1.5px var(--led), 0 0 14px -2px var(--led), var(--a-shadow-1) !important; }
+}

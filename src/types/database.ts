@@ -144,6 +144,7 @@ export interface BingoTask {
   // solo. contest_game keys come from lib/contestGames.ts; contest_bonus is the
   // extra the winner banks on top of the challenger's normal tile points.
   is_contest: boolean
+  led?: string | null
   contest_game: string
   contest_bonus: number
   maps_url: string | null

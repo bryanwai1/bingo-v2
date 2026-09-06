@@ -475,21 +475,16 @@ function boardWriteFailureMessage(dbMessage?: string): string {
 /** Readable ink for a given card colour. A challenge can be any hex the
  *  trainer picked, so neither theme token works — dark cards need light text
  *  and pale cards need dark text, in either theme. */
-function inkFor(hex: string) {
-  const h = (hex || '#888888').replace('#', '')
-  const v = h.length === 3 ? h.split('').map(c => c + c).join('') : h
-  const r = parseInt(v.slice(0, 2), 16) || 0
-  const g = parseInt(v.slice(2, 4), 16) || 0
-  const b = parseInt(v.slice(4, 6), 16) || 0
-  // Rec. 601 luma: green dominates perceived brightness.
-  const lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255
-  const dark = lum > 0.55
-  return {
-    strong: dark ? 'rgba(0,0,0,0.92)' : 'rgba(255,255,255,0.97)',
-    mid:    dark ? 'rgba(0,0,0,0.68)' : 'rgba(255,255,255,0.78)',
-    faint:  dark ? 'rgba(0,0,0,0.48)' : 'rgba(255,255,255,0.55)',
-  }
+// Card lights. Fixed palette so the value is safe to store and render
+// identically on the phone and the projector.
+const LED_HEX: Record<string, string> = {
+  teal: '#14b8a6', amber: '#f59e0b', violet: '#8b5cf6',
+  lime: '#84cc16', rose: '#f43f5e', cyan: '#06b6d4',
 }
+const LED_KEYS = Object.keys(LED_HEX)
+
+// Cards are neutral now, so text follows the theme rather than the swatch.
+const CARD_INK = { strong: 'var(--a-text)', mid: 'var(--a-text-2)', faint: 'var(--a-text-3)' }
 
 const emptySlots = new Set<number>()
 
@@ -593,6 +588,14 @@ export function BingoDashAdmin() {
       return new Set<string>(raw ? JSON.parse(raw) : [])
     } catch { return new Set<string>() }
   })
+
+  const [ledMenuId, setLedMenuId] = useState<string | null>(null)
+
+  const setLed = async (taskId: string, led: string | null) => {
+    setTasks(prev => prev.map(t => t.id === taskId ? { ...t, led } : t))
+    setLedMenuId(null)
+    await supabase.from('bingo_tasks').update({ led }).eq('id', taskId)
+  }
 
   const toggleGroup = (key: string) => {
     setCollapsedGroups(prev => {
@@ -2161,9 +2164,9 @@ export function BingoDashAdmin() {
             const currentSection = sections.find(s => s.id === currentSectionId)
             const isStarted = currentSection?.game_started ?? false
             return (
-              <div className={`flex items-center justify-between gap-4 rounded-2xl px-6 py-5 ${isStarted ? 'bg-green-950/40 border border-green-800' : 'bg-gray-800/60 border a-border'}`}>
+              <div className={`flex items-center justify-between gap-4 rounded-2xl px-6 py-5 ${isStarted ? 'a-ok-panel border' : 'bg-gray-800/60 border a-border'}`}>
                 <div>
-                  <p className={`text-lg font-black ${isStarted ? 'text-green-400' : 'a-text-2'}`}>
+                  <p className={`text-lg font-black ${isStarted ? 'a-ok-text' : 'a-text-2'}`}>
                     {isStarted ? '● Game is LIVE' : '■ Game is Locked'}
                   </p>
                   <p className="text-xs a-text-3 mt-0.5">
@@ -2178,8 +2181,8 @@ export function BingoDashAdmin() {
                     disabled={!currentSectionId}
                     className={`px-6 py-3 rounded-xl font-black text-sm transition-all disabled:opacity-40 ${
                       isStarted
-                        ? 'bg-red-500 a-text hover:bg-red-600'
-                        : 'bg-green-500 a-text hover:bg-green-600'
+                        ? 'bg-red-600 text-white hover:bg-red-700'
+                        : 'bg-green-600 text-white hover:bg-green-700'
                     }`}
                   >
                     {isStarted ? 'Lock Game' : 'Start Game'}
@@ -2187,7 +2190,7 @@ export function BingoDashAdmin() {
                   <button
                     onClick={resetGame}
                     disabled={resettingGame}
-                    className="px-5 py-3 rounded-xl font-black text-sm transition-all border border-red-500/40 text-red-400 hover:bg-red-950/60 disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="px-5 py-3 rounded-xl font-black text-sm transition-all border border-red-500/40 a-danger-btn disabled:opacity-50 disabled:cursor-not-allowed"
                     title="Remove all teams from this board and clear their scans, submissions and points (this board only)"
                   >
                     {resettingGame ? 'Resetting…' : '↺ Reset Game'}
@@ -2208,13 +2211,13 @@ export function BingoDashAdmin() {
                 style={{
                   fontSize: 'clamp(3.5rem, 10vw, 6rem)',
                   color: isTimerRunning
-                    ? (currentBoard?.timer_end_at && (new Date(currentBoard.timer_end_at).getTime() - Date.now()) < 120_000 ? '#f87171' : '#4ade80')
-                    : '#ffffff',
+                    ? (currentBoard?.timer_end_at && (new Date(currentBoard.timer_end_at).getTime() - Date.now()) < 120_000 ? 'var(--a-danger)' : 'var(--a-ok)')
+                    : 'var(--a-text)',
                 }}
               >
                 {timerDisplay}
               </div>
-              <div className={`text-sm font-bold mt-2 tracking-wider uppercase ${isTimerRunning ? 'text-green-400' : 'a-text-3'}`}>
+              <div className={`text-sm font-bold mt-2 tracking-wider uppercase ${isTimerRunning ? 'a-ok-text' : 'a-text-3'}`}>
                 {isTimerRunning ? '● Running' : (currentBoard?.timer_seconds ?? 0) > 0 ? '■ Paused / Stopped' : '■ Not set'}
               </div>
             </div>
@@ -2861,16 +2864,22 @@ export function BingoDashAdmin() {
                             hidden={collapsedGroups.has(section.id + ':' + group.key)}
                           >
                             {group.tasks.map(task => {
-                              const ink = inkFor(task.hex_code)
+                              const ink = CARD_INK
                               return (
                               <div key={task.id} className="rounded-2xl overflow-hidden flex flex-col transition-shadow"
                                 style={{
-                                  backgroundColor: task.hex_code,
-                                  // A soft bloom in the card's own colour, so a
-                                  // board of cards reads as a set of lit tiles
-                                  // rather than flat swatches.
-                                  boxShadow: `0 2px 10px -2px ${task.hex_code}88, 0 0 0 1px rgba(0,0,0,0.06)`,
+                                  // Neutral card, colour as an accent. A solid
+                                  // hex block fought the text for attention and
+                                  // left no room for a light to read against.
+                                  background: 'var(--a-surface)',
+                                  border: '1px solid var(--a-border)',
+                                  boxShadow: 'var(--a-shadow-1)',
+                                  ...(task.led ? {
+                                    ['--led' as string]: LED_HEX[task.led] ?? '#34d3b8',
+                                    animation: 'card-led 2.6s cubic-bezier(.22,1,.36,1) infinite',
+                                  } : {}),
                                 }}>
+                                <div style={{ height: 5, background: task.hex_code }} />
                                 <div className="px-4 pt-4 pb-3 flex-1">
                                   <p className="text-xs font-bold uppercase tracking-widest mb-1" style={{ color: ink.mid }}>{task.color}</p>
                                   <h3 className="font-black text-lg leading-tight" style={{ color: ink.strong }}>{task.title}</h3>
@@ -2923,8 +2932,8 @@ export function BingoDashAdmin() {
                                       }}
                                       className={`mt-1.5 text-xs font-bold px-2 py-0.5 rounded-full transition-colors ${
                                         task.require_marshal
-                                          ? 'bg-yellow-400/30 text-yellow-200 hover:bg-yellow-400/50'
-                                          : 'a-surface/10 a-text-3 hover:a-surface/20'
+                                          ? 'a-chip-on'
+                                          : 'a-chip-off'
                                       }`}
                                     >
                                       {task.require_marshal ? '🔒 Marshal ON' : '🔓 Marshal OFF'}
@@ -2946,8 +2955,8 @@ export function BingoDashAdmin() {
                                         }}
                                         className={`text-xs font-bold px-2 py-0.5 rounded-full transition-colors ${
                                           task.is_contest
-                                            ? 'bg-red-500/40 text-red-100 hover:bg-red-500/60'
-                                            : 'a-surface/10 a-text-3 hover:a-surface/20'
+                                            ? 'a-chip-on'
+                                            : 'a-chip-off'
                                         }`}
                                       >
                                         {task.is_contest ? '⚔️ Contending ON' : '⚔️ Contending OFF'}
@@ -3004,29 +3013,51 @@ export function BingoDashAdmin() {
                                 {section.foreign ? (
                                   <div className="px-3 pb-3">
                                     <button onClick={() => addCardFromLibrary(task)}
-                                      className="w-full px-3 py-1.5 a-surface/20 rounded-lg a-text text-xs font-bold hover:a-surface/30 transition-colors"
+                                      className="w-full px-3 py-1.5 a-chip-btn rounded-lg text-xs font-bold transition-colors"
                                       title="Copies this card into your board — the original stays untouched">
                                       + Add to board
                                     </button>
                                   </div>
                                 ) : (
                                 <div className="px-3 pb-3 flex flex-wrap gap-1.5">
+                                  {ledMenuId === task.id ? (
+                                    <div className="flex items-center gap-1 w-full mb-1">
+                                      <button onClick={() => setLed(task.id, null)}
+                                        className="px-2 py-1 a-chip-btn rounded-lg text-[10px] font-black">Off</button>
+                                      {LED_KEYS.map(k => (
+                                        <button key={k} onClick={() => setLed(task.id, k)} title={k}
+                                          aria-label={k}
+                                          className="w-5 h-5 rounded-full"
+                                          style={{ background: LED_HEX[k],
+                                                   outline: task.led === k ? '2px solid var(--a-text)' : 'none',
+                                                   outlineOffset: 1 }} />
+                                      ))}
+                                    </div>
+                                  ) : (
+                                    <button onClick={() => setLedMenuId(task.id)}
+                                      title="Light this card up so a team knows to attack it next"
+                                      className={`px-3 py-1.5 rounded-lg text-xs font-bold ${task.led ? 'a-chip-on' : 'a-chip-btn'}`}>
+                                      {task.led
+                                        ? <><span style={{ color: LED_HEX[task.led] }}>●</span> Lit</>
+                                        : '○ Light'}
+                                    </button>
+                                  )}
                                   <button onClick={() => navigate(`/bingo-dash/admin/task/${task.id}`)}
-                                    className="px-3 py-1.5 a-surface/20 rounded-lg a-text text-xs font-bold hover:a-surface/30 transition-colors">Edit</button>
+                                    className="px-3 py-1.5 a-chip-btn rounded-lg text-xs font-bold transition-colors">Edit</button>
                                   <button onClick={() => setQrTask(task)}
-                                    className="px-3 py-1.5 a-surface/20 rounded-lg a-text text-xs font-bold hover:a-surface/30 transition-colors">QR</button>
+                                    className="px-3 py-1.5 a-chip-btn rounded-lg text-xs font-bold transition-colors">QR</button>
                                   <button onClick={() => copyLink(task.id)}
-                                    className="px-3 py-1.5 a-surface/20 rounded-lg a-text text-xs font-bold hover:a-surface/30 transition-colors">
+                                    className="px-3 py-1.5 a-chip-btn rounded-lg text-xs font-bold transition-colors">
                                     {copiedId === task.id ? '✓' : '🔗'}
                                   </button>
                                   <button onClick={() => duplicateTask(task)}
-                                    className="px-3 py-1.5 a-surface/20 rounded-lg a-text text-xs font-bold hover:a-surface/30 transition-colors"
+                                    className="px-3 py-1.5 a-chip-btn rounded-lg text-xs font-bold transition-colors"
                                     title="Duplicate this card">⎘ Copy</button>
                                   <button onClick={() => openTileEdit(task)}
-                                    className="px-3 py-1.5 a-surface/20 rounded-lg a-text text-xs font-bold hover:a-surface/30 transition-colors"
+                                    className="px-3 py-1.5 a-chip-btn rounded-lg text-xs font-bold transition-colors"
                                     title="Move to another section">Move</button>
                                   <button onClick={() => deleteTask(task.id, task.title)}
-                                    className="px-3 py-1.5 bg-red-500/30 rounded-lg a-text text-xs font-bold hover:bg-red-500/50 transition-colors">Delete</button>
+                                    className="px-3 py-1.5 a-chip-danger transition-colors">Delete</button>
                                 </div>
                                 )}
                               </div>
