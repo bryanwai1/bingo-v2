@@ -1,3 +1,5 @@
+import { useEffect } from 'react'
+import { createPortal } from 'react-dom'
 import { QRCodeSVG } from 'qrcode.react'
 import type { Task } from '../types/database'
 
@@ -10,21 +12,32 @@ export function QRCodeModal({ task, onClose }: QRCodeModalProps) {
   const base = import.meta.env.VITE_APP_URL || window.location.origin
   const url = `${base}/task/${task.id}`
 
-  return (
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+    const prev = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.body.style.overflow = prev
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [onClose])
+
+  return createPortal(
     <div
-      className="fixed inset-0 flex items-center justify-center z-50 cursor-pointer"
-      style={{ background: 'rgba(0,0,0,0.88)', backdropFilter: 'blur(6px)' }}
+      role="dialog"
+      aria-modal="true"
+      className="fixed inset-0 flex items-center justify-center cursor-pointer"
+      style={{ background: 'rgba(0,0,0,0.88)', backdropFilter: 'blur(6px)', zIndex: 2147483000 }}
       onClick={onClose}
     >
-      {/* Big X close button - top right */}
       <button
         onClick={onClose}
-        className="absolute top-6 right-8 text-white/70 hover:text-white text-5xl font-light transition-colors z-10"
+        className="absolute top-6 right-8 text-white/70 hover:text-white text-5xl font-light transition-colors"
       >
         &times;
       </button>
 
-      {/* Hint text at top */}
       <div className="absolute top-6 left-0 right-0 text-center text-white/60 text-lg">
         Tap anywhere to go back
       </div>
@@ -53,6 +66,7 @@ export function QRCodeModal({ task, onClose }: QRCodeModalProps) {
           &larr; Back to Cards
         </button>
       </div>
-    </div>
+    </div>,
+    document.body
   )
 }

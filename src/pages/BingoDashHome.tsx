@@ -8,7 +8,7 @@ import { TimeUpAlarm } from '../components/TimeUpAlarm'
 import { TileFace } from '../components/BingoTileFace'
 import { IncomingDuelBanner } from '../components/ContestCard'
 import { MyQrButton } from '../components/MyQrButton'
-import { DayNightForest } from '../components/DayNightForest'
+import { ForestWaitingScreen } from '../components/ForestWaitingScreen'
 import { WaitingTiger } from '../components/WaitingTiger'
 import { activeFaces, faceName, faceColor, normaliseFaceCount } from '../lib/cubeFaces'
 import { tasksForFace } from '../lib/boardCards'
@@ -825,16 +825,20 @@ export function BingoDashHome() {
           {/* Players can sit on this screen for several minutes before a
               facilitator starts, so it needs to be somewhere pleasant to wait
               rather than a spinner on black. */}
-          <DayNightForest />
+          <ForestWaitingScreen />
+          <div
+            className="absolute inset-0 pointer-events-none"
+            style={{ zIndex: 5, background: 'linear-gradient(to bottom, rgba(4,15,12,0.60) 0%, rgba(4,15,12,0.28) 42%, rgba(4,15,12,0.75) 100%)' }}
+          />
 
-          <div className="relative z-10 text-center px-6 pt-16 flex-1 flex flex-col justify-center">
-            <p className="text-[11px] font-black uppercase tracking-[0.25em] text-emerald-300/60 mb-2">
+          <div className="relative z-10 text-center px-6 pt-16 flex-1 flex flex-col justify-center [text-shadow:0_2px_14px_rgba(0,0,0,0.75)]">
+            <p className="text-[11px] font-black uppercase tracking-[0.25em] text-emerald-200/90 mb-2">
               {section.name}
             </p>
             <h1 className="text-3xl sm:text-4xl font-black text-white tracking-tight mb-3">
               Waiting to start
             </h1>
-            <p className="text-white/50 text-sm">
+            <p className="text-white/85 text-sm">
               You're in <span className="text-amber-300 font-bold">{team!.name}</span>.
               <br className="sm:hidden" /> The game begins when your host says go.
             </p>
@@ -847,7 +851,7 @@ export function BingoDashHome() {
 
             <button
               onClick={leaveTeam}
-              className="mt-8 text-xs text-white/25 hover:text-white/50 transition-colors"
+              className="mt-8 text-xs text-white/45 hover:text-white/75 transition-colors"
             >
               Switch team
             </button>
