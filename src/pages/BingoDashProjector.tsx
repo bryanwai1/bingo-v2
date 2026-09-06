@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useLayoutEffect, useRef } from 'react'
 import { useParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { ParticleBackground } from '../components/ParticleBackground'
@@ -182,7 +182,49 @@ export function BingoDashProjector() {
   // Per-board skin. A hotel room with windows needs 'daylight' or the
   // projected scoreboard is unreadable; a dim AV suite wants 'midnight'.
   const theme = getScoreboardTheme(activeSection?.scoreboard_theme)
-  const rankColors = ['#fbbf24', '#cbd5e1', '#d97706']
+
+
+  // Rank-change motion.
+  //
+  // Re-sorting a mapped array does not animate — React repaints each row's
+  // contents where it already sits, so an overtake happens silently. That is
+  // the one moment a scoreboard on a wall exists for.
+  //
+  // FLIP: remember each row's screen position, let the re-sort happen, then
+  // transform every row back to where it was and release it. The browser
+  // animates the release. useLayoutEffect runs before paint, so the room never
+  // sees the intermediate state.
+  const rowEls = useRef(new Map<string, HTMLDivElement>())
+  const lastTop = useRef(new Map<string, number>())
+
+  useLayoutEffect(() => {
+    const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    const now = new Map<string, number>()
+    rowEls.current.forEach((el, id) => { if (el) now.set(id, el.getBoundingClientRect().top) })
+
+    if (!reduced) {
+      now.forEach((top, id) => {
+        const was = lastTop.current.get(id)
+        const el = rowEls.current.get(id)
+        if (was === undefined || !el) return
+        const shift = was - top
+        if (Math.abs(shift) < 2) return
+
+        el.style.transition = 'none'
+        el.style.transform = `translateY(${shift}px)`
+        el.style.zIndex = '20'
+        requestAnimationFrame(() => {
+          el.style.transition = 'transform .85s cubic-bezier(.22,1,.36,1)'
+          el.style.transform = ''
+          window.setTimeout(() => {
+            el.style.transition = ''
+            el.style.zIndex = ''
+          }, 900)
+        })
+      })
+    }
+    lastTop.current = now
+  }, [rows])
 
   return (
     <div className={`min-h-screen relative overflow-hidden ${theme.bg}`}>
@@ -249,11 +291,15 @@ export function BingoDashProjector() {
               {rows.map((row, i) => {
                 const rank = i + 1
                 const isTop3 = rank <= 3
-                const rankColor = isTop3 ? rankColors[rank - 1] : '#4b5563'
+                const rankColor = isTop3 ? theme.rankColors[rank - 1] : theme.rankMuted
                 return (
                   <div
                     key={row.team.id}
-                    className="grid grid-cols-[80px_1fr_200px_200px_200px] gap-4 items-center px-6 py-5 rounded-2xl transition-all duration-500"
+                    ref={el => {
+                      if (el) rowEls.current.set(row.team.id, el)
+                      else rowEls.current.delete(row.team.id)
+                    }}
+                    className="grid grid-cols-[80px_1fr_200px_200px_200px] gap-4 items-center px-6 py-5 rounded-2xl"
                     style={{
                       background: isTop3
                         ? `linear-gradient(90deg, ${rankColor}22 0%, rgba(255,255,255,0.03) 100%)`
@@ -277,28 +323,28 @@ export function BingoDashProjector() {
                       </p>
                       {showBonus ? (
                         <p className={`${theme.muted} text-xs font-bold uppercase tracking-widest mt-1`}>
-                          <span className="text-violet-300">{row.points} bingo</span>
+                          <span className={theme.accent}>{row.points} bingo</span>
                           <span className={theme.muted}> + </span>
-                          <span className="text-amber-400">{row.bonus} bonus</span>
+                          <span className={theme.bonus}>{row.bonus} bonus</span>
                         </p>
                       ) : row.duelBonus > 0 ? (
                         // Surface duel winnings — otherwise a defender who won
                         // reads as having scored from nowhere.
                         <p className={`${theme.muted} text-xs font-bold uppercase tracking-widest mt-1`}>
-                          pts <span className="text-red-300">· incl. {row.duelBonus} duel</span>
+                          pts <span className={theme.duel}>· incl. {row.duelBonus} duel</span>
                         </p>
                       ) : (
                         <p className={`${theme.muted} text-xs font-bold uppercase tracking-widest mt-1`}>pts</p>
                       )}
                     </div>
                     <div className="text-center">
-                      <p className="text-amber-400 text-5xl font-black tabular-nums">
+                      <p className={`${theme.lines} text-5xl font-black tabular-nums`}>
                         {row.bingos}<span className={`text-2xl ${theme.muted}`}>/12</span>
                       </p>
                       <p className={`${theme.muted} text-xs font-bold uppercase tracking-widest mt-1`}>lines</p>
                     </div>
                     <div className="text-center">
-                      <p className="text-green-400 text-5xl font-black tabular-nums">
+                      <p className={`${theme.positive} text-5xl font-black tabular-nums`}>
                         {row.tasksDone}
                       </p>
                       <p className={`${theme.muted} text-xs font-bold uppercase tracking-widest mt-1`}>completed</p>

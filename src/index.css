@@ -686,3 +686,7 @@ html:not(.admin-dark) .hover\:bg-white:hover { background-color: var(--a-raised)
 @media (prefers-reduced-motion: reduce) {
   .cube-led { animation: none; box-shadow: 0 0 0 1.5px var(--led), 0 0 12px -1px var(--led); }
 }
+
+/* Stat colours moved from the projector JSX into scoreboardThemes.ts, so the
+   scanner no longer sees them literally. Same reason as the block above. */
+@source inline("text-amber-400 text-amber-700 text-red-300 text-red-700 text-green-400");

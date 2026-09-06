@@ -28,6 +28,15 @@ export type ScoreboardTheme = {
   accent: string
   accentSoft: string
   positive: string
+  /** Stat colours. These were hardcoded in the projector rows, which meant
+      daylight rendered amber-400 and green-400 on a near-white background —
+      unreadable in exactly the bright room daylight exists to serve. */
+  lines: string
+  bonus: string
+  duel: string
+  /** Rank 1-3 accent, then everyone else. Silver on a light page was invisible. */
+  rankColors: readonly [string, string, string]
+  rankMuted: string
   /** Ambient blobs — empty string turns them off. */
   ambient: string
 }
@@ -46,6 +55,11 @@ export const SCOREBOARD_THEMES: ScoreboardTheme[] = [
     accent: 'text-violet-300',
     accentSoft: 'text-fuchsia-300',
     positive: 'text-emerald-400',
+    lines: 'text-amber-400',
+    bonus: 'text-amber-400',
+    duel: 'text-red-300',
+    rankColors: ['#fbbf24', '#cbd5e1', '#d97706'],
+    rankMuted: '#6b7280',
     ambient: 'bg-violet-600/20',
   },
   {
@@ -61,6 +75,11 @@ export const SCOREBOARD_THEMES: ScoreboardTheme[] = [
     accent: 'text-amber-300',
     accentSoft: 'text-amber-200',
     positive: 'text-lime-400',
+    lines: 'text-amber-300',
+    bonus: 'text-amber-300',
+    duel: 'text-red-300',
+    rankColors: ['#fbbf24', '#e2e8f0', '#f59e0b'],
+    rankMuted: '#9ca3af',
     ambient: '',
   },
   {
@@ -76,6 +95,11 @@ export const SCOREBOARD_THEMES: ScoreboardTheme[] = [
     accent: 'text-violet-700',
     accentSoft: 'text-fuchsia-700',
     positive: 'text-emerald-600',
+    lines: 'text-amber-700',
+    bonus: 'text-amber-700',
+    duel: 'text-red-700',
+    rankColors: ['#b45309', '#64748b', '#92400e'],
+    rankMuted: '#64748b',
     ambient: '',
   },
 ]
