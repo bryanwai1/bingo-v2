@@ -30,6 +30,7 @@ export type RemoteCommand =
   | { action: 'prevPage' }
   | { action: 'fillMarshal' }
   | { action: 'submitComplete' }
+  | { action: 'scroll'; direction: 'up' | 'down' } // scroll the projector's viewport
   | { action: 'requestState' } // controller → projector: "resend your state now"
 
 export type SampleView = 'board' | 'scoreboard'

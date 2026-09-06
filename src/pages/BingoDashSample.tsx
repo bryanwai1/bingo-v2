@@ -1268,6 +1268,7 @@ function SampleProjector() {
       case 'prevPage': detailRef.current?.prevPage(); break
       case 'fillMarshal': detailRef.current?.fillMarshal(); break
       case 'submitComplete': detailRef.current?.submitComplete(); break
+      case 'scroll': window.scrollBy({ top: c.direction === 'down' ? 400 : -400, behavior: 'smooth' }); break
       case 'requestState': sendState(snapshot()); break
     }
   }
@@ -1616,6 +1617,18 @@ function SampleController({ code }: { code: string }) {
               onClick={() => sendCommand({ action: 'setView', view: 'scoreboard' })}
               className={`py-2 rounded-lg text-sm font-black transition-colors ${view === 'scoreboard' ? 'bg-purple-500 text-white' : 'text-gray-400 hover:text-white'}`}>
               📊 Scoreboard
+            </button>
+          </div>
+
+          {/* Scroll the projector's screen up/down */}
+          <div className="grid grid-cols-2 gap-2">
+            <button onClick={() => sendCommand({ action: 'scroll', direction: 'up' })}
+              className="py-2.5 rounded-lg bg-white/10 text-gray-200 border border-white/15 text-sm font-black hover:bg-white/20 active:scale-95 transition-all">
+              ↑ Scroll up
+            </button>
+            <button onClick={() => sendCommand({ action: 'scroll', direction: 'down' })}
+              className="py-2.5 rounded-lg bg-white/10 text-gray-200 border border-white/15 text-sm font-black hover:bg-white/20 active:scale-95 transition-all">
+              ↓ Scroll down
             </button>
           </div>
 
