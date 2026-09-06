@@ -55,18 +55,13 @@ export function CubeBoard({
   // Faces sit at 0, -90, -180, 90. Allow a little overshoot past the outermost
   // face so it can be viewed square-on, but not so far that you are staring
   // into the empty side of a partial cube.
-  const MARGIN = 14
-  const limitY: [number, number] | null =
-    faces.length >= 4 ? null
-    : faces.length === 3 ? [-180 - MARGIN, MARGIN]
-    : faces.length === 2 ? [-90 - MARGIN, MARGIN]
-    : [-MARGIN, MARGIN]
+  // The cube is a closed box: all six walls render, and `faces` only decides
+  // how many of them are in play. Free rotation is safe because there is no
+  // open side to look through — which is what made a 3-face board feel broken.
+  const panels = Array.from({ length: 6 }, (_, i) => faces[i] ?? null)
+  const limitY: [number, number] | null = null
 
-  // Vertical range depends on whether the box is actually closed above and
-  // below. Without a top face, tilting up shows the inside.
-  const hasTop = faces.length >= 5
-  const hasBottom = faces.length >= 6
-  const limitX: [number, number] = [hasBottom ? -80 : -22, hasTop ? 80 : 22]
+  const limitX: [number, number] = [-80, 80]
 
   const onMove = useCallback((e: PointerEvent) => {
     const d = drag.current
@@ -120,7 +115,7 @@ export function CubeBoard({
             transition: snapping ? 'transform .7s cubic-bezier(.22,1,.36,1)' : 'none',
           }}
         >
-          {faces.map((tiles, f) => (
+          {panels.map((tiles, f) => (
             <div
               key={f}
               className="absolute inset-0 rounded-2xl overflow-hidden"
@@ -128,11 +123,11 @@ export function CubeBoard({
                 transform: faceTransform(f, size),
                 backfaceVisibility: 'hidden',
                 background: 'rgba(8,18,18,0.96)',
-                border: `2px solid ${faceColor(f)}77`,
-                boxShadow: `0 0 50px ${faceColor(f)}44, inset 0 0 60px rgba(0,0,0,.5)`,
+                border: `2px solid ${tiles ? faceColor(f) + '77' : 'rgba(255,255,255,0.10)'}`,
+                boxShadow: tiles ? `0 0 50px ${faceColor(f)}44, inset 0 0 60px rgba(0,0,0,.5)` : 'inset 0 0 70px rgba(0,0,0,.62)',
               }}
             >
-              {showLabels && (() => {
+              {tiles && showLabels && (() => {
                 // Angle between this face and the camera; past 90 degrees we
                 // are looking at its reverse and the text would read mirrored.
                 const facing = ((FACE_ANGLES[f].y - rot.y) % 360 + 540) % 360 - 180
@@ -146,7 +141,7 @@ export function CubeBoard({
               })()}
               <div className="grid grid-cols-5 gap-1 p-2"
                    style={{ height: showLabels ? size - 28 : size }}>
-                {Array.from({ length: TILES_PER_FACE }, (_, i) => {
+                {tiles && Array.from({ length: TILES_PER_FACE }, (_, i) => {
                   const t = tiles?.[i]
                   const slot = f * TILES_PER_FACE + i
                   const led = ledOf?.(t ?? null, slot) ?? null
@@ -162,6 +157,7 @@ export function CubeBoard({
                           : done ? t.hex_code : `${t.hex_code}2e`,
                         border: `1px solid ${t ? `${t.hex_code}88` : 'rgba(255,255,255,0.07)'}`,
                         color: done ? '#fff' : 'rgba(255,255,255,0.88)',
+                        pointerEvents: onTileClick ? 'auto' : 'none',
                         fontSize: tileFont,
                         lineHeight: 1.15,
                         textShadow: done ? 'none' : '0 1px 2px rgba(0,0,0,.55)',

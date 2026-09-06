@@ -12,19 +12,20 @@ export function QRCodeModal({ task, onClose }: QRCodeModalProps) {
 
   return (
     <div
-      className="fixed inset-0 bg-black flex items-center justify-center z-50 cursor-pointer"
+      className="fixed inset-0 flex items-center justify-center z-50 cursor-pointer"
+      style={{ background: 'rgba(0,0,0,0.88)', backdropFilter: 'blur(6px)' }}
       onClick={onClose}
     >
       {/* Big X close button - top right */}
       <button
         onClick={onClose}
-        className="absolute top-6 right-8 a-text-2 hover:a-text text-5xl font-light transition-colors z-10"
+        className="absolute top-6 right-8 text-white/70 hover:text-white text-5xl font-light transition-colors z-10"
       >
         &times;
       </button>
 
       {/* Hint text at top */}
-      <div className="absolute top-6 left-0 right-0 text-center a-text-3 text-lg">
+      <div className="absolute top-6 left-0 right-0 text-center text-white/60 text-lg">
         Tap anywhere to go back
       </div>
 
@@ -39,15 +40,15 @@ export function QRCodeModal({ task, onClose }: QRCodeModalProps) {
           />
           <h2 className="text-3xl font-black text-gray-900">{task.title}</h2>
         </div>
-        <p className="text-gray-400 font-medium uppercase tracking-wider text-sm">
+        <p className="text-gray-500 font-medium uppercase tracking-wider text-sm">
           {task.color} Flag — Scan with your phone camera
         </p>
-        <div className="bg-white p-4 rounded-2xl">
-          <QRCodeSVG value={url} size={400} level="H" />
+        <div className="rounded-2xl" style={{ background: '#fff', padding: 40 }}>
+          <QRCodeSVG value={url} size={400} level="H" bgColor="#ffffff" fgColor="#000000" />
         </div>
         <button
           onClick={onClose}
-          className="px-8 py-4 a-surface a-text rounded-2xl hover:bg-gray-700 transition-all text-lg font-bold hover:scale-105 active:scale-95"
+          className="px-8 py-4 bg-gray-900 text-white rounded-2xl hover:bg-gray-700 transition-all text-lg font-bold hover:scale-105 active:scale-95"
         >
           &larr; Back to Cards
         </button>

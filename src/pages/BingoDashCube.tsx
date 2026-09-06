@@ -1,3 +1,4 @@
+import { LED_HEX } from '../lib/ledColors'
 import { useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
@@ -97,7 +98,8 @@ export function BingoDashCube() {
           </p>
         </div>
 
-        <CubeBoard faces={faces} completedSlots={completedSlots} size={360} />
+        <CubeBoard faces={faces} completedSlots={completedSlots} size={360}
+          ledOf={t => (t?.led ? LED_HEX[t.led] ?? null : null)} />
 
         {/* Fullscreen is what makes this usable on a second screen during a
             break — the browser chrome is the only thing spoiling it. */}

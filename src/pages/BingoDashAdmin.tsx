@@ -16,6 +16,7 @@ import { activeFaces, faceName, faceColor, slotFor, normaliseFaceCount, TILES_PE
 import { CubeBoard } from '../components/CubeBoard'
 import { RunEventPanel, Step } from '../components/RunEventPanel'
 import { CONTEST_GAMES, getContestGame } from '../lib/contestGames'
+import { LED_HEX, LED_KEYS } from '../lib/ledColors'
 import { duelBonusByTeam } from '../hooks/useBingoDuels'
 
 // Sanitize a string into a filesystem-safe filename component.
@@ -477,11 +478,7 @@ function boardWriteFailureMessage(dbMessage?: string): string {
  *  and pale cards need dark text, in either theme. */
 // Card lights. Fixed palette so the value is safe to store and render
 // identically on the phone and the projector.
-const LED_HEX: Record<string, string> = {
-  teal: '#14b8a6', amber: '#f59e0b', violet: '#8b5cf6',
-  lime: '#84cc16', rose: '#f43f5e', cyan: '#06b6d4',
-}
-const LED_KEYS = Object.keys(LED_HEX)
+
 
 // Cards are neutral now, so text follows the theme rather than the swatch.
 const CARD_INK = { strong: 'var(--a-text)', mid: 'var(--a-text-2)', faint: 'var(--a-text-3)' }
@@ -2412,7 +2409,7 @@ export function BingoDashAdmin() {
                       completedSlots={emptySlots}
                       faces={activeFaces(currentBoard?.face_count).map(f =>
                         Array.from({ length: TILES_PER_FACE }, (_, i) => gridSlots[f * TILES_PER_FACE + i] ?? null))}
-                      onTileClick={slot => { setEditFace(Math.floor(slot / TILES_PER_FACE)); setEditView('flat') }}
+                      ledOf={t => (t?.led ? LED_HEX[t.led] ?? null : null)}
                     />
                   </div>
                 )}
