@@ -86,6 +86,7 @@ function DemoBar({
   showQuickWin,
   onRemote,
   remoteActive,
+  onTryIt,
   view,
   onToggleView,
   showViewToggle,
@@ -101,6 +102,7 @@ function DemoBar({
   showQuickWin: boolean
   onRemote: () => void
   remoteActive: boolean
+  onTryIt: () => void
   view: SampleView
   onToggleView: () => void
   showViewToggle: boolean
@@ -156,6 +158,13 @@ function DemoBar({
               }`}
             >
               📡<span className="hidden sm:inline"> {remoteActive ? 'Paired' : 'Remote'}</span>
+            </button>
+            <button
+              onClick={onTryIt}
+              title="Let the audience try the game on their own phones"
+              className="flex-shrink-0 px-2.5 py-2 rounded-lg bg-white/10 text-gray-200 border border-white/15 text-xs font-black hover:bg-white/20 transition-colors whitespace-nowrap"
+            >
+              📱<span className="hidden sm:inline"> Try it yourself</span>
             </button>
             {showQuickWin && (
               <button
@@ -1170,6 +1179,7 @@ function SampleProjector() {
   // channel; a paired phone drives the state below via commands.
   const [remoteCode, setRemoteCode] = useState<string | null>(null)
   const [showPair, setShowPair] = useState(false)
+  const [showTryIt, setShowTryIt] = useState(false)
   // Live step of the open task detail, reported up so the phone shows the right
   // buttons (Start Challenge → pages → marshal password → Complete).
   const [detailStep, setDetailStep] = useState<DetailStep | null>(null)
@@ -1313,6 +1323,7 @@ function SampleProjector() {
         showQuickWin={!!teamName && gridTasks.length > 0}
         onRemote={enableRemote}
         remoteActive={!!remoteCode}
+        onTryIt={() => setShowTryIt(true)}
         view={view}
         onToggleView={() => setView(v => v === 'board' ? 'scoreboard' : 'board')}
         showViewToggle={sections.length > 0}
@@ -1369,6 +1380,10 @@ function SampleProjector() {
       {showPair && remoteCode && (
         <RemotePairModal code={remoteCode} onClose={() => setShowPair(false)} />
       )}
+
+      {showTryIt && (
+        <TryItModal boardId={selectedId} onClose={() => setShowTryIt(false)} />
+      )}
     </div>
   )
 }
@@ -1418,6 +1433,58 @@ function RemotePairModal({ code, onClose }: { code: string; onClose: () => void 
           </div>
           <p className="text-[11px] text-gray-400 text-center">
             Keep this device on the projector. The phone becomes your remote — every tap here shows up on the big screen.
+          </p>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── "Try it yourself" modal (audience-facing, one QR for everyone) ────────────
+// Unlike the Remote pairing above, this URL carries no ?remote= code — every
+// attendee who scans it opens their own independent, local-only sandbox
+// session (own join screen, own board, own BINGO) on their own phone. No two
+// phones share state, and nothing is written to Supabase.
+
+function TryItModal({ boardId, onClose }: { boardId: string | null; onClose: () => void }) {
+  const url = boardId
+    ? `${window.location.origin}/bingo-dash/sample?board=${boardId}`
+    : `${window.location.origin}/bingo-dash/sample`
+  const [copied, setCopied] = useState(false)
+  const copy = () => {
+    navigator.clipboard.writeText(url).then(() => {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    })
+  }
+  return (
+    <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[70] px-4" onClick={onClose}>
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm animate-bounce-in" onClick={e => e.stopPropagation()}>
+        <div className="px-6 py-5 border-b border-gray-100 flex items-center justify-between">
+          <div>
+            <h3 className="text-lg font-black text-gray-900">📱 Try it yourself</h3>
+            <p className="text-xs text-gray-400 mt-0.5">Everyone scans this to play on their own phone</p>
+          </div>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-700 text-2xl font-light">&times;</button>
+        </div>
+        <div className="p-6 flex flex-col items-center gap-4">
+          <div className="bg-white p-3 rounded-2xl border border-gray-100 shadow-sm">
+            <QRCodeSVG value={url} size={220} level="H" />
+          </div>
+          <div className="w-full flex items-center gap-2">
+            <div className="flex-1 px-3 py-2.5 bg-gray-50 rounded-lg text-[11px] font-mono text-gray-600 break-all select-all border border-gray-200">
+              {url}
+            </div>
+            <button onClick={copy}
+              className={`px-3 py-2.5 rounded-lg text-xs font-bold transition-all flex-shrink-0 ${
+                copied ? 'bg-green-100 text-green-700 border border-green-300' : 'bg-purple-600 text-white hover:bg-purple-700'
+              }`}>
+              {copied ? 'Copied!' : 'Copy'}
+            </button>
+          </div>
+          <p className="text-[11px] text-gray-400 text-center">
+            One link, any number of people — everyone gets their own private join screen and board. Nothing anyone
+            does here is saved, so it's safe to hand out to the whole room. Sample password <span className="font-black text-purple-500">{SAMPLE_TEAM_PASSWORD}</span> is pre-filled for them.
           </p>
         </div>
       </div>
