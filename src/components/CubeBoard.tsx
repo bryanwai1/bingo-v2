@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { faceName, faceColor, TILES_PER_FACE } from '../lib/cubeFaces'
+import { faceName, faceColor, faceTransform, TILES_PER_FACE } from '../lib/cubeFaces'
 import type { BingoTask } from '../types/database'
 
 // An interactive cube board.
@@ -25,27 +25,19 @@ const FACE_ANGLES: Vec[] = [
   { x: 90,  y: 0    },  // bottom
 ]
 
-function faceTransform(i: number, size: number): string {
-  const d = size / 2
-  switch (i) {
-    case 0: return `translateZ(${d}px)`
-    case 1: return `rotateY(180deg) translateZ(${d}px)`
-    case 2: return `rotateY(-90deg) translateZ(${d}px)`
-    case 3: return `rotateY(90deg) translateZ(${d}px)`
-    case 4: return `rotateX(90deg) translateZ(${d}px)`
-    default: return `rotateX(-90deg) translateZ(${d}px)`
-  }
-}
-
 export function CubeBoard({
-  faces, size = 380, completedSlots, onTileClick, showLabels = true,
+  faces, size = 380, completedSlots, onTileClick, showLabels = true, ledOf,
 }: {
   faces: (BingoTask | null)[][]
   size?: number
   completedSlots: Set<number>
   onTileClick?: (slot: number) => void
   showLabels?: boolean
+  /** Return a colour to ring a tile in light, or null for none. */
+  ledOf?: (task: BingoTask | null, slot: number) => string | null
 }) {
+  // 7px was unreadable at any size. Scale with the cube and floor it at 9.
+  const tileFont = Math.max(9, Math.round(size / 34))
   const [rot, setRot] = useState<Vec>({ x: -20, y: -28 })
   const [snapping, setSnapping] = useState(false)
   const drag = useRef<{ x: number; y: number; rx: number; ry: number } | null>(null)
@@ -139,7 +131,7 @@ export function CubeBoard({
                 const facing = ((FACE_ANGLES[f].y - rot.y) % 360 + 540) % 360 - 180
                 if (Math.abs(facing) > 88) return null
                 return (
-                  <div className="px-3 py-1.5 text-[10px] font-black uppercase tracking-widest"
+                  <div className="px-3 py-1 text-[11px] font-black uppercase tracking-widest"
                        style={{ color: faceColor(f), background: `${faceColor(f)}1a` }}>
                     {faceName(f)}
                   </div>
@@ -150,21 +142,30 @@ export function CubeBoard({
                 {Array.from({ length: TILES_PER_FACE }, (_, i) => {
                   const t = tiles?.[i]
                   const slot = f * TILES_PER_FACE + i
+                  const led = ledOf?.(t ?? null, slot) ?? null
                   const done = completedSlots.has(slot)
                   return (
                     <button
                       key={i}
                       onClick={() => onTileClick?.(slot)}
                       disabled={!onTileClick}
-                      className="rounded-md grid place-items-center text-[7px] font-black leading-none text-center px-0.5 overflow-hidden transition-transform hover:scale-105"
+                      className={`rounded-md grid place-items-center font-black text-center px-1 py-0.5 overflow-hidden transition-transform hover:scale-105 ${led ? 'cube-led' : ''}`}
                       style={{
                         background: !t ? 'rgba(255,255,255,0.03)'
                           : done ? t.hex_code : `${t.hex_code}2e`,
                         border: `1px solid ${t ? `${t.hex_code}88` : 'rgba(255,255,255,0.07)'}`,
-                        color: done ? '#fff' : 'rgba(255,255,255,0.6)',
+                        color: done ? '#fff' : 'rgba(255,255,255,0.88)',
+                        fontSize: tileFont,
+                        lineHeight: 1.15,
+                        textShadow: done ? 'none' : '0 1px 2px rgba(0,0,0,.55)',
+                        ...(led ? { ['--led' as string]: led } : {}),
                       }}
                     >
-                      {done ? '✓' : t ? t.title.slice(0, 12) : ''}
+                      {t ? (
+                        <span className="cube-tile-text">
+                          {done && <b className="cube-tick">✓</b>}{t.title}
+                        </span>
+                      ) : ''}
                     </button>
                   )
                 })}
@@ -196,7 +197,7 @@ export function CubeBoard({
           )
         })}
       </div>
-      <p className="text-xs text-white/30">Drag the cube to spin · tap a face to turn to it</p>
+      <p className="text-xs" style={{ color: 'var(--a-text-3)' }}>Drag the cube to spin · tap a face to turn to it</p>
     </div>
   )
 }

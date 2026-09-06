@@ -614,3 +614,75 @@ html, body, #root {
   background: var(--a-bg);
   color: var(--a-text);
 }
+
+/* ── Light-theme surface fix ───────────────────────────────────
+   Two problems, one block.
+
+   1. --a-surface was #ffffff, so cards had nothing to sit against and the
+      whole admin glared on a projector. Now a shade off white, with true
+      white reserved for hover so raised state still reads.
+   2. 221 hardcoded `bg-white` classes bypassed the tokens entirely — this is
+      why remapping BingoDashAdmin looked correct in code and wrong on screen.
+      Unlayered CSS outranks Tailwind's @layer utilities, so these rules win
+      without editing a single component.
+
+   Scoped to light mode on purpose. In dark mode the participant and projector
+   screens want genuine white chips; remapping those would sink them into the
+   background. */
+:root {
+  --a-bg:        #e3eae8;
+  --a-surface:   #f8fbfa;
+  --a-surface-2: #eef3f2;
+  --a-raised:    #ffffff;
+  --a-border:    #c3d1ce;
+
+  --a-shadow-1: 0 1px 2px rgba(10, 22, 21, .06);
+  --a-shadow-2: 0 6px 18px -6px rgba(10, 22, 21, .16);
+  --a-shadow-3: 0 24px 48px -20px rgba(10, 22, 21, .28);
+}
+html.admin-dark {
+  --a-raised:   #1d302c;
+  --a-shadow-1: 0 1px 2px rgba(0, 0, 0, .40);
+  --a-shadow-2: 0 6px 18px -6px rgba(0, 0, 0, .55);
+  --a-shadow-3: 0 24px 48px -20px rgba(0, 0, 0, .70);
+}
+
+html:not(.admin-dark) .bg-white   { background-color: var(--a-surface); }
+html:not(.admin-dark) .bg-gray-50,
+html:not(.admin-dark) .bg-slate-50 { background-color: var(--a-surface-2); }
+
+html:not(.admin-dark) .hover\:bg-white:hover { background-color: var(--a-raised); }
+
+.a-raised { background: var(--a-raised); }
+.a-shadow-1 { box-shadow: var(--a-shadow-1); }
+.a-shadow-2 { box-shadow: var(--a-shadow-2); }
+.a-shadow-3 { box-shadow: var(--a-shadow-3); }
+
+/* ── Cube tile text + LED rim ──────────────────────────────────
+   Titles wrap to three lines and ellipsis rather than being cut at 12
+   characters mid-word, and completed tiles keep their title with the tick
+   demoted to a corner mark — a finished face used to be 25 anonymous ticks.
+
+   The LED is per tile so a facilitator can light the two cards a team should
+   attack next. Light every tile and it reads as noise. */
+.cube-tile-text {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  word-break: break-word;
+  hyphens: auto;
+}
+.cube-tick { margin-right: 2px; opacity: .9; }
+
+.cube-led {
+  box-shadow: 0 0 0 1.5px var(--led), 0 0 10px -1px var(--led);
+  animation: cube-led-breathe 2.6s cubic-bezier(.22,1,.36,1) infinite;
+}
+@keyframes cube-led-breathe {
+  0%, 100% { box-shadow: 0 0 0 1.5px var(--led), 0 0 8px -2px var(--led); }
+  50%      { box-shadow: 0 0 0 1.5px var(--led), 0 0 18px 1px var(--led); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .cube-led { animation: none; box-shadow: 0 0 0 1.5px var(--led), 0 0 12px -1px var(--led); }
+}

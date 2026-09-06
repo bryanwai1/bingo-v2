@@ -19,6 +19,35 @@ const STEP = CYCLE_MS / FRAMES
 const FADE_MS = 2200               // fade must stay shorter than the 3s step
 const src = (n: number) => `/forest/forest-${String(n).padStart(2, '0')}.webp`
 
+// Sky colour sampled from each frame: [zenith, just above the treeline].
+//
+// The art is 301x250. Stretched to fill a portrait phone that is a 3x upscale,
+// which is why this screen looked soft and cropped — bg-cover threw away most
+// of the width to reach the height. Instead the forest now sits at the bottom
+// at its own ratio and these colours extend its sky upward to fill the rest.
+// Sampled per frame, so sunset sweeps the whole screen rather than a strip.
+const SKY = [
+  ['#040f21', '#0c1a2f'], ['#0b1928', '#101e30'], ['#0c1c23', '#1b2b38'],
+  ['#192a2c', '#43453e'], ['#2b3e34', '#5f5a37'], ['#2d5043', '#516853'],
+  ['#254b40', '#406557'], ['#284d3f', '#3e6150'], ['#235648', '#3f6855'],
+  ['#1e4a3c', '#3a604b'], ['#2c543f', '#526a48'], ['#414b30', '#6c6132'],
+  ['#453c1f', '#6e4f1f'], ['#2d2d36', '#4b363a'], ['#141c36', '#2e2945'],
+  ['#121831', '#292341'], ['#03122e', '#081b3d'], ['#030e27', '#0c1d39'],
+  ['#030e27', '#10213a'], ['#071c35', '#122b47'],
+] as const
+
+const sky = (n: number) =>
+  `linear-gradient(to bottom, ${SKY[n][0]} 0%, ${SKY[n][1]} 100%)`
+
+// Pinned to the bottom, native ratio, hard pixel edges. `contain` would
+// letterbox and `cover` crops the sides off; explicit sizing does neither.
+const ART: React.CSSProperties = {
+  backgroundSize: 'auto min(62vh, 78vw)',
+  backgroundPosition: 'center bottom',
+  backgroundRepeat: 'no-repeat',
+  imageRendering: 'pixelated',
+}
+
 export function DayNightForest() {
   const [base, setBase] = useState(() => Math.floor(Math.random() * FRAMES))
   const [incoming, setIncoming] = useState<number | null>(null)
@@ -70,16 +99,29 @@ export function DayNightForest() {
   }, [base])
 
   return (
-    <div className="absolute inset-0 overflow-hidden" style={{ background: '#0a1410' }}>
+    <div className="absolute inset-0 overflow-hidden" style={{ background: SKY[base][0] }}>
+      {/* Sky first, so the art composites over it rather than onto black. */}
+      <div className="absolute inset-0" style={{ background: sky(base) }} />
+      {incoming !== null && (
+        <div
+          className="absolute inset-0"
+          style={{
+            background: sky(incoming),
+            opacity: fade,
+            transition: fade === 1 ? `opacity ${FADE_MS}ms linear` : 'none',
+          }}
+        />
+      )}
       {/* Bottom layer: never fades, so there is always something opaque. */}
       <div
-        className="absolute inset-0 bg-cover bg-center"
-        style={{ backgroundImage: `url(${src(base)})` }}
+        className="absolute inset-0"
+        style={{ ...ART, backgroundImage: `url(${src(base)})` }}
       />
       {/* Top layer: the next frame fading in over the one below. */}
       <div
-        className="absolute inset-0 bg-cover bg-center"
+        className="absolute inset-0"
         style={{
+          ...ART,
           backgroundImage: incoming === null ? 'none' : `url(${src(incoming)})`,
           opacity: fade,
           transition: fade === 1 ? `opacity ${FADE_MS}ms linear` : 'none',

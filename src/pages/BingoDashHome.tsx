@@ -821,7 +821,7 @@ export function BingoDashHome() {
   if (section && !section.game_started) {
     return (
       <>
-        <div className="min-h-screen relative overflow-hidden flex flex-col items-center justify-end pb-0">
+        <div className="relative overflow-hidden flex flex-col items-center justify-end pb-0" style={{ minHeight: '100dvh' }}>
           {/* Players can sit on this screen for several minutes before a
               facilitator starts, so it needs to be somewhere pleasant to wait
               rather than a spinner on black. */}
