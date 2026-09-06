@@ -17,6 +17,7 @@ const TILES: Tile[] = [
   { to: '/bingo-dash',            emoji: '🎯', title: 'Player Board',  sub: 'Join a team and start playing', primary: true },
   { to: '/bingo-dash/admin',      emoji: '⚙️', title: 'Admin Panel',   sub: 'Boards, cards, teams, scoring' },
   { to: '/bingo-dash/projector',  emoji: '📺', title: 'Projector',     sub: 'Live scoreboard for the room' },
+  { to: '/bingo-dash/sample',     emoji: '🎬', title: 'Try a Demo',    sub: 'Play a sandbox round — nothing is saved' },
   { to: '/bingo-dash/slides',     emoji: '🎬', title: 'Event Slides',  sub: 'Briefing, groupings, awards' },
   { to: '/bingo-dash/crew',       emoji: '👥', title: 'Crew Passes',   sub: 'Bring co-trainers into your event' },
   { to: '/bingo-dash/events',     emoji: '🤝', title: 'Shared Events', sub: 'Run a day with another trainer' },
