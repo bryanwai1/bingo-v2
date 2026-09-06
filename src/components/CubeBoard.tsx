@@ -122,9 +122,11 @@ export function CubeBoard({
               style={{
                 transform: faceTransform(f, size),
                 backfaceVisibility: 'hidden',
-                background: 'rgba(8,18,18,0.96)',
-                border: `2px solid ${tiles ? faceColor(f) + '77' : 'rgba(255,255,255,0.10)'}`,
-                boxShadow: tiles ? `0 0 50px ${faceColor(f)}44, inset 0 0 60px rgba(0,0,0,.5)` : 'inset 0 0 70px rgba(0,0,0,.62)',
+                background: tiles ? 'rgba(8,18,18,0.96)' : 'rgba(4,10,10,0.99)',
+                border: tiles ? `2px solid ${faceColor(f)}77` : '1px solid rgba(255,255,255,0.06)',
+                boxShadow: tiles
+                  ? `0 0 50px ${faceColor(f)}44, inset 0 0 60px rgba(0,0,0,.5)`
+                  : 'inset 0 0 90px rgba(0,0,0,.85)',
               }}
             >
               {tiles && showLabels && (() => {
