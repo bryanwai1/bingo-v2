@@ -2,7 +2,8 @@ import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 're
 import { Link } from 'react-router-dom'
 import { QRCodeSVG } from 'qrcode.react'
 import { supabase } from '../lib/supabase'
-import { fetchBoardTasks } from '../lib/boardCards'
+import { fetchBoardTasks, tasksForFace } from '../lib/boardCards'
+import { activeFaces, faceName, faceColor, normaliseFaceCount } from '../lib/cubeFaces'
 import { buildBingoSlots, completedBingoLines } from '../lib/bingoLines'
 import { useSampleRemote, makeRemoteCode, type RemoteCommand, type RemoteState, type SampleView, type DetailStep } from '../hooks/useSampleRemote'
 import { useBingoTaskPages } from '../hooks/useBingoTaskPages'
@@ -86,9 +87,12 @@ function DemoBar({
   showQuickWin,
   onRemote,
   remoteActive,
+  onTryIt,
   view,
   onToggleView,
   showViewToggle,
+  backHref,
+  backLabel,
 }: {
   sections: BingoSection[]
   selectedId: string | null
@@ -99,9 +103,12 @@ function DemoBar({
   showQuickWin: boolean
   onRemote: () => void
   remoteActive: boolean
+  onTryIt: () => void
   view: SampleView
   onToggleView: () => void
   showViewToggle: boolean
+  backHref: string
+  backLabel: string
 }) {
   return (
     <div className="sticky top-0 z-40 w-full bg-gray-950/95 backdrop-blur border-b border-purple-500/30">
@@ -153,6 +160,13 @@ function DemoBar({
             >
               📡<span className="hidden sm:inline"> {remoteActive ? 'Paired' : 'Remote'}</span>
             </button>
+            <button
+              onClick={onTryIt}
+              title="Let the audience try the game on their own phones"
+              className="flex-shrink-0 px-2.5 py-2 rounded-lg bg-white/10 text-gray-200 border border-white/15 text-xs font-black hover:bg-white/20 transition-colors whitespace-nowrap"
+            >
+              📱<span className="hidden sm:inline"> Try it yourself</span>
+            </button>
             {showQuickWin && (
               <button
                 onClick={onQuickWin}
@@ -170,11 +184,11 @@ function DemoBar({
               ↺<span className="hidden sm:inline"> Reset</span>
             </button>
             <Link
-              to="/"
-              title="Back to Game Hub"
+              to={backHref}
+              title={backLabel}
               className="flex-shrink-0 px-2.5 py-2 rounded-lg bg-white/10 text-gray-200 border border-white/15 text-xs font-bold hover:bg-white/20 transition-colors whitespace-nowrap"
             >
-              ←<span className="hidden sm:inline"> Hub</span>
+              ←<span className="hidden sm:inline"> {backLabel}</span>
             </Link>
           </div>
         </div>
@@ -498,14 +512,21 @@ function BoardScreen({
   const boardNoteEvery = section?.board_note_every ?? 0
   const tileDisplay = normalizeTileDisplay(section?.tile_display)
 
+  // Which cube face this player is looking at — matches the real player view
+  // (Front/Right/Back/Left/Top/Bottom); a one-face board never shows the tabs.
+  const [face, setFace] = useState(0)
+  const faceCount = normaliseFaceCount(section?.face_count)
+  const visibleTasks = faceCount > 1 ? tasksForFace(gridTasks, face) : gridTasks
+
   const getStatus = (taskId: string): TileStatus => {
     const st = scanState[taskId]
     if (!st) return 'locked'
     return st === 'completed' ? 'completed' : 'scanned'
   }
 
-  const completedCount = gridTasks.filter(t => scanState[t.id] === 'completed').length
-  const slots = buildSlots(gridTasks)
+  const gridTaskIds = new Set(visibleTasks.map(t => t.id))
+  const completedCount = gridTasks.filter(t => scanState[t.id] === 'completed' && gridTaskIds.has(t.id)).length
+  const slots = buildSlots(visibleTasks)
 
   const completedLineIndices = BINGO_LINES.reduce((acc, line, i) => {
     const allDone = line.every(slotIdx => {
@@ -562,7 +583,7 @@ function BoardScreen({
             <p className="text-purple-400 text-[10px] font-black uppercase tracking-widest">Bingo Dash</p>
             <h1 className="text-white text-xl font-black tracking-tight leading-tight">{teamName}</h1>
             <div className="flex items-center gap-2 mt-0.5">
-              <span className="text-green-400 text-xs font-bold">{completedCount}/{gridTasks.length} completed</span>
+              <span className="text-green-400 text-xs font-bold">{completedCount}/{visibleTasks.length} completed</span>
               {lettersEarned && (
                 <span className="text-purple-300 text-xs font-black tracking-widest">{lettersEarned}!</span>
               )}
@@ -601,7 +622,34 @@ function BoardScreen({
 
       <main className="relative z-10 px-3 pb-8">
         <div className="max-w-md mx-auto">
-          {gridTasks.length === 0 ? (
+          {/* Face tabs. Only rendered on a cube board, so a normal game is
+              visually unchanged — mirrors the real player view exactly. */}
+          {faceCount > 1 && (
+            <div className="flex gap-1.5 mb-3 flex-wrap justify-center">
+              {activeFaces(faceCount).map(f => {
+                const on = face === f
+                const ft = tasksForFace(gridTasks, f)
+                const doneOnFace = ft.filter(t => getStatus(t.id) === 'completed').length
+                return (
+                  <button
+                    key={f}
+                    onClick={() => setFace(f)}
+                    className="px-3 py-1.5 rounded-xl text-xs font-black transition-all active:scale-95"
+                    style={on
+                      ? { background: faceColor(f), color: '#fff' }
+                      : { background: 'rgba(255,255,255,0.06)', color: 'rgba(255,255,255,0.55)', border: '1px solid rgba(255,255,255,0.12)' }}
+                  >
+                    {faceName(f)}
+                    <span className={on ? 'text-white/70 ml-1.5' : 'text-white/35 ml-1.5'}>
+                      {doneOnFace}/{ft.length}
+                    </span>
+                  </button>
+                )
+              })}
+            </div>
+          )}
+
+          {visibleTasks.length === 0 ? (
             <div className="text-center py-20 text-gray-500">
               <div className="text-4xl mb-3">📋</div>
               <p className="font-bold">No grid set up on this board yet</p>
@@ -675,6 +723,7 @@ export type SampleTaskDetailHandle = {
   prevPage: () => void
   fillMarshal: () => void
   submitComplete: () => void
+  scroll: (direction: 'up' | 'down') => void
 }
 
 const SampleTaskDetail = forwardRef<SampleTaskDetailHandle, {
@@ -702,6 +751,7 @@ const SampleTaskDetail = forwardRef<SampleTaskDetailHandle, {
   const [photoSubmitted, setPhotoSubmitted] = useState(false)
   const [answerInputs, setAnswerInputs] = useState<string[]>([])
   const letterRefs = useRef<(HTMLInputElement | null)[][]>([])
+  const scrollRef = useRef<HTMLDivElement | null>(null)
 
   const answerRows = task.task_type === 'answer' && task.answer_text
     ? task.answer_text.split('\n').map(r => r.trim()).filter(Boolean)
@@ -750,6 +800,7 @@ const SampleTaskDetail = forwardRef<SampleTaskDetailHandle, {
     prevPage: () => setCurrentPage(p => Math.max(0, p - 1)),
     fillMarshal: () => { setMarshalInput(marshalPassword); setMarshalError('') },
     submitComplete: () => doComplete(),
+    scroll: direction => scrollRef.current?.scrollBy({ top: direction === 'down' ? 400 : -400, behavior: 'smooth' }),
   }))
 
   // Report the current step up so the controller renders the right buttons.
@@ -798,6 +849,7 @@ const SampleTaskDetail = forwardRef<SampleTaskDetailHandle, {
   // ── Main view ──
   return (
     <div
+      ref={scrollRef}
       className="fixed inset-0 z-50 overflow-y-auto"
       style={{ backgroundColor: `color-mix(in srgb, ${task.hex_code} 50%, #0a0a0a)` }}
     >
@@ -1140,6 +1192,11 @@ export function BingoDashSample() {
 }
 
 function SampleProjector() {
+  // `?board=<sectionId>` lets the admin launch the demo pre-scoped to a
+  // specific event's board (from the Run Event panel); when present it also
+  // swaps the "← Hub" link for a way back to that event's admin page.
+  const boardParam = new URLSearchParams(window.location.search).get('board')
+
   const [sections, setSections] = useState<BingoSection[]>([])
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [gridTasks, setGridTasks] = useState<BingoTask[]>([])
@@ -1157,6 +1214,7 @@ function SampleProjector() {
   // channel; a paired phone drives the state below via commands.
   const [remoteCode, setRemoteCode] = useState<string | null>(null)
   const [showPair, setShowPair] = useState(false)
+  const [showTryIt, setShowTryIt] = useState(false)
   // Live step of the open task detail, reported up so the phone shows the right
   // buttons (Start Challenge → pages → marshal password → Complete).
   const [detailStep, setDetailStep] = useState<DetailStep | null>(null)
@@ -1175,10 +1233,14 @@ function SampleProjector() {
       const list = (secs ?? []) as BingoSection[]
       setSections(list)
       const active = settings?.active_section_id
-      const initial = list.find(s => s.id === active)?.id ?? list[0]?.id ?? null
+      const initial = (boardParam && list.find(s => s.id === boardParam)?.id)
+        ?? list.find(s => s.id === active)?.id
+        ?? list[0]?.id
+        ?? null
       setSelectedId(initial)
       setLoading(false)
     })()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   // Load the grid whenever the selected board changes; reset the sandbox.
@@ -1255,6 +1317,10 @@ function SampleProjector() {
       case 'prevPage': detailRef.current?.prevPage(); break
       case 'fillMarshal': detailRef.current?.fillMarshal(); break
       case 'submitComplete': detailRef.current?.submitComplete(); break
+      case 'scroll':
+        if (openTask && detailRef.current) detailRef.current.scroll(c.direction)
+        else window.scrollBy({ top: c.direction === 'down' ? 400 : -400, behavior: 'smooth' })
+        break
       case 'requestState': sendState(snapshot()); break
     }
   }
@@ -1292,9 +1358,12 @@ function SampleProjector() {
         showQuickWin={!!teamName && gridTasks.length > 0}
         onRemote={enableRemote}
         remoteActive={!!remoteCode}
+        onTryIt={() => setShowTryIt(true)}
         view={view}
         onToggleView={() => setView(v => v === 'board' ? 'scoreboard' : 'board')}
         showViewToggle={sections.length > 0}
+        backHref={boardParam ? '/bingo-dash/admin' : '/'}
+        backLabel={boardParam ? 'Back to event' : 'Hub'}
       />
 
       {sections.length === 0 ? (
@@ -1346,6 +1415,10 @@ function SampleProjector() {
       {showPair && remoteCode && (
         <RemotePairModal code={remoteCode} onClose={() => setShowPair(false)} />
       )}
+
+      {showTryIt && (
+        <TryItModal boardId={selectedId} onClose={() => setShowTryIt(false)} />
+      )}
     </div>
   )
 }
@@ -1395,6 +1468,58 @@ function RemotePairModal({ code, onClose }: { code: string; onClose: () => void 
           </div>
           <p className="text-[11px] text-gray-400 text-center">
             Keep this device on the projector. The phone becomes your remote — every tap here shows up on the big screen.
+          </p>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── "Try it yourself" modal (audience-facing, one QR for everyone) ────────────
+// Unlike the Remote pairing above, this URL carries no ?remote= code — every
+// attendee who scans it opens their own independent, local-only sandbox
+// session (own join screen, own board, own BINGO) on their own phone. No two
+// phones share state, and nothing is written to Supabase.
+
+function TryItModal({ boardId, onClose }: { boardId: string | null; onClose: () => void }) {
+  const url = boardId
+    ? `${window.location.origin}/bingo-dash/sample?board=${boardId}`
+    : `${window.location.origin}/bingo-dash/sample`
+  const [copied, setCopied] = useState(false)
+  const copy = () => {
+    navigator.clipboard.writeText(url).then(() => {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    })
+  }
+  return (
+    <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[70] px-4" onClick={onClose}>
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm animate-bounce-in" onClick={e => e.stopPropagation()}>
+        <div className="px-6 py-5 border-b border-gray-100 flex items-center justify-between">
+          <div>
+            <h3 className="text-lg font-black text-gray-900">📱 Try it yourself</h3>
+            <p className="text-xs text-gray-400 mt-0.5">Everyone scans this to play on their own phone</p>
+          </div>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-700 text-2xl font-light">&times;</button>
+        </div>
+        <div className="p-6 flex flex-col items-center gap-4">
+          <div className="bg-white p-3 rounded-2xl border border-gray-100 shadow-sm">
+            <QRCodeSVG value={url} size={220} level="H" />
+          </div>
+          <div className="w-full flex items-center gap-2">
+            <div className="flex-1 px-3 py-2.5 bg-gray-50 rounded-lg text-[11px] font-mono text-gray-600 break-all select-all border border-gray-200">
+              {url}
+            </div>
+            <button onClick={copy}
+              className={`px-3 py-2.5 rounded-lg text-xs font-bold transition-all flex-shrink-0 ${
+                copied ? 'bg-green-100 text-green-700 border border-green-300' : 'bg-purple-600 text-white hover:bg-purple-700'
+              }`}>
+              {copied ? 'Copied!' : 'Copy'}
+            </button>
+          </div>
+          <p className="text-[11px] text-gray-400 text-center">
+            One link, any number of people — everyone gets their own private join screen and board. Nothing anyone
+            does here is saved, so it's safe to hand out to the whole room. Sample password <span className="font-black text-purple-500">{SAMPLE_TEAM_PASSWORD}</span> is pre-filled for them.
           </p>
         </div>
       </div>
@@ -1601,6 +1726,18 @@ function SampleController({ code }: { code: string }) {
               onClick={() => sendCommand({ action: 'setView', view: 'scoreboard' })}
               className={`py-2 rounded-lg text-sm font-black transition-colors ${view === 'scoreboard' ? 'bg-purple-500 text-white' : 'text-gray-400 hover:text-white'}`}>
               📊 Scoreboard
+            </button>
+          </div>
+
+          {/* Scroll the projector's screen up/down */}
+          <div className="grid grid-cols-2 gap-2">
+            <button onClick={() => sendCommand({ action: 'scroll', direction: 'up' })}
+              className="py-2.5 rounded-lg bg-white/10 text-gray-200 border border-white/15 text-sm font-black hover:bg-white/20 active:scale-95 transition-all">
+              ↑ Scroll up
+            </button>
+            <button onClick={() => sendCommand({ action: 'scroll', direction: 'down' })}
+              className="py-2.5 rounded-lg bg-white/10 text-gray-200 border border-white/15 text-sm font-black hover:bg-white/20 active:scale-95 transition-all">
+              ↓ Scroll down
             </button>
           </div>
 

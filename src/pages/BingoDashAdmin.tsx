@@ -2979,6 +2979,28 @@ export function BingoDashAdmin() {
           const btn = 'px-4 py-2 rounded-xl text-sm font-black transition-all active:scale-95'
           return (
             <RunEventPanel>
+              <div className="flex items-center justify-between gap-3 mb-6 px-4 py-3 rounded-xl border"
+                   style={{ background: 'var(--a-surface-2)', borderColor: 'var(--a-border)' }}>
+                <div>
+                  <p className="text-sm font-black a-text">🎬 Try a live demo</p>
+                  <p className="text-xs a-text-2 mt-0.5">Preview the board, phone remote and BINGO flow — nothing is saved.</p>
+                </div>
+                <a
+                  href={currentSectionId ? `/bingo-dash/sample?board=${currentSectionId}` : undefined}
+                  target="_blank" rel="noreferrer"
+                  aria-disabled={!currentSectionId}
+                  className={`px-4 py-2 rounded-xl text-sm font-black transition-all active:scale-95 flex-shrink-0 ${currentSectionId ? 'a-text' : ''}`}
+                  style={{
+                    background: currentSectionId ? 'var(--a-brand)' : 'var(--a-surface-3)',
+                    color: currentSectionId ? undefined : 'var(--a-text-2)',
+                    pointerEvents: currentSectionId ? 'auto' : 'none',
+                    opacity: currentSectionId ? 1 : 0.6,
+                  }}
+                >
+                  Launch demo
+                </a>
+              </div>
+
               <Step n={1} done={!!currentBoard}
                 title="Pick the board for this event"
                 blurb="Each board is one event: its own cards, teams and scoreboard."
