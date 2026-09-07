@@ -231,6 +231,8 @@ export interface BingoScan {
   // (roulette genre/topic, dealt cards, animals, the 7 pitch words). Empty for
   // every other card type. See lib/aitbCards.ts.
   words: string[]
+  // AI Team Building cards only: indexes of ticked mission steps.
+  steps_done: number[]
 }
 
 // A head-to-head duel on a contest card. The challenger scans the defender's QR
@@ -407,5 +409,17 @@ export interface AitbProgress {
   completed_at: string | null
   bonus: number
   words: string[]
+  created_at: string
+}
+
+// One word/photo option in an interactive module's draw pool (e.g. Nerf
+// Prompt Cups' Character pool, Roulette's Genre pool) — admin-editable from
+// the Card Library, keyed by AitbPoolKey (see lib/aitbActivities.ts).
+export interface AitbPoolItem {
+  id: string
+  pool_key: string
+  label: string
+  photo_url: string | null
+  sort_order: number
   created_at: string
 }

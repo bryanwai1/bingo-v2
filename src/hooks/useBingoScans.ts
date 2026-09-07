@@ -29,6 +29,23 @@ export function useBingoScans() {
     if (error) throw error
   }, [])
 
+  /** Interactive-module result (Nerf cups, roulette wheels, dealt cards) for
+   *  an AI Team Building card played standalone (not inside the bundle tile).
+   *  Written once by whichever phone completes the draw, read back by every
+   *  teammate through the bingo_scans realtime subscription. */
+  const saveWords = useCallback(async (scanId: string, words: string[]) => {
+    const { error } = await supabase.from('bingo_scans').update({ words }).eq('id', scanId)
+    if (error) throw error
+  }, [])
+
+  /** Persist the ticked-step set for a standalone AI Team Building card —
+   *  mirrors toggle_bundle_step's array-of-indexes shape, just written
+   *  directly since bingo_scans has no completion/status gate to guard. */
+  const saveSteps = useCallback(async (scanId: string, stepsDone: number[]) => {
+    const { error } = await supabase.from('bingo_scans').update({ steps_done: stepsDone }).eq('id', scanId)
+    if (error) throw error
+  }, [])
+
   /**
    * A non-leader member submits a tile. It goes PENDING — no points, nothing
    * on the host's screen — until the team leader approves. This is what stops
@@ -56,5 +73,5 @@ export function useBingoScans() {
     return {}
   }, [])
 
-  return { recordScan, toggleComplete, submitTile, approveTile }
+  return { recordScan, toggleComplete, submitTile, approveTile, saveWords, saveSteps }
 }

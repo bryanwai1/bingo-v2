@@ -413,6 +413,15 @@ body {
   animation: aitb-spark var(--dur, 0.9s) linear var(--delay, 0s) infinite;
 }
 
+/* Roulette wheel — gold halo behind the disc, pulsing while idle */
+@keyframes aitb-wheel-glow {
+  0%, 100% { box-shadow: 0 0 18px 4px #fbbf2466, 0 0 40px 14px #f9731633, inset 0 0 24px 6px #fde68a22; }
+  50%      { box-shadow: 0 0 26px 8px #fbbf24aa, 0 0 56px 20px #f9731655, inset 0 0 30px 10px #fde68a44; }
+}
+.aitb-wheel-glow {
+  animation: aitb-wheel-glow 2.2s ease-in-out infinite;
+}
+
 /* Briefing · Step 3: multiplier ladder rung pulses as that line lights up */
 @keyframes ladder-pulse {
   0%, 60%  { transform: scale(1); filter: brightness(0.85); }

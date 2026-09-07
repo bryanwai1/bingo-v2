@@ -10,6 +10,10 @@ import { useBingoTaskPages } from '../hooks/useBingoTaskPages'
 import { useBingoTaskPhotos } from '../hooks/useBingoTaskPhotos'
 import { useTaskLinks } from '../hooks/useTaskLinks'
 import { TaskLinkButtons } from '../components/TaskLinkButtons'
+import { DemoBundleCard } from '../components/DemoBundleCard'
+import { AitbMissionModule } from '../components/AitbMissionModule'
+import { BonusBar } from '../components/AitbBonusBar'
+import { aitbByName, aitbToolUrl, aitbToolCaption, AITB_POINTS } from '../lib/aitbActivities'
 import { InstructionPage } from '../components/InstructionPage'
 import { PageNavigator } from '../components/PageNavigator'
 import { SwipeablePages } from '../components/SwipeablePages'
@@ -753,6 +757,28 @@ const SampleTaskDetail = forwardRef<SampleTaskDetailHandle, {
   const letterRefs = useRef<(HTMLInputElement | null)[][]>([])
   const scrollRef = useRef<HTMLDivElement | null>(null)
 
+  // A standalone AITB card (not opened via the bundle tile) still carries the
+  // same interactive module — the demo has no per-team progress row for it,
+  // so the result just lives in this component's own state.
+  const aitbActivity = aitbByName(task.title)
+  const [aitbWords, setAitbWords] = useState<string[]>([])
+  const [aitbStepsDone, setAitbStepsDone] = useState<number[]>([])
+  // The demo has no check-in row to read a start time from, so the timer
+  // just starts whenever this card is first opened.
+  const [aitbStartedAt] = useState(() => Date.now())
+  const [now, setNow] = useState(Date.now())
+
+  useEffect(() => {
+    if (!aitbActivity || completed) return
+    const t = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(t)
+  }, [aitbActivity, completed])
+
+  const toggleAitbStep = (i: number) => {
+    if (completed) return
+    setAitbStepsDone(prev => (prev.includes(i) ? prev.filter(x => x !== i) : [...prev, i]))
+  }
+
   const answerRows = task.task_type === 'answer' && task.answer_text
     ? task.answer_text.split('\n').map(r => r.trim()).filter(Boolean)
     : []
@@ -846,6 +872,12 @@ const SampleTaskDetail = forwardRef<SampleTaskDetailHandle, {
     )
   }
 
+  // AITB cards carry the wheel/deal modules, which want the room a phone
+  // column doesn't have — widening just for these lets a projector (wide,
+  // landscape) show them at a useful size while a phone still gets the
+  // narrower column at its own breakpoint, purely from viewport width.
+  const containerMaxW = aitbActivity ? 'max-w-lg sm:max-w-2xl lg:max-w-4xl' : 'max-w-lg'
+
   // ── Main view ──
   return (
     <div
@@ -858,7 +890,7 @@ const SampleTaskDetail = forwardRef<SampleTaskDetailHandle, {
       <header className="px-6 py-5 text-white relative z-10 overflow-hidden">
         <div className="absolute inset-0" style={{ backgroundColor: task.hex_code, opacity: 0.35 }} />
         <div className="absolute inset-0 bg-black/30" />
-        <div className="max-w-lg mx-auto relative z-10 flex items-start justify-between gap-4">
+        <div className={`${containerMaxW} mx-auto relative z-10 flex items-start justify-between gap-4`}>
           <div className="flex items-start gap-3">
             <button
               onClick={onClose}
@@ -880,7 +912,7 @@ const SampleTaskDetail = forwardRef<SampleTaskDetailHandle, {
         </div>
       </header>
 
-      <main className="max-w-lg mx-auto px-6 py-8 relative z-10">
+      <main className={`${containerMaxW} mx-auto px-6 py-8 relative z-10`}>
         {/* Photo carousel */}
         {photos.length > 0 && (
           <div className="rounded-2xl overflow-hidden mb-6 shadow-xl animate-slide-up">
@@ -920,8 +952,27 @@ const SampleTaskDetail = forwardRef<SampleTaskDetailHandle, {
           </div>
         )}
 
-        {/* Instruction pointers */}
-        {pages.length > 0 ? (
+        {/* AI Team Building brief — a live bonus timer, the real description
+            + skill tag, then the module and a tickable mission checklist
+            instead of swipeable instruction pages. */}
+        {aitbActivity ? (
+          <>
+            <div className="flex items-center gap-2 mb-4">
+              <span className="px-2 py-1 rounded-lg text-xs font-black uppercase" style={{ background: `${aitbActivity.color}22`, color: aitbActivity.color }}>
+                {aitbActivity.difficulty}
+              </span>
+              {completed && (
+                <span className="px-2 py-1 rounded-lg text-xs font-black bg-emerald-400/20 text-emerald-300">✓ Completed</span>
+              )}
+            </div>
+            <BonusBar elapsedMs={completed ? 0 : now - aitbStartedAt} activity={aitbActivity} completed={completed} bankedBonus={0} />
+            <div className="rounded-2xl p-4 mb-6" style={{ background: 'rgba(255,255,255,0.05)', border: '2px solid rgba(255,255,255,0.1)' }}>
+              <h2 className="text-white font-black text-lg mb-2">{aitbActivity.tagline}</h2>
+              <p className="text-gray-300 text-sm leading-relaxed">{aitbActivity.description}</p>
+              <p className="text-gray-500 text-xs font-black uppercase tracking-wide mt-3">{aitbActivity.skillTag}</p>
+            </div>
+          </>
+        ) : pages.length > 0 ? (
           <SwipeablePages currentPage={currentPage} total={pages.length} onChange={setCurrentPage}>
             <InstructionPage page={pages[currentPage]} hexCode={task.hex_code} />
             <PageNavigator
@@ -936,6 +987,61 @@ const SampleTaskDetail = forwardRef<SampleTaskDetailHandle, {
           <div className="text-center py-12 text-gray-400">No instructions available for this challenge yet.</div>
         )}
 
+        {/* Interactive module (Nerf cups, roulette wheels, card deal, retro
+            tracker), a tickable mission checklist, and AI tool links — all
+            apply to every AITB activity, whether or not it carries a module. */}
+        {aitbActivity && (
+          <div className="mb-8 mt-8 animate-slide-up">
+            {aitbActivity.module && (
+              <AitbMissionModule activity={aitbActivity} savedWords={aitbWords}
+                disabled={completed} onSave={setAitbWords} progressId={`demo-standalone-${task.id}`} />
+            )}
+
+            <div className="text-xs font-black tracking-widest uppercase text-gray-400 mb-2">
+              ✅ Your mission — +{AITB_POINTS.step} pts per step
+            </div>
+            <div className="flex flex-col gap-2 mb-5">
+              {aitbActivity.steps.map((s, i) => {
+                const ticked = aitbStepsDone.includes(i)
+                return (
+                  <button key={i} onClick={() => toggleAitbStep(i)} disabled={completed}
+                    className="flex items-center gap-3 text-left rounded-2xl px-4 py-3 transition-all active:scale-[0.98]"
+                    style={{
+                      background: ticked ? `${aitbActivity.color}1e` : 'rgba(255,255,255,0.05)',
+                      border: `2px solid ${ticked ? aitbActivity.color : 'rgba(255,255,255,0.1)'}`,
+                      opacity: completed && !ticked ? 0.6 : 1,
+                    }}>
+                    <span className="text-3xl">{aitbActivity.stepEmojis[i]}</span>
+                    <span className={`flex-1 font-bold text-white ${ticked ? 'line-through opacity-70' : ''}`}>{s}</span>
+                    <span className="text-2xl">{ticked ? '✅' : i + 1}</span>
+                  </button>
+                )
+              })}
+            </div>
+
+            <div className="rounded-2xl p-3" style={{ background: 'rgba(255,255,255,0.04)', border: '2px solid rgba(255,255,255,0.1)' }}>
+              <div className="text-xs font-black tracking-widest uppercase text-gray-400 mb-2">🤖 Your AI tools — tap to open</div>
+              <div className="flex flex-wrap gap-2">
+                {aitbActivity.apps.map(a => {
+                  const url = aitbToolUrl(a)
+                  const caption = aitbToolCaption(a)
+                  const cls = "px-3 py-2 rounded-xl text-sm font-bold transition-transform active:scale-95"
+                  const style = { background: `${aitbActivity.color}18`, border: `1.5px solid ${aitbActivity.color}55`, color: aitbActivity.color }
+                  const content = (
+                    <>
+                      <span className="flex items-center gap-1">{a}{url && ' ↗'}</span>
+                      {caption && <span className="block text-[10px] font-bold opacity-70 normal-case">{caption}</span>}
+                    </>
+                  )
+                  return url
+                    ? <a key={a} href={url} target="_blank" rel="noopener noreferrer" className={cls} style={style}>{content}</a>
+                    : <span key={a} className={cls} style={style}>{content}</span>
+                })}
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Helpful links */}
         {links.length > 0 && (
           <div className="mt-8 animate-slide-up">
@@ -945,7 +1051,17 @@ const SampleTaskDetail = forwardRef<SampleTaskDetailHandle, {
 
         {/* Complete Activity */}
         <div className="mt-8 animate-slide-up">
-          {completed ? (
+          {task.is_bundle ? (
+            <>
+              <DemoBundleCard task={task} marshalPassword={marshalPassword} />
+              <button
+                onClick={onClose}
+                className="mt-4 w-full py-3 rounded-2xl text-white/70 font-bold border border-white/15 hover:bg-white/5 transition-colors"
+              >
+                ← Back to Board
+              </button>
+            </>
+          ) : completed ? (
             <div className="text-center">
               <div className="p-6 rounded-2xl border-2" style={{ backgroundColor: `${task.hex_code}25`, borderColor: `${task.hex_code}66` }}>
                 <div className="text-4xl mb-2">🎉</div>
@@ -1264,6 +1380,16 @@ function SampleProjector() {
     setScanState({})
     setOpenTask(null)
     setTeamName(null)
+    // Roulette-style modules (spin wheels) track their spin count in
+    // localStorage, keyed per activity — "nothing is saved" for the demo
+    // otherwise, but that one exception needs clearing explicitly or a
+    // reset demo would still show wheels locked from the last run.
+    try {
+      for (let i = localStorage.length - 1; i >= 0; i--) {
+        const key = localStorage.key(i)
+        if (key?.startsWith('aitb_spins_')) localStorage.removeItem(key)
+      }
+    } catch { /* private mode — nothing to clear */ }
   }
 
   const handleOpenTask = (task: BingoTask) => {

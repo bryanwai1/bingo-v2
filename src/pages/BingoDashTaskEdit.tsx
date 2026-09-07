@@ -10,15 +10,26 @@ import { InstructionPage } from '../components/InstructionPage'
 import { TaskLinksEditor } from '../components/TaskLinksEditor'
 import { TaskLinkButtons } from '../components/TaskLinkButtons'
 import { ParticleBackground } from '../components/ParticleBackground'
+import { AitbPoolEditor } from '../components/AitbPoolEditor'
+import { AitbMissionModule } from '../components/AitbMissionModule'
+import { BonusBar } from '../components/AitbBonusBar'
 import { useBingoAuth } from '../hooks/useBingoAuth'
+import { aitbByName, AITB_MODULE_SLOTS, AITB_POINTS, aitbToolUrl, aitbToolCaption } from '../lib/aitbActivities'
 import type { BingoTask, BingoTaskPage } from '../types/database'
 
 export function BingoDashTaskEdit() {
   const { taskId } = useParams<{ taskId: string }>()
-  const { workingOwnerValue } = useBingoAuth()
+  const { workingOwnerValue, isOwner } = useBingoAuth()
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
-  const backPath = searchParams.get('from') === 'snake-ladder' ? '/snake-ladder/admin' : '/bingo-dash/admin'
+  // ?from= records where the editor was opened from, so Back returns there
+  // rather than dropping the user on the admin's default Run Event tab.
+  const from = searchParams.get('from')
+  const ADMIN_TABS = ['run', 'board', 'library', 'teams', 'submissions', 'settings']
+  const backPath =
+    from === 'snake-ladder' ? '/snake-ladder/admin'
+    : from && ADMIN_TABS.includes(from) ? `/bingo-dash/admin?tab=${from}`
+    : '/bingo-dash/admin?tab=library'
   const [task, setTask] = useState<BingoTask | null>(null)
   const [editingTitle, setEditingTitle] = useState(false)
   const [titleValue, setTitleValue] = useState('')
@@ -37,6 +48,12 @@ export function BingoDashTaskEdit() {
   const [mapsUrl, setMapsUrl] = useState('')
   const [mapsLabel, setMapsLabel] = useState('')
   const [mapsUrlSaving, setMapsUrlSaving] = useState(false)
+  // AITB preview state — ephemeral, mirrors the demo's "nothing is saved"
+  // approach, so previewing never writes into real team progress.
+  const [previewAitbWords, setPreviewAitbWords] = useState<string[]>([])
+  const [previewStepsDone, setPreviewStepsDone] = useState<number[]>([])
+  const [previewStartedAt] = useState(() => Date.now())
+  const [previewNow, setPreviewNow] = useState(Date.now())
   const { pages, createPage, updatePage, deletePage, reorderPages } = useBingoTaskPages(taskId)
   const { photos, reload: reloadPhotos } = useBingoTaskPhotos(taskId)
   const { links } = useTaskLinks(taskId, 'bingo_task_links')
@@ -56,6 +73,14 @@ export function BingoDashTaskEdit() {
       }
     })
   }, [taskId])
+
+  const previewActivity = task ? aitbByName(task.title) : undefined
+
+  useEffect(() => {
+    if (!previewMode || !previewActivity) return
+    const t = setInterval(() => setPreviewNow(Date.now()), 1000)
+    return () => clearInterval(t)
+  }, [previewMode, previewActivity])
 
   const handleTitleSave = async () => {
     if (!task || !titleValue.trim() || titleValue.trim() === task.title) {
@@ -137,9 +162,10 @@ export function BingoDashTaskEdit() {
     )
   }
 
-  // Hub model: cards owned by another account are copy-on-use only — never
-  // editable here, even for the owner (RLS blocks sub writes anyway).
-  const isMineTask = (task.owner_id ?? null) === workingOwnerValue
+  // Hub model: cards owned by another account are copy-on-use only for subs.
+  // The owner account has full write access (bingo_can_write / is_bingo_owner
+  // allows it in RLS), so it edits any card in the shared library directly.
+  const isMineTask = isOwner || (task.owner_id ?? null) === workingOwnerValue
   if (!isMineTask) {
     return (
       <div className="min-h-screen bg-gray-950 flex items-center justify-center px-6">
@@ -179,14 +205,14 @@ export function BingoDashTaskEdit() {
         <header className="px-6 py-5 text-white relative z-10 overflow-hidden">
           <div className="absolute inset-0" style={{ backgroundColor: task.hex_code, opacity: 0.35 }} />
           <div className="absolute inset-0 bg-black/30" />
-          <div className="max-w-lg mx-auto relative z-10">
+          <div className={`${previewActivity ? 'max-w-lg sm:max-w-2xl lg:max-w-4xl' : 'max-w-lg'} mx-auto relative z-10`}>
             <p className="text-sm font-bold opacity-80 uppercase tracking-wider">Team: Preview Team</p>
             <h1 className="text-3xl font-black tracking-tight">{task.title}</h1>
             <div className="text-sm opacity-70 mt-1 uppercase tracking-wider">{task.color} Challenge</div>
           </div>
         </header>
 
-        <main className="max-w-lg mx-auto px-6 py-8 relative z-10">
+        <main className={`${previewActivity ? 'max-w-lg sm:max-w-2xl lg:max-w-4xl' : 'max-w-lg'} mx-auto px-6 py-8 relative z-10`}>
           {/* Photo carousel — mirrors the participant page */}
           {photos.length > 0 && (
             <div className="rounded-2xl overflow-hidden mb-6 shadow-xl animate-slide-up">
@@ -227,7 +253,72 @@ export function BingoDashTaskEdit() {
             </div>
           )}
 
-          {pages.length > 0 ? (
+          {previewActivity ? (
+            <>
+              <div className="flex items-center gap-2 mb-4">
+                <span className="px-2 py-1 rounded-lg text-xs font-black uppercase" style={{ background: `${previewActivity.color}22`, color: previewActivity.color }}>
+                  {previewActivity.difficulty}
+                </span>
+              </div>
+              <BonusBar elapsedMs={previewNow - previewStartedAt} activity={previewActivity} completed={false} bankedBonus={0} />
+              <div className="rounded-2xl p-4 mb-6" style={{ background: 'rgba(255,255,255,0.05)', border: '2px solid rgba(255,255,255,0.1)' }}>
+                <h2 className="text-white font-black text-lg mb-2">{previewActivity.tagline}</h2>
+                <p className="text-gray-300 text-sm leading-relaxed">{previewActivity.description}</p>
+                <p className="text-gray-500 text-xs font-black uppercase tracking-wide mt-3">{previewActivity.skillTag}</p>
+              </div>
+
+              {previewActivity.module && (
+                <div className="mb-6">
+                  <AitbMissionModule activity={previewActivity} savedWords={previewAitbWords}
+                    disabled={false} onSave={setPreviewAitbWords} progressId="admin-preview" />
+                </div>
+              )}
+
+              <div className="text-xs font-black tracking-widest uppercase text-gray-400 mb-2">
+                ✅ Your mission — +{AITB_POINTS.step} pts per step
+              </div>
+              <div className="flex flex-col gap-2 mb-5">
+                {previewActivity.steps.map((s, i) => {
+                  const ticked = previewStepsDone.includes(i)
+                  return (
+                    <button key={i}
+                      onClick={() => setPreviewStepsDone(prev => (prev.includes(i) ? prev.filter(x => x !== i) : [...prev, i]))}
+                      className="flex items-center gap-3 text-left rounded-2xl px-4 py-3 transition-all active:scale-[0.98]"
+                      style={{
+                        background: ticked ? `${previewActivity.color}1e` : 'rgba(255,255,255,0.05)',
+                        border: `2px solid ${ticked ? previewActivity.color : 'rgba(255,255,255,0.1)'}`,
+                      }}>
+                      <span className="text-3xl">{previewActivity.stepEmojis[i]}</span>
+                      <span className={`flex-1 font-bold text-white ${ticked ? 'line-through opacity-70' : ''}`}>{s}</span>
+                      <span className="text-2xl">{ticked ? '✅' : i + 1}</span>
+                    </button>
+                  )
+                })}
+              </div>
+
+              <div className="rounded-2xl p-3 mb-6" style={{ background: 'rgba(255,255,255,0.04)', border: '2px solid rgba(255,255,255,0.1)' }}>
+                <div className="text-xs font-black tracking-widest uppercase text-gray-400 mb-2">🤖 Your AI tools — tap to open</div>
+                <div className="flex flex-wrap gap-2">
+                  {previewActivity.apps.map(a => {
+                    const url = aitbToolUrl(a)
+                    const caption = aitbToolCaption(a)
+                    const cls = "px-3 py-2 rounded-xl text-sm font-bold transition-transform active:scale-95"
+                    const style = { background: `${previewActivity.color}18`, border: `1.5px solid ${previewActivity.color}55`, color: previewActivity.color }
+                    const content = (
+                      <>
+                        <span className="flex items-center gap-1">{a}{url && ' ↗'}</span>
+                        {caption && <span className="block text-[10px] font-bold opacity-70 normal-case">{caption}</span>}
+                      </>
+                    )
+                    return url
+                      ? <a key={a} href={url} target="_blank" rel="noopener noreferrer" className={cls} style={style}>{content}</a>
+                      : <span key={a} className={cls} style={style}>{content}</span>
+                  })}
+                </div>
+              </div>
+              <p className="text-center text-xs text-gray-500 font-bold">🧪 Preview only — nothing here is saved.</p>
+            </>
+          ) : pages.length > 0 ? (
             <>
               <InstructionPage page={pages[previewPage]} hexCode={task.hex_code} />
               {pages.length > 1 && (
@@ -264,7 +355,7 @@ export function BingoDashTaskEdit() {
           )}
 
           {/* Static complete button preview */}
-          <div className="mt-8">
+          {!previewActivity && <div className="mt-8">
             <button
               disabled
               className="w-full py-4 rounded-2xl text-white text-xl font-black uppercase tracking-wider opacity-50 cursor-default"
@@ -272,7 +363,7 @@ export function BingoDashTaskEdit() {
             >
               Complete Challenge ✅
             </button>
-          </div>
+          </div>}
         </main>
       </div>
     )
@@ -574,6 +665,28 @@ export function BingoDashTaskEdit() {
             description='Shown to participants below the instructions as "Use these links to complete your tasks". Each link opens in a new tab.'
           />
         </div>
+
+        {/* AI Team Building draw pools — only for cards matched by name to an
+            AITB activity that carries an interactive module (Nerf cups,
+            roulette, the card deal). Every option a team can draw is editable
+            here, including its photo, live for every player immediately. */}
+        {(() => {
+          const activity = aitbByName(task.title)
+          if (!activity?.module) return null
+          const slots = AITB_MODULE_SLOTS[activity.module]
+          if (slots.length === 0) return null
+          return (
+            <div className="mt-6">
+              <h2 className="text-lg font-bold text-gray-900">🎲 AI Team Building draw pools</h2>
+              <p className="text-xs text-gray-400 mt-1">
+                This card runs the {activity.name} interactive module. Manage what each slot can draw below.
+              </p>
+              {slots.map(s => (
+                <AitbPoolEditor key={s.pool} poolKey={s.pool} emoji={s.emoji} label={s.label} />
+              ))}
+            </div>
+          )
+        })()}
       </main>
     </div>
   )

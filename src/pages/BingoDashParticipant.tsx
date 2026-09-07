@@ -14,6 +14,9 @@ import { ParticleBackground } from '../components/ParticleBackground'
 import { TimeUpAlarm } from '../components/TimeUpAlarm'
 import { ContestCard } from '../components/ContestCard'
 import { BundleCard } from '../components/BundleCard'
+import { AitbMissionModule } from '../components/AitbMissionModule'
+import { BonusBar } from '../components/AitbBonusBar'
+import { aitbByName, aitbToolUrl, aitbToolCaption, AITB_POINTS } from '../lib/aitbActivities'
 import { normalizeUrl } from '../lib/normalizeUrl'
 import type { BingoScan, BingoTask } from '../types/database'
 
@@ -73,14 +76,15 @@ export function BingoDashParticipant() {
   const { pages, loading: pagesLoading } = useBingoTaskPages(taskId)
   const { photos, loading: photosLoading } = useBingoTaskPhotos(taskId)
   const { links } = useTaskLinks(taskId, 'bingo_task_links')
-  const { recordScan, toggleComplete, submitTile } = useBingoScans()
+  const { recordScan, toggleComplete, submitTile, saveWords, saveSteps } = useBingoScans()
   const memberId = localStorage.getItem('bingo-dash-member-id')
   const isLeader = localStorage.getItem('bingo-dash-member-role') === 'leader'
   const [submittedForApproval, setSubmittedForApproval] = useState(false)
 
   const [task, setTask] = useState<BingoTask | null>(null)
   const [showSplash, setShowSplash] = useState(!isSnakeLadder)
-  const [scanRecord, setScanRecord] = useState<{ id: string; completed: boolean; words: string[] } | null>(null)
+  const [scanRecord, setScanRecord] = useState<{ id: string; completed: boolean; words: string[]; stepsDone: number[]; scannedAt: string } | null>(null)
+  const [now, setNow] = useState(Date.now())
   const [scanRecorded, setScanRecorded] = useState(false)
   const [currentPage, setCurrentPage] = useState(0)
   const [completing, setCompleting] = useState(false)
@@ -174,10 +178,10 @@ export function BingoDashParticipant() {
   // An imported AITB activity gets its own mission brief (hero, steps, props,
   // interactive draw, tool buttons) instead of the generic instruction pages.
   // Completion is unchanged: marshal password → toggleComplete → scoreboard.
-  // AITB card types removed — bingo-only build.
-  // AITB card types removed — bingo-only build. Typed loose so the
-  // remaining `aitbActivity && ...` branches compile and never render.
-  const aitbActivity = null as { emoji?: string; act?: number; mins?: number; tagline?: string } | null
+  // Matched by title against the AITB activity table (aitbByName), same as
+  // the bundle tile — a card is "an AITB card" purely by carrying one of
+  // those names, whether it's played standalone or inside the bundle.
+  const aitbActivity = task ? aitbByName(task.title) : undefined
 
   // The draw / typed words belong to the TEAM, not the phone that made them —
   // a roulette spin on one handset has to reach the teammate holding the other.
@@ -196,7 +200,7 @@ export function BingoDashParticipant() {
         { event: 'UPDATE', schema: 'public', table: 'bingo_scans', filter: `id=eq.${scanRecord.id}` },
         ({ new: updated }) => {
           const row = updated as BingoScan
-          setScanRecord(prev => (prev ? { ...prev, completed: row.completed, words: row.words ?? [] } : prev))
+          setScanRecord(prev => (prev ? { ...prev, completed: row.completed, words: row.words ?? [], stepsDone: row.steps_done ?? [] } : prev))
         }
       )
       .subscribe()
@@ -228,10 +232,28 @@ export function BingoDashParticipant() {
     if (team && taskId && !scanRecorded) {
       recordScan(team.id, taskId).then((scan) => {
         setScanRecorded(true)
-        if (scan) setScanRecord({ id: scan.id, completed: scan.completed, words: scan.words ?? [] })
+        if (scan) setScanRecord({
+          id: scan.id, completed: scan.completed, words: scan.words ?? [],
+          stepsDone: scan.steps_done ?? [], scannedAt: scan.scanned_at,
+        })
       })
     }
   }, [isSnakeLadder, team, taskId, scanRecorded, recordScan])
+
+  // The AITB bonus ladder counts up live, same as the bundle mission.
+  useEffect(() => {
+    if (!aitbActivity || !scanRecord || scanRecord.completed) return
+    const t = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(t)
+  }, [aitbActivity, scanRecord?.completed, scanRecord?.id])
+
+  const toggleAitbStep = (i: number) => {
+    if (!scanRecord || scanRecord.completed) return
+    const on = !scanRecord.stepsDone.includes(i)
+    const next = on ? [...scanRecord.stepsDone, i] : scanRecord.stepsDone.filter(x => x !== i)
+    setScanRecord({ ...scanRecord, stepsDone: next })
+    void saveSteps(scanRecord.id, next)
+  }
 
   // Auto-complete when answer-input card answer is correct
   useEffect(() => {
@@ -389,6 +411,12 @@ export function BingoDashParticipant() {
   }
 
   // ── Main view ────────────────────────────────────────────────────────
+  // AITB cards carry the wheel/deal modules, which want the room a phone
+  // column doesn't have — widening just for these lets a projector (wide,
+  // landscape) show them at a useful size while a phone still gets the
+  // narrower column at its own breakpoint, purely from viewport width.
+  const containerMaxW = aitbActivity ? 'max-w-lg sm:max-w-2xl lg:max-w-4xl' : 'max-w-lg'
+
   return (
     <>
     <div
@@ -401,7 +429,7 @@ export function BingoDashParticipant() {
       <header className="px-6 py-5 text-white relative z-10 overflow-hidden">
         <div className="absolute inset-0" style={{ backgroundColor: task.hex_code, opacity: 0.35 }} />
         <div className="absolute inset-0 bg-black/30" />
-        <div className="max-w-lg mx-auto relative z-10 flex items-start justify-between gap-4">
+        <div className={`${containerMaxW} mx-auto relative z-10 flex items-start justify-between gap-4`}>
           <div className="flex items-start gap-3">
             <button
               onClick={() => navigate(backPath)}
@@ -455,7 +483,7 @@ export function BingoDashParticipant() {
         </div>
       </header>
 
-      <main className="max-w-lg mx-auto px-6 py-8 relative z-10">
+      <main className={`${containerMaxW} mx-auto px-6 py-8 relative z-10`}>
         {/* Photo carousel */}
         {photos.length > 0 && (
           <div className="rounded-2xl overflow-hidden mb-6 shadow-xl animate-slide-up">
@@ -510,9 +538,32 @@ export function BingoDashParticipant() {
           </div>
         )}
 
-        {/* AI Team Building brief — replaces the generic pages, which for these
-            cards only hold a copy of the same steps. */}
-        {pages.length > 0 ? (
+        {/* AI Team Building brief — replaces the generic pages entirely: a
+            live bonus timer, the real description + skill tag, then the
+            module and a tickable mission checklist instead of swipeable
+            instruction pages. */}
+        {aitbActivity && scanRecord ? (
+          <>
+            <div className="flex items-center gap-2 mb-4">
+              <span className="px-2 py-1 rounded-lg text-xs font-black uppercase" style={{ background: `${aitbActivity.color}22`, color: aitbActivity.color }}>
+                {aitbActivity.difficulty}
+              </span>
+              {scanRecord.completed && (
+                <span className="px-2 py-1 rounded-lg text-xs font-black bg-emerald-400/20 text-emerald-300">
+                  ✓ Completed
+                </span>
+              )}
+            </div>
+            <BonusBar
+              elapsedMs={scanRecord.completed ? 0 : now - new Date(scanRecord.scannedAt).getTime()}
+              activity={aitbActivity} completed={scanRecord.completed} bankedBonus={0} />
+            <div className="rounded-2xl p-4 mb-6" style={{ background: 'rgba(255,255,255,0.05)', border: '2px solid rgba(255,255,255,0.1)' }}>
+              <h2 className="text-white font-black text-lg mb-2">{aitbActivity.tagline}</h2>
+              <p className="text-gray-300 text-sm leading-relaxed">{aitbActivity.description}</p>
+              <p className="text-gray-500 text-xs font-black uppercase tracking-wide mt-3">{aitbActivity.skillTag}</p>
+            </div>
+          </>
+        ) : pages.length > 0 ? (
           <SwipeablePages
             currentPage={currentPage}
             total={pages.length}
@@ -530,6 +581,69 @@ export function BingoDashParticipant() {
         ) : (
           <div className="text-center py-12 text-gray-400">
             No instructions available for this challenge yet.
+          </div>
+        )}
+
+        {/* AI Team Building interactive module (Nerf cups, roulette wheels,
+            card deal, retro tracker) — standalone card, so it saves into this
+            team's bingo_scans row rather than a bundle's aitb_progress row —
+            then the tickable mission checklist and AI tool links, which apply
+            to every AITB activity whether or not it carries a module. */}
+        {aitbActivity && scanRecord && (
+          <div className="mb-8 mt-8 animate-slide-up">
+            {aitbActivity.module && (
+              <AitbMissionModule activity={aitbActivity} savedWords={scanRecord.words}
+                disabled={scanRecord.completed}
+                onSave={words => {
+                  setScanRecord(prev => (prev ? { ...prev, words } : prev))
+                  void saveWords(scanRecord.id, words)
+                }}
+                progressId={scanRecord.id} />
+            )}
+
+            <div className="text-xs font-black tracking-widest uppercase text-gray-400 mb-2">
+              ✅ Your mission — +{AITB_POINTS.step} pts per step
+            </div>
+            <div className="flex flex-col gap-2 mb-5">
+              {aitbActivity.steps.map((s, i) => {
+                const ticked = scanRecord.stepsDone.includes(i)
+                const locked = scanRecord.completed
+                return (
+                  <button key={i} onClick={() => toggleAitbStep(i)} disabled={locked}
+                    className="flex items-center gap-3 text-left rounded-2xl px-4 py-3 transition-all active:scale-[0.98]"
+                    style={{
+                      background: ticked ? `${aitbActivity.color}1e` : 'rgba(255,255,255,0.05)',
+                      border: `2px solid ${ticked ? aitbActivity.color : 'rgba(255,255,255,0.1)'}`,
+                      opacity: locked && !ticked ? 0.6 : 1,
+                    }}>
+                    <span className="text-3xl">{aitbActivity.stepEmojis[i]}</span>
+                    <span className={`flex-1 font-bold text-white ${ticked ? 'line-through opacity-70' : ''}`}>{s}</span>
+                    <span className="text-2xl">{ticked ? '✅' : i + 1}</span>
+                  </button>
+                )
+              })}
+            </div>
+
+            <div className="rounded-2xl p-3" style={{ background: 'rgba(255,255,255,0.04)', border: '2px solid rgba(255,255,255,0.1)' }}>
+              <div className="text-xs font-black tracking-widest uppercase text-gray-400 mb-2">🤖 Your AI tools — tap to open</div>
+              <div className="flex flex-wrap gap-2">
+                {aitbActivity.apps.map(a => {
+                  const url = aitbToolUrl(a)
+                  const caption = aitbToolCaption(a)
+                  const cls = "px-3 py-2 rounded-xl text-sm font-bold transition-transform active:scale-95"
+                  const style = { background: `${aitbActivity.color}18`, border: `1.5px solid ${aitbActivity.color}55`, color: aitbActivity.color }
+                  const content = (
+                    <>
+                      <span className="flex items-center gap-1">{a}{url && ' ↗'}</span>
+                      {caption && <span className="block text-[10px] font-bold opacity-70 normal-case">{caption}</span>}
+                    </>
+                  )
+                  return url
+                    ? <a key={a} href={url} target="_blank" rel="noopener noreferrer" className={cls} style={style}>{content}</a>
+                    : <span key={a} className={cls} style={style}>{content}</span>
+                })}
+              </div>
+            </div>
           </div>
         )}
 

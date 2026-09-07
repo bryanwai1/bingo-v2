@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { QRCodeSVG } from 'qrcode.react'
 import JSZip from 'jszip'
 import { supabase } from '../lib/supabase'
@@ -77,6 +77,16 @@ const PRESET_COLORS = [
   { name: 'Fuchsia', hex: '#D946EF' },
   { name: 'Pink', hex: '#EC4899' },
   { name: 'Rose', hex: '#F43F5E' },
+]
+
+// Mall Hunt acts. Acts are colour tags on individual cards (not their own
+// category level) — see the "Mall Hunt" category in the Card Library.
+const ACT_COLORS = [
+  { name: 'Act 1 · Setup', hex: '#FF7F5C' },
+  { name: 'Act 2 · The Hunt', hex: '#14A79A' },
+  { name: 'Act 3 · The Mission', hex: '#6C63D9' },
+  { name: 'Act 4 · Action', hex: '#E4536B' },
+  { name: 'Act 5 · The Cut', hex: '#2E9E63' },
 ]
 
 function formatTime(totalSeconds: number): string {
@@ -162,6 +172,21 @@ function ColorPicker({
               style={{ backgroundColor: c.hex }}
               title={c.name}
             />
+          ))}
+        </div>
+        <p className="text-[10px] font-black a-text-3 uppercase tracking-widest mb-1.5">Mall Hunt acts</p>
+        <div className="flex gap-1.5 flex-wrap mb-2">
+          {ACT_COLORS.map(c => (
+            <button
+              key={c.hex}
+              type="button"
+              onClick={() => { onHexChange(c.hex); onNameChange(c.name) }}
+              className={`px-2 h-7 rounded-full border-2 text-[10px] font-black text-white transition-all ${hex === c.hex ? 'border-gray-900 scale-105' : 'border-transparent'}`}
+              style={{ backgroundColor: c.hex }}
+              title={c.name}
+            >
+              {c.name.split(' ')[1]}
+            </button>
           ))}
         </div>
         <div className="flex items-center gap-2">
@@ -415,7 +440,7 @@ function CategoryGroupBlock({
               </p>
             </div>
             <div className="px-3 pb-3 flex flex-wrap gap-1.5">
-              <button onClick={() => navigate(`/bingo-dash/admin/task/${task.id}`)}
+              <button onClick={() => navigate(`/bingo-dash/admin/task/${task.id}?from=board`)}
                 className="px-3 py-1.5 a-surface/20 rounded-lg a-text text-xs font-bold hover:a-surface/30 transition-colors">
                 Edit
               </button>
@@ -520,6 +545,9 @@ export function BingoDashAdmin() {
   // Category management
   const [showCategoryManager, setShowCategoryManager] = useState<string | null>(null) // section id or null
   const [newCategoryName, setNewCategoryName] = useState('')
+  // Card Library header: inline "+ New Category" creator for the current compartment
+  const [showLibNewCategory, setShowLibNewCategory] = useState(false)
+  const [libNewCategoryName, setLibNewCategoryName] = useState('')
   // Challenge section management (grouping above categories in the Board tab)
   const [showChallengeSectionManager, setShowChallengeSectionManager] = useState(false)
   const [newChallengeSectionName, setNewChallengeSectionName] = useState('')
@@ -627,7 +655,22 @@ export function BingoDashAdmin() {
   // Tab navigation
   // Sidebar views. 'run' is the guided landing screen; 'settings' collects the
   // board options that used to sit stacked under the board editor.
-  const [activeTab, setActiveTab] = useState<AdminView>('run')
+  // The open tab lives in the URL (?tab=…) so returning here from a card's
+  // edit page lands back on the tab you left, instead of always on Run Event.
+  const [searchParams, setSearchParams] = useSearchParams()
+  const ADMIN_VIEWS: AdminView[] = ['run', 'board', 'library', 'teams', 'submissions', 'settings']
+  const tabParam = searchParams.get('tab') as AdminView | null
+  const [activeTab, setActiveTabState] = useState<AdminView>(
+    tabParam && ADMIN_VIEWS.includes(tabParam) ? tabParam : 'run'
+  )
+  const setActiveTab = (v: AdminView) => {
+    setActiveTabState(v)
+    setSearchParams(prev => {
+      const next = new URLSearchParams(prev)
+      if (v === 'run') next.delete('tab'); else next.set('tab', v)
+      return next
+    }, { replace: true })
+  }
   // Which cube face the grid editor is showing. Faces beyond the board's
   // face_count are not offered, so a 1-face board behaves exactly as before.
   const [editFace, setEditFace] = useState(0)
@@ -662,6 +705,13 @@ export function BingoDashAdmin() {
 
   // Library: compartment filter
   const [libraryCompartmentFilter, setLibraryCompartmentFilter] = useState<'all' | string>('all')
+  // Library: category filter, only meaningful on the "All Compartments" view
+  const [libraryCategoryFilter, setLibraryCategoryFilter] = useState<'all' | string>('all')
+  // Library: free-text search across card title / category / colour label
+  const [librarySearch, setLibrarySearch] = useState('')
+  // Which card's three-dot action menu is open (library cards)
+  const [cardMenuId, setCardMenuId] = useState<string | null>(null)
+  const [cardMenuPos, setCardMenuPos] = useState<{ top: number; right: number } | null>(null)
 
   // ── Derived ────────────────────────────────────────────────────────────────
   // Boards this account actually manages: house boards for the owner, own
@@ -831,7 +881,7 @@ export function BingoDashAdmin() {
   // groups follow: subs see the main account's shared cards; the owner sees a
   // "Sub-account cards" group per sub account. Foreign cards are read-only —
   // placing one on a board creates an independent copy (copy-on-use).
-  const groupedLibrary = (() => {
+  const groupedLibraryAll = (() => {
     const byCategory = (list: BingoTask[]) => {
       const map = new Map<string, BingoTask[]>()
       const uncategorized: BingoTask[] = []
@@ -847,8 +897,10 @@ export function BingoDashAdmin() {
       return cats
     }
 
+    // "All Compartments" is the complete shared library only — individual
+    // boards (KL board etc.) show their own cards when that chip is picked.
     const mineSections = libraryCompartmentFilter === 'all'
-      ? myBoards
+      ? []
       : myBoards.filter(s => s.id === libraryCompartmentFilter)
     const groups = mineSections.map(section => {
       const sectionTasks = tasks.filter(t => t.section_id === section.id && isMineRow(t.owner_id))
@@ -886,6 +938,58 @@ export function BingoDashAdmin() {
     }
     return groups
   })()
+
+  // Every category present in the current library view, for the filter dropdown.
+  // Declared-but-empty categories are included too: a category created via
+  // "+ New Category" has no cards yet, and leaving it out made it look as
+  // though the create had silently failed.
+  const libraryCategoryOptions = (() => {
+    const seen = new Map<string, string>()
+    for (const g of groupedLibraryAll) for (const c of g.categories) if (!seen.has(c.key)) seen.set(c.key, c.label)
+    const visibleSectionIds = new Set(
+      libraryCompartmentFilter === 'all'
+        ? myBoards.map(s => s.id)
+        : [libraryCompartmentFilter]
+    )
+    for (const c of categories) {
+      if (!visibleSectionIds.has(c.section_id)) continue
+      if (!seen.has(c.name)) seen.set(c.name, c.name)
+    }
+    return [...seen.entries()].map(([key, label]) => ({ key, label })).sort((a, b) => a.label.localeCompare(b.label))
+  })()
+
+  // True when the picked category exists but holds no cards yet — drives an
+  // explanatory empty state instead of a blank library.
+  const libraryFilterIsEmptyCategory =
+    libraryCategoryFilter !== 'all' &&
+    !groupedLibraryAll.some(g => g.categories.some(c => c.key === libraryCategoryFilter))
+
+  // Category dropdown narrows every group to one category
+  // (hunt challenge, physical challenge, …).
+  const groupedLibrary = (() => {
+    const q = librarySearch.trim().toLowerCase()
+    if (libraryCategoryFilter === 'all' && !q) return groupedLibraryAll
+    const matches = (t: BingoTask) =>
+      !q ||
+      t.title.toLowerCase().includes(q) ||
+      (t.category ?? '').toLowerCase().includes(q) ||
+      (t.color ?? '').toLowerCase().includes(q)
+    return groupedLibraryAll
+      .map(g => {
+        const categories = g.categories
+          .filter(c => libraryCategoryFilter === 'all' || c.key === libraryCategoryFilter)
+          .map(c => ({ ...c, tasks: c.tasks.filter(matches) }))
+          .filter(c => c.tasks.length > 0)
+        return { ...g, categories, totalTasks: categories.reduce((n, c) => n + c.tasks.length, 0) }
+      })
+      .filter(g => g.categories.length > 0)
+  })()
+
+  // How many cards the shared ("Complete Library") view covers, independent of
+  // the current chip so the chip label never lies.
+  const sharedLibraryCount = isOwner
+    ? tasks.filter(t => !!t.owner_id).length
+    : (myOwnerValue !== null ? tasks.filter(t => t.owner_id === null).length : 0)
 
   // ── Data fetching ──────────────────────────────────────────────────────────
   // Two-stage, tenancy-scoped fetch (hub model):
@@ -1935,6 +2039,73 @@ export function BingoDashAdmin() {
     setTimeout(() => setCopiedId(null), 1500)
   }
 
+
+  // Full card actions behind a three-dot menu. Every library card gets it —
+  // this account has write access to the shared library too — so Edit, QR,
+  // Copy, Move and Delete are always one click away.
+  const renderCardMenu = (task: BingoTask) => (
+    <div className="flex-shrink-0">
+      <button
+        onClick={e => {
+          if (cardMenuId === task.id) { setCardMenuId(null); return }
+          // The card clips its own overflow, so the panel is positioned
+          // fixed against the button's viewport rect instead of absolutely.
+          const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
+          const openUp = r.bottom + 280 > window.innerHeight
+          setCardMenuPos({
+            top: openUp ? Math.max(8, r.top - 280) : r.bottom + 6,
+            right: Math.max(8, window.innerWidth - r.right),
+          })
+          setCardMenuId(task.id)
+        }}
+        aria-haspopup="menu"
+        aria-expanded={cardMenuId === task.id}
+        title="More actions"
+        className="px-2.5 py-1.5 a-chip-btn rounded-lg text-xs font-black transition-colors"
+      >
+        ⋯
+      </button>
+      {cardMenuId === task.id && cardMenuPos && (
+        <>
+          <div className="fixed inset-0 z-[60]" onClick={() => setCardMenuId(null)} />
+          <div
+            role="menu"
+            className="fixed z-[61] w-44 rounded-xl border a-border p-1.5 flex flex-col gap-0.5"
+            style={{ top: cardMenuPos.top, right: cardMenuPos.right, background: 'var(--a-surface)', boxShadow: 'var(--a-shadow-1)' }}
+          >
+            <div className="flex items-center gap-1 px-2 py-1.5">
+              <span className="text-[10px] font-black uppercase tracking-wider a-text-3 mr-1">Light</span>
+              <button onClick={() => { setLed(task.id, null); setCardMenuId(null) }}
+                title="Off" aria-label="Light off"
+                className="w-4 h-4 rounded-full border a-border" />
+              {LED_KEYS.map(k => (
+                <button key={k} onClick={() => { setLed(task.id, k); setCardMenuId(null) }}
+                  title={k} aria-label={k} className="w-4 h-4 rounded-full"
+                  style={{ background: LED_HEX[k],
+                           outline: task.led === k ? '2px solid var(--a-text)' : 'none',
+                           outlineOffset: 1 }} />
+              ))}
+            </div>
+            <button role="menuitem" onClick={() => { setCardMenuId(null); navigate(`/bingo-dash/admin/task/${task.id}?from=${activeTab}`) }}
+              className="text-left px-2 py-1.5 rounded-lg text-xs font-bold a-text hover:a-surface-2">✎ Edit</button>
+            <button role="menuitem" onClick={() => { setCardMenuId(null); setQrTask(task) }}
+              className="text-left px-2 py-1.5 rounded-lg text-xs font-bold a-text hover:a-surface-2">▦ QR code</button>
+            <button role="menuitem" onClick={() => copyLink(task.id)}
+              className="text-left px-2 py-1.5 rounded-lg text-xs font-bold a-text hover:a-surface-2">
+              {copiedId === task.id ? '✓ Link copied' : '🔗 Copy link'}
+            </button>
+            <button role="menuitem" onClick={() => { setCardMenuId(null); duplicateTask(task) }}
+              className="text-left px-2 py-1.5 rounded-lg text-xs font-bold a-text hover:a-surface-2">⎘ Duplicate</button>
+            <button role="menuitem" onClick={() => { setCardMenuId(null); openTileEdit(task) }}
+              className="text-left px-2 py-1.5 rounded-lg text-xs font-bold a-text hover:a-surface-2">↦ Move</button>
+            <button role="menuitem" onClick={() => { setCardMenuId(null); deleteTask(task.id, task.title) }}
+              className="text-left px-2 py-1.5 rounded-lg text-xs font-bold text-red-400 hover:a-surface-2">🗑 Delete</button>
+          </div>
+        </>
+      )}
+    </div>
+  )
+
   // ── Import ─────────────────────────────────────────────────────────────────
   const handleImportPreview = () => {
     setImportError(''); setImportPreview(null)
@@ -2611,12 +2782,65 @@ export function BingoDashAdmin() {
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-xl font-bold a-text">Card Library</h2>
             <div className="flex items-center gap-2">
+              <button onClick={() => { setShowLibNewCategory(!showLibNewCategory); setLibNewCategoryName('') }}
+                disabled={!currentSectionId}
+                title={currentSectionId ? 'Create a category in the current compartment' : 'Select a compartment first'}
+                className="px-4 py-2 border a-border a-surface-2 a-text rounded-lg hover:a-surface text-sm font-medium transition-colors disabled:opacity-40">
+                + New Category
+              </button>
               <button onClick={() => setShowForm(!showForm)}
                 className="px-4 py-2 bg-teal-600 a-text rounded-lg hover:bg-violet-700 text-sm font-medium transition-colors">
                 + Add Challenge
               </button>
             </div>
           </div>
+
+          {/* Inline category creator — scoped to the current compartment */}
+          {showLibNewCategory && (
+            <div className="a-surface rounded-xl border a-border p-4 mb-4">
+              <p className="text-xs a-text-2 mb-2">
+                New category in <span className="font-bold a-text-3">{sections.find(s => s.id === currentSectionId)?.name ?? '—'}</span>
+              </p>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={libNewCategoryName}
+                  onChange={e => setLibNewCategoryName(e.target.value)}
+                  onKeyDown={async e => {
+                    if (e.key === 'Enter' && currentSectionId && libNewCategoryName.trim()) {
+                      const created = await createCategoryByName(currentSectionId, libNewCategoryName)
+                      if (created) {
+                        setLibraryCompartmentFilter(currentSectionId)
+                        setLibraryCategoryFilter(created.name)
+                        setLibNewCategoryName(''); setShowLibNewCategory(false)
+                      }
+                    }
+                    if (e.key === 'Escape') setShowLibNewCategory(false)
+                  }}
+                  placeholder="e.g. Mall Hunt"
+                  autoFocus
+                  className="flex-1 px-3 py-2 rounded-lg border a-border text-sm focus:outline-none focus:ring-2 focus:ring-teal-500"
+                />
+                <button
+                  onClick={async () => {
+                    if (!currentSectionId) return
+                    const created = await createCategoryByName(currentSectionId, libNewCategoryName)
+                    if (created) {
+                      setLibraryCompartmentFilter(currentSectionId)
+                      setLibraryCategoryFilter(created.name)
+                      setLibNewCategoryName(''); setShowLibNewCategory(false)
+                    }
+                  }}
+                  disabled={!libNewCategoryName.trim() || !currentSectionId}
+                  className="px-4 py-2 bg-teal-600 a-text rounded-lg text-sm font-bold hover:bg-violet-700 disabled:opacity-40"
+                >
+                  Create
+                </button>
+                <button onClick={() => setShowLibNewCategory(false)}
+                  className="px-3 py-2 a-text-3 text-sm font-bold hover:a-text">Cancel</button>
+              </div>
+            </div>
+          )}
 
           {/* Owner-authored content packs any tenant can copy in. Replaces the
               old hardcoded AI Team Building import, which only the house
@@ -2629,7 +2853,7 @@ export function BingoDashAdmin() {
               onClick={() => setLibraryCompartmentFilter('all')}
               className={`px-3 py-1.5 rounded-full text-xs font-bold transition-colors ${libraryCompartmentFilter === 'all' ? 'a-surface a-text' : 'a-surface-2 a-text-3 hover:a-surface-2'}`}
             >
-              All Compartments ({tasks.filter(t => isMineRow(t.owner_id)).length})
+              Complete Library ({sharedLibraryCount})
             </button>
             {myBoards.map(s => (
               <button
@@ -2641,6 +2865,31 @@ export function BingoDashAdmin() {
                 {activeBoardPointer === s.id && <span className="ml-1 text-green-400">●</span>}
               </button>
             ))}
+            <div className="ml-auto flex items-center gap-2">
+              <div className="relative">
+                <input
+                  type="search"
+                  value={librarySearch}
+                  onChange={e => setLibrarySearch(e.target.value)}
+                  placeholder="Search cards…"
+                  aria-label="Search cards"
+                  className="w-52 pl-8 pr-3 py-1.5 rounded-full text-xs font-bold border a-border a-surface-2 a-text focus:outline-none focus:ring-2 focus:ring-teal-500"
+                />
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs a-text-3 pointer-events-none">🔍</span>
+              </div>
+              <label className="text-xs font-bold a-text-3" htmlFor="lib-cat-filter">Category</label>
+              <select
+                id="lib-cat-filter"
+                value={libraryCategoryFilter}
+                onChange={e => setLibraryCategoryFilter(e.target.value)}
+                className="px-3 py-1.5 rounded-full text-xs font-bold border a-border a-surface-2 a-text focus:outline-none focus:ring-2 focus:ring-teal-500"
+              >
+                <option value="all">All categories</option>
+                {libraryCategoryOptions.map(c => (
+                  <option key={c.key} value={c.key}>{c.label}</option>
+                ))}
+              </select>
+            </div>
           </div>
 
           {/* New challenge form (scoped to current section) */}
@@ -2738,6 +2987,18 @@ export function BingoDashAdmin() {
           {tasks.length === 0 ? (
             <p className="a-text-2 text-center py-8 a-surface rounded-xl border a-border">
               No challenges yet. Click "Add Challenge" to create one.
+            </p>
+          ) : groupedLibrary.length === 0 ? (
+            <p className="a-text-2 text-center py-8 a-surface rounded-xl border a-border">
+              {librarySearch.trim()
+                ? `No cards match “${librarySearch.trim()}”.`
+                : libraryFilterIsEmptyCategory
+                ? `“${libraryCategoryFilter}” has no cards yet — create a challenge and pick this category, or drag existing cards into it.`
+                : libraryCategoryFilter !== 'all'
+                ? 'No cards in this category.'
+                : libraryCompartmentFilter === 'all'
+                  ? 'No shared library cards yet — pick a compartment above to see its own cards.'
+                  : 'No cards in this compartment.'}
             </p>
           ) : (
             <div className="flex flex-col gap-10">
@@ -2906,7 +3167,7 @@ export function BingoDashAdmin() {
                                 <div className="px-4 pt-4 pb-3 flex-1">
                                   <p className="text-xs font-bold uppercase tracking-widest mb-1" style={{ color: ink.mid }}>{task.color}</p>
                                   <h3 className="font-black text-lg leading-tight" style={{ color: ink.strong }}>{task.title}</h3>
-                                  {section.foreign ? (
+                                  {section.foreign && !isOwner ? (
                                     task.category && (
                                       <p className="mt-1.5 text-xs" style={{ color: ink.faint }}>📂 {task.category}</p>
                                     )
@@ -2946,7 +3207,7 @@ export function BingoDashAdmin() {
                                       return n > 0 ? `✓ On ${n} board${n > 1 ? 's' : ''}` : 'Not on any board'
                                     })()}
                                   </p>
-                                  {!section.foreign && (
+                                  {(!section.foreign || isOwner) && (
                                     <button
                                       onClick={async () => {
                                         const newVal = !task.require_marshal
@@ -2968,7 +3229,7 @@ export function BingoDashAdmin() {
                                       the challenger scans another team's QR,
                                       both phones unlock the same clue, and the
                                       marshal declares the winner. */}
-                                  {!section.foreign && (
+                                  {(!section.foreign || isOwner) && (
                                     <div className="mt-1.5">
                                       <button
                                         onClick={async () => {
@@ -3034,12 +3295,13 @@ export function BingoDashAdmin() {
                                   )}
                                 </div>
                                 {section.foreign ? (
-                                  <div className="px-3 pb-3">
+                                  <div className="px-3 pb-3 flex items-start gap-1.5">
                                     <button onClick={() => addCardFromLibrary(task)}
-                                      className="w-full px-3 py-1.5 a-chip-btn rounded-lg text-xs font-bold transition-colors"
+                                      className="flex-1 px-3 py-1.5 a-chip-btn rounded-lg text-xs font-bold transition-colors"
                                       title="Copies this card into your board — the original stays untouched">
                                       + Add to board
                                     </button>
+                                    {renderCardMenu(task)}
                                   </div>
                                 ) : (
                                 <div className="px-3 pb-3 flex flex-wrap gap-1.5">
@@ -3065,7 +3327,7 @@ export function BingoDashAdmin() {
                                         : '○ Light'}
                                     </button>
                                   )}
-                                  <button onClick={() => navigate(`/bingo-dash/admin/task/${task.id}`)}
+                                  <button onClick={() => navigate(`/bingo-dash/admin/task/${task.id}?from=library`)}
                                     className="px-3 py-1.5 a-chip-btn rounded-lg text-xs font-bold transition-colors">Edit</button>
                                   <button onClick={() => setQrTask(task)}
                                     className="px-3 py-1.5 a-chip-btn rounded-lg text-xs font-bold transition-colors">QR</button>
@@ -3081,6 +3343,7 @@ export function BingoDashAdmin() {
                                     title="Move to another section">Move</button>
                                   <button onClick={() => deleteTask(task.id, task.title)}
                                     className="px-3 py-1.5 a-chip-danger transition-colors">Delete</button>
+                                  {renderCardMenu(task)}
                                 </div>
                                 )}
                               </div>

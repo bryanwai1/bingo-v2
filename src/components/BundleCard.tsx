@@ -20,6 +20,7 @@ type Progress = {
   steps_done: number[]
   bonus: number
   difficulty: 'Easy' | 'Normal' | 'Hard'
+  words: string[]
 }
 
 export function BundleCard({ task, teamId, marshalPassword }: {
