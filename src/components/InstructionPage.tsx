@@ -36,13 +36,13 @@ export function InstructionPage({ page, hexCode }: InstructionPageProps) {
             <video
               src={page.media_url}
               controls
-              className="w-full max-h-[300px] object-contain"
+              className="w-full max-h-[min(46vh,520px)] object-contain"
             />
           ) : (
             <img
               src={page.media_url}
               alt="Instruction"
-              className="w-full max-h-[300px] object-contain"
+              className="w-full max-h-[min(46vh,520px)] object-contain"
             />
           )}
         </div>
@@ -127,7 +127,7 @@ export function InstructionPage({ page, hexCode }: InstructionPageProps) {
                     <img
                       src={example}
                       alt={`Example for step ${index + 1}`}
-                      className="w-full max-h-[250px] object-contain"
+                      className="w-full max-h-[min(40vh,440px)] object-contain"
                     />
                   </div>
                 )}

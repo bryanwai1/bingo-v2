@@ -135,7 +135,7 @@ export interface BingoTask {
   in_grid: boolean
   category: string
   points: number
-  task_type: 'standard' | 'answer' | 'photo'
+  task_type: 'standard' | 'answer' | 'photo' | 'sign_splice'
   answer_question: string | null
   answer_text: string | null
   completion_warning: string | null
@@ -145,6 +145,11 @@ export interface BingoTask {
   // extra the winner banks on top of the challenger's normal tile points.
   is_contest: boolean
   led?: string | null
+  // AI Team Building cards only: per-card override of the speed-bonus clock.
+  // enabled=false hides the bonus bar; minutes=null keeps the activity's own
+  // duration. See supabase/020_aitb_card_timer.sql.
+  aitb_timer_enabled?: boolean
+  aitb_timer_minutes?: number | null
   contest_game: string
   contest_bonus: number
   maps_url: string | null

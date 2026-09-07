@@ -243,9 +243,11 @@ function BingoTile({
       onClick={onClick}
       title={task.title}
       aria-label={task.title}
-      className="relative rounded-xl overflow-hidden flex flex-col items-center justify-center aspect-square transition-all duration-200 hover:scale-105 active:scale-95 focus:outline-none"
+      className="bingo-glow relative rounded-xl overflow-hidden flex flex-col items-center justify-center aspect-square transition-all duration-200 hover:scale-105 active:scale-95 focus:outline-none"
       style={{
         backgroundColor: task.hex_code,
+        // drives the .bingo-glow hover glow
+        ['--tc' as string]: task.hex_code,
         boxShadow: status === 'completed'
           ? isInBingoLine
             ? `0 0 0 3px #fde68a, 0 0 0 5px ${task.hex_code}, 0 6px 24px ${task.hex_code}cc`
@@ -530,7 +532,7 @@ function BoardScreen({
 
       {/* Header */}
       <header className="relative z-10 px-4 pt-5 pb-3">
-        <div className="max-w-md mx-auto flex items-start justify-between gap-3">
+        <div className="board-col flex items-start justify-between gap-3">
           <div>
             <p className="text-teal-400 text-[10px] font-black uppercase tracking-widest">Bingo Dash</p>
             <h1 className="text-white text-xl font-black tracking-tight leading-tight">{team.name}</h1>
@@ -566,7 +568,7 @@ function BoardScreen({
         </div>
 
         {/* Progress bar */}
-        <div className="max-w-md mx-auto mt-3">
+        <div className="board-col mt-3">
           <div className="h-1.5 bg-white/10 rounded-full overflow-hidden">
             <div
               className="h-full rounded-full transition-all duration-700"
@@ -581,7 +583,7 @@ function BoardScreen({
 
       {/* 5×5 Grid with BINGO side letters */}
       <main className="relative z-10 px-3 pb-8">
-        <div className="max-w-md mx-auto">
+        <div className="board-col">
           {/* Face tabs. Only rendered on a cube board, so a normal game is
               visually unchanged. Each pill carries that face's own progress so
               a team can see at a glance where the work is left. */}
@@ -649,7 +651,7 @@ function BoardScreen({
       {/* Facilitator note below the board (e.g. Bonsai Project item collection) */}
       {boardNote.trim() !== '' && gridTasks.length > 0 && (
         <div className="relative z-10 px-4 pb-8">
-          <div className="max-w-md mx-auto">
+          <div className="board-col">
             <div className="rounded-2xl overflow-hidden border border-emerald-800/40 bg-emerald-950/30">
               <div className="px-4 py-3 flex items-center gap-2 border-b border-emerald-800/30">
                 <span className="text-base">🌱</span>

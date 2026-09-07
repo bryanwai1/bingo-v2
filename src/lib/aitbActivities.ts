@@ -163,6 +163,26 @@ export function aitbSpeedBonus(elapsedMs: number, a: Pick<AitbActivity,'bonusTie
   return 0
 }
 
+/**
+ * Apply a card's timer override to an activity.
+ *
+ * Passing a minute count rescales the whole bonus ladder proportionally, so a
+ * 20-minute activity run in 10 keeps the same shape of ladder — just twice as
+ * tight. null leaves the activity untouched.
+ */
+export function aitbWithTimer(a: AitbActivity, minutes?: number | null): AitbActivity {
+  if (!minutes || minutes <= 0 || minutes === a.mins || !a.mins) return a
+  const factor = minutes / a.mins
+  return {
+    ...a,
+    mins: minutes,
+    bonusTiers: a.bonusTiers.map(t => ({
+      ...t,
+      uptoMin: Math.max(0.5, Math.round(t.uptoMin * factor * 10) / 10),
+    })),
+  }
+}
+
 /** Best possible score: check-in + every step + completion + top bonus. */
 export function aitbMaxPoints(a: AitbActivity): number {
   return AITB_POINTS.scan + a.steps.length * AITB_POINTS.step

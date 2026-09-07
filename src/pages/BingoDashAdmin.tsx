@@ -16,6 +16,7 @@ import { activeFaces, faceName, faceColor, slotFor, normaliseFaceCount, TILES_PE
 import { CubeBoard } from '../components/CubeBoard'
 import { RunEventPanel, Step } from '../components/RunEventPanel'
 import { CONTEST_GAMES, getContestGame } from '../lib/contestGames'
+import { aitbByName } from '../lib/aitbActivities'
 import { LED_HEX, LED_KEYS } from '../lib/ledColors'
 import { duelBonusByTeam } from '../hooks/useBingoDuels'
 
@@ -508,6 +509,15 @@ function boardWriteFailureMessage(dbMessage?: string): string {
 // Cards are neutral now, so text follows the theme rather than the swatch.
 const CARD_INK = { strong: 'var(--a-text)', mid: 'var(--a-text-2)', faint: 'var(--a-text-3)' }
 
+// A card as it sits on a board. placementId identifies the bingo_board_cards
+// row, which is the only stable identity here: the same task can hold several
+// slots, and two rows can even share a slot number, so neither task id nor slot
+// index can address one tile on its own.
+type PlacedCard = BingoTask & { placementId: string }
+
+// Synthetic compartment id for the flat Complete Library group.
+const LIBRARY_ALL_ID = '__all__'
+
 const emptySlots = new Set<number>()
 
 export function BingoDashAdmin() {
@@ -567,7 +577,7 @@ export function BingoDashAdmin() {
   const [formHex, setFormHex] = useState('#3B82F6')
   const [formCategory, setFormCategory] = useState('')
   const [formPoints, setFormPoints] = useState(0)
-  const [formTaskType, setFormTaskType] = useState<'standard' | 'answer' | 'photo'>('standard')
+  const [formTaskType, setFormTaskType] = useState<'standard' | 'answer' | 'photo' | 'sign_splice'>('standard')
   const [formAnswerQuestion, setFormAnswerQuestion] = useState('')
   const [formAnswerText, setFormAnswerText] = useState('')
   const [formSaving, setFormSaving] = useState(false)
@@ -593,7 +603,7 @@ export function BingoDashAdmin() {
   const [tileCategory, setTileCategory] = useState('')
   const [tilePoints, setTilePoints] = useState(0)
   const [tileSectionId, setTileSectionId] = useState<string>('')
-  const [tileTaskType, setTileTaskType] = useState<'standard' | 'answer' | 'photo'>('standard')
+  const [tileTaskType, setTileTaskType] = useState<'standard' | 'answer' | 'photo' | 'sign_splice'>('standard')
   const [tileAnswerQuestion, setTileAnswerQuestion] = useState('')
   const [tileAnswerText, setTileAnswerText] = useState('')
   const [tileSaving, setTileSaving] = useState(false)
@@ -645,7 +655,9 @@ export function BingoDashAdmin() {
   const [addListSearch, setAddListSearch] = useState('')
 
   // Drag state
-  const [dragState, setDragState] = useState<{ id: string; type: 'grid' | 'list' } | null>(null)
+  // A grid drag identifies a SLOT (a card may sit in several), a list drag a task.
+  const [dragState, setDragState] = useState<
+    { type: 'grid'; slot: number } | { type: 'list'; id: string } | null>(null)
   const [dragOverSlot, setDragOverSlot] = useState<number | null>(null)
 
   // Slot picker: which empty grid slot is being filled via click
@@ -724,34 +736,49 @@ export function BingoDashAdmin() {
   const scopedTeams = currentSectionId
     ? teams.filter(t => t.section_id === currentSectionId).sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }))
     : []
-  // Cards are universal: grid membership lives in bingo_board_cards (one
-  // placement row per board the card sits on), not on the task itself.
+  // Cards are universal: grid membership lives in bingo_board_cards, one
+  // placement row per slot the card occupies, not on the task itself.
+  //
+  // A card may be reused — the same task can hold several slots on one board,
+  // and each placement row is an independent tile. Everything downstream is
+  // therefore keyed by SLOT, not task id: removeTileAt deletes the clicked
+  // slot alone, and a grid drag carries its slot so dragging one instance
+  // never moves its twin.
   const taskById = new Map(tasks.map(t => [t.id, t]))
-  const boardTasksForSection = (sectionId: string): BingoTask[] =>
+  const boardTasksForSection = (sectionId: string): PlacedCard[] =>
     boardCards
       .filter(bc => bc.section_id === sectionId)
+      .sort((a, b) => a.slot - b.slot)
       .map(bc => {
         const t = taskById.get(bc.task_id)
-        return t ? { ...t, sort_order: bc.slot, in_grid: true } : null
+        return t ? { ...t, sort_order: bc.slot, in_grid: true, placementId: bc.id } : null
       })
-      .filter((t): t is BingoTask => t !== null)
+      .filter((t): t is PlacedCard => t !== null)
       .sort((a, b) => a.sort_order - b.sort_order)
   const gridTasks = currentSectionId ? boardTasksForSection(currentSectionId) : []
   // Contest bonuses won in duels, folded into each team's earned points.
   const duelBonuses = duelBonusByTeam(duels)
-  // How many boards each card sits on (for the "On N boards" labels).
+  // How many boards each card sits on (for the "On N boards" labels). Counts
+  // distinct boards, not placements — a card reused in three slots of one board
+  // is still on one board.
   const boardCountByTask = (() => {
+    const bySection = new Map<string, Set<string>>()
+    for (const bc of boardCards) {
+      const set = bySection.get(bc.task_id) ?? new Set<string>()
+      set.add(bc.section_id)
+      bySection.set(bc.task_id, set)
+    }
     const m = new Map<string, number>()
-    for (const bc of boardCards) m.set(bc.task_id, (m.get(bc.task_id) ?? 0) + 1)
+    for (const [taskId, set] of bySection) m.set(taskId, set.size)
     return m
   })()
 
   // Sparse 25-slot layout: each placed task sits at slot = sort_order (0-24).
   // Any legacy placement whose slot is out of range or colliding is placed in
   // the next available slot so existing data migrates gracefully.
-  const gridSlots: (BingoTask | null)[] = (() => {
-    const slots: (BingoTask | null)[] = Array(25).fill(null)
-    const overflow: BingoTask[] = []
+  const gridSlots: (PlacedCard | null)[] = (() => {
+    const slots: (PlacedCard | null)[] = Array(25).fill(null)
+    const overflow: PlacedCard[] = []
     for (const t of gridTasks) {
       const s = t.sort_order
       if (Number.isInteger(s) && s >= 0 && s < 25 && slots[s] === null) slots[s] = t
@@ -897,13 +924,21 @@ export function BingoDashAdmin() {
       return cats
     }
 
-    // "All Compartments" is the complete shared library only — individual
-    // boards (KL board etc.) show their own cards when that chip is picked.
+    // "Complete Library" is every card this account can use: its own
+    // compartments first, then the shared / sub-account cards it can copy in.
+    // It used to list only the foreign groups, which left the view completely
+    // empty for a facilitator working on house data.
     const mineSections = libraryCompartmentFilter === 'all'
-      ? []
+      ? myBoards
       : myBoards.filter(s => s.id === libraryCompartmentFilter)
+    // A compartment shows what is ON that board — boards take their cards from
+    // the shared Complete Library, so a card sitting in the section but never
+    // placed is catalogue content, not board content. Complete Library itself
+    // still reads every card, since that is the catalogue.
     const groups = mineSections.map(section => {
-      const sectionTasks = tasks.filter(t => t.section_id === section.id && isMineRow(t.owner_id))
+      const sectionTasks = libraryCompartmentFilter === 'all'
+        ? tasks.filter(t => t.section_id === section.id && isMineRow(t.owner_id))
+        : boardTasksForSection(section.id)
       return { section: { id: section.id, name: section.name, foreign: false }, categories: byCategory(sectionTasks), totalTasks: sectionTasks.length }
     })
 
@@ -936,6 +971,39 @@ export function BingoDashAdmin() {
         })
       }
     }
+    // Complete Library is one flat catalogue grouped by category alone — which
+    // board a card lives on is not a heading here.
+    //
+    // Copies of the same challenge on other boards collapse to one entry, but
+    // only ACROSS boards: a board that legitimately holds four cards all called
+    // "Paper Scissors Rock!" keeps all four, so the catalogue can never come out
+    // smaller than a single board. Dedupe is therefore applied per group against
+    // titles claimed by earlier groups, never within a group.
+    if (libraryCompartmentFilter === 'all') {
+      const claimed = new Set<string>()
+      const keyOf = (t: BingoTask) =>
+        `${t.title.trim().toLowerCase()}\u0000${(t.category ?? '').trim().toLowerCase()}`
+      const flat: BingoTask[] = []
+      for (const g of groups) {
+        const mine: BingoTask[] = []
+        for (const c of g.categories) {
+          for (const t of c.tasks) {
+            if (claimed.has(keyOf(t))) continue
+            mine.push(t)
+          }
+        }
+        // Claim after the whole group, so duplicates inside one board survive.
+        for (const t of mine) claimed.add(keyOf(t))
+        flat.push(...mine)
+      }
+      if (flat.length === 0) return []
+      return [{
+        section: { id: LIBRARY_ALL_ID, name: 'Complete Library', foreign: false },
+        categories: byCategory(flat),
+        totalTasks: flat.length,
+      }]
+    }
+
     return groups
   })()
 
@@ -987,9 +1055,38 @@ export function BingoDashAdmin() {
 
   // How many cards the shared ("Complete Library") view covers, independent of
   // the current chip so the chip label never lies.
-  const sharedLibraryCount = isOwner
-    ? tasks.filter(t => !!t.owner_id).length
-    : (myOwnerValue !== null ? tasks.filter(t => t.owner_id === null).length : 0)
+  // What Complete Library will list: every card, minus copies of a challenge
+  // already claimed by an earlier board. Computed from the same board order the
+  // grouping uses rather than read off the current view, so the chip stays
+  // truthful while another compartment is selected.
+  const sharedLibraryCount = (() => {
+    const key = (t: BingoTask) =>
+      `${t.title.trim().toLowerCase()}\u0000${(t.category ?? '').trim().toLowerCase()}`
+    const claimed = new Set<string>()
+    let total = 0
+    const countBucket = (list: BingoTask[]) => {
+      const fresh = list.filter(t => !claimed.has(key(t)))
+      for (const t of fresh) claimed.add(key(t))
+      total += fresh.length
+    }
+    for (const section of myBoards) {
+      countBucket(tasks.filter(t => t.section_id === section.id && isMineRow(t.owner_id)))
+    }
+    if (isOwner) {
+      const byAccount = new Map<string, BingoTask[]>()
+      for (const t of tasks) {
+        if (!t.owner_id) continue
+        if (!byAccount.has(t.owner_id)) byAccount.set(t.owner_id, [])
+        byAccount.get(t.owner_id)!.push(t)
+      }
+      for (const list of byAccount.values()) countBucket(list)
+    } else if (myOwnerValue !== null) {
+      for (const section of sections.filter(x => x.owner_id === null)) {
+        countBucket(tasks.filter(t => t.section_id === section.id && t.owner_id === null))
+      }
+    }
+    return total
+  })()
 
   // ── Data fetching ──────────────────────────────────────────────────────────
   // Two-stage, tenancy-scoped fetch (hub model):
@@ -1046,7 +1143,12 @@ export function BingoDashAdmin() {
 
     setSections(allSections)
     setTasks((tasksRes.data ?? []) as BingoTask[])
-    setBoardCards(boardCardsData.sort((a, b) => a.slot - b.slot))
+    const sortedBoardCards = boardCardsData.sort((a, b) => a.slot - b.slot)
+    setBoardCards(sortedBoardCards)
+
+    // A card may deliberately occupy several slots on the same board, so
+    // repeat (section, task) placements are kept. Each placement row is its own
+    // tile: removeTileAt deletes the clicked slot only, never every instance.
     setTeams(teamsData.sort((a, b) => a.created_at.localeCompare(b.created_at)))
     setScans(scansData)
     setCategories(categoriesData.sort((a, b) => a.sort_order - b.sort_order))
@@ -1429,18 +1531,18 @@ export function BingoDashAdmin() {
   // (board, card). The card itself is never copied or mutated.
 
   // Persist a 25-slot layout for the current board: placement.slot = slot index.
-  const applySlots = async (slots: (BingoTask | null)[]) => {
+  const applySlots = async (slots: (PlacedCard | null)[]) => {
     if (!currentSectionId) return
-    const updates: { task_id: string; slot: number }[] = []
-    slots.forEach((t, i) => { if (t) updates.push({ task_id: t.id, slot: i }) })
+    // Addressed by placement row, not task: moving one instance of a reused
+    // card must not drag its twins along with it.
+    const updates: { placementId: string; slot: number }[] = []
+    slots.forEach((t, i) => { if (t) updates.push({ placementId: t.placementId, slot: i }) })
     setBoardCards(prev => prev.map(bc => {
-      if (bc.section_id !== currentSectionId) return bc
-      const u = updates.find(x => x.task_id === bc.task_id)
+      const u = updates.find(x => x.placementId === bc.id)
       return u ? { ...bc, slot: u.slot } : bc
     }))
     await Promise.all(updates.map(u =>
-      supabase.from('bingo_board_cards').update({ slot: u.slot })
-        .eq('section_id', currentSectionId).eq('task_id', u.task_id),
+      supabase.from('bingo_board_cards').update({ slot: u.slot }).eq('id', u.placementId),
     ))
   }
 
@@ -1529,24 +1631,24 @@ export function BingoDashAdmin() {
     setBoardCards(prev => [...prev, created])
   }
 
-  const removeTile = async (taskId: string) => {
-    if (!currentSectionId) return
-    setBoardCards(prev => prev.filter(bc => !(bc.section_id === currentSectionId && bc.task_id === taskId)))
-    await supabase.from('bingo_board_cards').delete()
-      .eq('section_id', currentSectionId).eq('task_id', taskId)
+  // Deletes one slot, not every copy of the card — a card can sit in several
+  // slots on the same board and removing one must leave the others alone.
+  const removePlacement = async (placementId: string) => {
+    setBoardCards(prev => prev.filter(bc => bc.id !== placementId))
+    await supabase.from('bingo_board_cards').delete().eq('id', placementId)
   }
 
   // ── Drag handlers ──────────────────────────────────────────────────────────
-  const onGridDragStart = (e: React.DragEvent, taskId: string) => {
+  const onGridDragStart = (e: React.DragEvent, slot: number) => {
     e.dataTransfer.effectAllowed = 'move'
-    e.dataTransfer.setData('text/plain', taskId)
-    setDragState({ id: taskId, type: 'grid' })
+    e.dataTransfer.setData('text/plain', String(slot))
+    setDragState({ type: 'grid', slot })
   }
 
   const onListDragStart = (e: React.DragEvent, taskId: string) => {
     e.dataTransfer.effectAllowed = 'copy'
     e.dataTransfer.setData('text/plain', taskId)
-    setDragState({ id: taskId, type: 'list' })
+    setDragState({ type: 'list', id: taskId })
   }
 
   const onSlotDragOver = (e: React.DragEvent, slotIndex: number) => {
@@ -1560,9 +1662,7 @@ export function BingoDashAdmin() {
     setDragOverSlot(null)
     if (!dragState) return
     if (dragState.type === 'grid') {
-      const fromSlot = gridSlots.findIndex(t => t?.id === dragState.id)
-      if (fromSlot === -1) { setDragState(null); return }
-      await reorderGrid(fromSlot, slotIndex)
+      await reorderGrid(dragState.slot, slotIndex)
     } else {
       await insertIntoGrid(dragState.id, slotIndex)
     }
@@ -2623,17 +2723,17 @@ export function BingoDashAdmin() {
 
                     return task ? (
                       <BoardTile
-                        key={task.id}
+                        key={`slot-${slotIndex}`}
                         task={task}
                         index={slotIndex}
                         total={gridTasks.length}
                         isDragOver={isDragOver}
-                        isBeingDragged={dragState?.id === task.id && dragState.type === 'grid'}
+                        isBeingDragged={dragState?.type === 'grid' && dragState.slot === slotIndex}
                         onMoveLeft={() => reorderGrid(slotIndex, slotIndex - 1)}
                         onMoveRight={() => reorderGrid(slotIndex, slotIndex + 1)}
-                        onRemove={() => removeTile(task.id)}
+                        onRemove={() => removePlacement(task.placementId)}
                         onEdit={() => openTileEdit(task)}
-                        onDragStart={e => onGridDragStart(e, task.id)}
+                        onDragStart={e => onGridDragStart(e, slotIndex)}
                         onDragOver={e => onSlotDragOver(e, slotIndex)}
                         onDrop={e => onSlotDrop(e, slotIndex)}
                         onDragEnd={onDragEnd}
@@ -2737,7 +2837,7 @@ export function BingoDashAdmin() {
                         onDragStart={e => onListDragStart(e, task.id)}
                         onDragEnd={onDragEnd}
                         className={`flex items-center gap-3 px-4 py-2.5 hover:a-surface-2 transition-colors select-none cursor-grab active:cursor-grabbing ${
-                          dragState?.id === task.id ? 'opacity-40' : ''
+                          dragState?.type === 'list' && dragState.id === task.id ? 'opacity-40' : ''
                         }`}
                       >
                         <div className="w-4 h-4 rounded-full flex-shrink-0" style={{ backgroundColor: task.hex_code }} />
@@ -2861,7 +2961,7 @@ export function BingoDashAdmin() {
                 onClick={() => setLibraryCompartmentFilter(s.id)}
                 className={`px-3 py-1.5 rounded-full text-xs font-bold transition-colors ${libraryCompartmentFilter === s.id ? 'bg-teal-600 a-text' : 'a-surface-2 a-text-3 hover:a-surface-2'}`}
               >
-                {s.name} ({tasks.filter(t => t.section_id === s.id).length})
+                {s.name} ({boardTasksForSection(s.id).length})
                 {activeBoardPointer === s.id && <span className="ml-1 text-green-400">●</span>}
               </button>
             ))}
@@ -2949,6 +3049,11 @@ export function BingoDashAdmin() {
                       className={`flex-1 py-2 text-sm font-bold transition-colors ${formTaskType === 'answer' ? 'bg-teal-600 a-text' : 'a-surface a-text-3 hover:a-surface-2'}`}>
                       Answer Input
                     </button>
+                    <button type="button" onClick={() => setFormTaskType('sign_splice')}
+                      title="Teams hunt each letter of their movie title on a different shop sign"
+                      className={`flex-1 py-2 text-sm font-bold transition-colors ${formTaskType === 'sign_splice' ? 'bg-teal-600 a-text' : 'a-surface a-text-3 hover:a-surface-2'}`}>
+                      Sign Splice
+                    </button>
                   </div>
                 </div>
                 {formTaskType === 'answer' && (
@@ -3004,7 +3109,9 @@ export function BingoDashAdmin() {
             <div className="flex flex-col gap-10">
               {groupedLibrary.map(({ section, categories: categoryGroups, totalTasks }) => (
                 <div key={section.id}>
-                  {/* Compartment header */}
+                  {/* Compartment header — omitted for the flat Complete
+                      Library group, which has no single board behind it. */}
+                  {section.id !== LIBRARY_ALL_ID && (
                   <div className="flex items-center gap-3 mb-3">
                     <div className="flex items-center gap-2">
                       <h2 className="text-base font-black a-text uppercase tracking-wider">{section.name}</h2>
@@ -3038,6 +3145,7 @@ export function BingoDashAdmin() {
                       </>
                     )}
                   </div>
+                  )}
 
                   {/* Category manager panel */}
                   {showCategoryManager === section.id && (
@@ -3224,6 +3332,70 @@ export function BingoDashAdmin() {
                                     </button>
                                   )}
 
+                                  {/* ── AI Team Building timer ───────────────
+                                      AITB cards run a speed-bonus ladder that
+                                      counts up from check-in. Facilitators can
+                                      turn that clock off for an untimed run, or
+                                      rescale it to a different window. */}
+                                  {(!section.foreign || isOwner) && aitbByName(task.title) && (() => {
+                                    const activity = aitbByName(task.title)!
+                                    const on = task.aitb_timer_enabled !== false
+                                    const mins = task.aitb_timer_minutes ?? activity.mins
+                                    const save = async (patch: Partial<BingoTask>) => {
+                                      setTasks(prev => prev.map(t => t.id === task.id ? { ...t, ...patch } : t))
+                                      const { error } = await supabase.from('bingo_tasks').update(patch).eq('id', task.id)
+                                      if (error) alert('Timer not saved: ' + error.message)
+                                    }
+                                    return (
+                                      <div className="mt-1.5">
+                                        <button
+                                          onClick={() => save({ aitb_timer_enabled: !on })}
+                                          title={on
+                                            ? 'Bonus clock is running for this card'
+                                            : 'Untimed — the bonus bar is hidden for players'}
+                                          className={`text-xs font-bold px-2 py-0.5 rounded-full transition-colors ${on ? 'a-chip-on' : 'a-chip-off'}`}
+                                        >
+                                          {on ? '⏱️ Timer ON' : '⏱️ Timer OFF'}
+                                        </button>
+                                        {on && (
+                                          <div className="mt-2 p-2 rounded-lg a-surface-2">
+                                            <label className="block a-text-3 text-[10px] font-black uppercase tracking-wider mb-1">
+                                              Minutes
+                                            </label>
+                                            <div className="flex items-center gap-2">
+                                              <input
+                                                type="number"
+                                                min={1}
+                                                max={180}
+                                                defaultValue={mins}
+                                                key={`${task.id}-aitbmin-${task.aitb_timer_minutes ?? 'def'}`}
+                                                onBlur={e => {
+                                                  const raw = parseInt(e.target.value)
+                                                  const v = Number.isFinite(raw) ? Math.min(180, Math.max(1, raw)) : activity.mins
+                                                  if (v === mins) return
+                                                  save({ aitb_timer_minutes: v === activity.mins ? null : v })
+                                                }}
+                                                className="w-20 bg-black/40 a-text text-xs px-2 py-1 rounded border border-white/25 text-center font-bold focus:outline-none focus:border-white/60"
+                                              />
+                                              {task.aitb_timer_minutes != null && (
+                                                <button
+                                                  onClick={() => save({ aitb_timer_minutes: null })}
+                                                  className="text-[10px] font-bold a-text-3 hover:text-teal-500"
+                                                >
+                                                  Reset to {activity.mins}
+                                                </button>
+                                              )}
+                                            </div>
+                                            <p className="a-text-3 text-[10px] mt-1 leading-snug">
+                                              Rescales the whole bonus ladder to this window.
+                                              Default for {activity.name} is {activity.mins} min.
+                                            </p>
+                                          </div>
+                                        )}
+                                      </div>
+                                    )
+                                  })()}
+
                                   {/* ── Contending mode ──────────────────────
                                       Turns this card into a head-to-head duel:
                                       the challenger scans another team's QR,
@@ -3294,11 +3466,18 @@ export function BingoDashAdmin() {
                                     </div>
                                   )}
                                 </div>
-                                {section.foreign ? (
+                                {/* Complete Library is a browse-and-place
+                                    view: one Add-to-board button with every
+                                    other action under the ⋯ menu. A single
+                                    compartment keeps the full inline strip. */}
+                                {libraryCompartmentFilter === 'all' ? (
                                   <div className="px-3 pb-3 flex items-start gap-1.5">
                                     <button onClick={() => addCardFromLibrary(task)}
-                                      className="flex-1 px-3 py-1.5 a-chip-btn rounded-lg text-xs font-bold transition-colors"
-                                      title="Copies this card into your board — the original stays untouched">
+                                      disabled={gridTasks.length >= 25 && isMineRow(task.owner_id)}
+                                      className="flex-1 px-3 py-1.5 a-chip-btn rounded-lg text-xs font-bold transition-colors disabled:opacity-40"
+                                      title={isMineRow(task.owner_id)
+                                        ? 'Place this card on the current board'
+                                        : 'Copies this card into your board — the original stays untouched'}>
                                       + Add to board
                                     </button>
                                     {renderCardMenu(task)}
@@ -3343,7 +3522,9 @@ export function BingoDashAdmin() {
                                     title="Move to another section">Move</button>
                                   <button onClick={() => deleteTask(task.id, task.title)}
                                     className="px-3 py-1.5 a-chip-danger transition-colors">Delete</button>
-                                  {renderCardMenu(task)}
+                                  {/* No ⋯ menu here: every one of its items is
+                                      already a button in this strip. It stays in
+                                      Complete Library, where the strip does not. */}
                                 </div>
                                 )}
                               </div>
@@ -3891,6 +4072,11 @@ export function BingoDashAdmin() {
                     <button type="button" onClick={() => setFormTaskType('answer')}
                       className={`flex-1 py-2 text-sm font-bold transition-colors ${formTaskType === 'answer' ? 'bg-teal-600 a-text' : 'a-surface a-text-3 hover:a-surface-2'}`}>
                       Answer Input
+                    </button>
+                    <button type="button" onClick={() => setFormTaskType('sign_splice')}
+                      title="Teams hunt each letter of their movie title on a different shop sign"
+                      className={`flex-1 py-2 text-sm font-bold transition-colors ${formTaskType === 'sign_splice' ? 'bg-teal-600 a-text' : 'a-surface a-text-3 hover:a-surface-2'}`}>
+                      Sign Splice
                     </button>
                   </div>
                 </div>

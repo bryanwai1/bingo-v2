@@ -13,10 +13,14 @@ import { SwipeablePages } from '../components/SwipeablePages'
 import { ParticleBackground } from '../components/ParticleBackground'
 import { TimeUpAlarm } from '../components/TimeUpAlarm'
 import { ContestCard } from '../components/ContestCard'
+import { SignSpliceCard } from '../components/SignSpliceCard'
+import { SpeedEditTargets } from '../components/SpeedEditTargets'
+import { SampleTreeApp } from '../components/SampleTreeApp'
+import { RetroGamesSample } from '../components/RetroGamesSample'
 import { BundleCard } from '../components/BundleCard'
 import { AitbMissionModule } from '../components/AitbMissionModule'
 import { BonusBar } from '../components/AitbBonusBar'
-import { aitbByName, aitbToolUrl, aitbToolCaption, AITB_POINTS } from '../lib/aitbActivities'
+import { aitbByName, aitbToolUrl, aitbToolCaption, AITB_POINTS, aitbWithTimer } from '../lib/aitbActivities'
 import { normalizeUrl } from '../lib/normalizeUrl'
 import type { BingoScan, BingoTask } from '../types/database'
 
@@ -181,7 +185,11 @@ export function BingoDashParticipant() {
   // Matched by title against the AITB activity table (aitbByName), same as
   // the bundle tile — a card is "an AITB card" purely by carrying one of
   // those names, whether it's played standalone or inside the bundle.
-  const aitbActivity = task ? aitbByName(task.title) : undefined
+  const aitbBase = task ? aitbByName(task.title) : undefined
+  // A card can rescale or switch off the AITB bonus clock — see
+  // supabase/020_aitb_card_timer.sql.
+  const aitbActivity = aitbBase ? aitbWithTimer(aitbBase, task?.aitb_timer_minutes) : undefined
+  const aitbTimerOn = task?.aitb_timer_enabled !== false
 
   // The draw / typed words belong to the TEAM, not the phone that made them —
   // a roulette spin on one handset has to reach the teammate holding the other.
@@ -411,11 +419,14 @@ export function BingoDashParticipant() {
   }
 
   // ── Main view ────────────────────────────────────────────────────────
-  // AITB cards carry the wheel/deal modules, which want the room a phone
-  // column doesn't have — widening just for these lets a projector (wide,
-  // landscape) show them at a useful size while a phone still gets the
-  // narrower column at its own breakpoint, purely from viewport width.
-  const containerMaxW = aitbActivity ? 'max-w-lg sm:max-w-2xl lg:max-w-4xl' : 'max-w-lg'
+  // Every card widens with the viewport, not just the AITB ones: instructions,
+  // photos and answer inputs all read better on a projector or a laptop than
+  // in a phone-width column, and a phone still gets the narrow column at its
+  // own breakpoint. AITB goes one step wider because its wheel/deal modules
+  // need the room.
+  const containerMaxW = aitbActivity
+    ? 'max-w-lg sm:max-w-2xl lg:max-w-4xl'
+    : 'max-w-lg sm:max-w-xl lg:max-w-3xl'
 
   return (
     <>
@@ -554,9 +565,9 @@ export function BingoDashParticipant() {
                 </span>
               )}
             </div>
-            <BonusBar
+            {aitbTimerOn && <BonusBar
               elapsedMs={scanRecord.completed ? 0 : now - new Date(scanRecord.scannedAt).getTime()}
-              activity={aitbActivity} completed={scanRecord.completed} bankedBonus={0} />
+              activity={aitbActivity} completed={scanRecord.completed} bankedBonus={0} />}
             <div className="rounded-2xl p-4 mb-6" style={{ background: 'rgba(255,255,255,0.05)', border: '2px solid rgba(255,255,255,0.1)' }}>
               <h2 className="text-white font-black text-lg mb-2">{aitbActivity.tagline}</h2>
               <p className="text-gray-300 text-sm leading-relaxed">{aitbActivity.description}</p>
@@ -600,6 +611,19 @@ export function BingoDashParticipant() {
                 }}
                 progressId={scanRecord.id} />
             )}
+
+            {/* Speed Edit Showdown works from a fixed set of target pictures. */}
+            {aitbActivity.name === 'Speed Edit Showdown' && (
+              <SpeedEditTargets color={aitbActivity.color} />
+            )}
+
+            {/* Resort Tree App Sprint ships with a worked example to aim at. */}
+            {aitbActivity.name === 'Resort Tree App Sprint' && (
+              <SampleTreeApp color={aitbActivity.color} />
+            )}
+
+            {/* Retro Game Speed Build ships the 3 games teams must rebuild. */}
+            {aitbActivity.name === 'Retro Game Speed Build' && <RetroGamesSample />}
 
             <div className="text-xs font-black tracking-widest uppercase text-gray-400 mb-2">
               ✅ Your mission — +{AITB_POINTS.step} pts per step
@@ -740,6 +764,12 @@ export function BingoDashParticipant() {
               }}
             >
               {/* ── Standard: Marshal password + Complete button ── */}
+              {/* Sign Splice Title: hunt each letter of your title on a
+                  different shop sign. OCR and stitching run in the page. */}
+              {task.task_type === 'sign_splice' && team && taskId && (
+                <SignSpliceCard teamId={team.id} taskId={taskId} />
+              )}
+
               {task.task_type === 'standard' && (
                 <>
                   {task.require_marshal && (

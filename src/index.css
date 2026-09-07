@@ -54,6 +54,62 @@ body {
 }
 .animate-swipe-nudge { animation: swipe-nudge 1.6s ease-in-out infinite; }
 
+/* The bingo board is a square, so it has to fit the SHORTER side of the
+   screen. Width-bound on a phone held upright, height-bound in landscape where
+   there is plenty of width and very little height, and capped so it does not
+   sprawl on a large monitor. Everything in the board column shares the width so
+   the header and legend stay aligned with the grid. */
+.board-col {
+  width: min(92vw, 68vh, 560px);
+  margin-inline: auto;
+}
+/* No special case for a phone on its side. Shrinking the board to clear the
+   header there drove tiles down to ~35px, which is worse than a short scroll:
+   the header alone is taller than the space a 5x5 grid needs. Tiles stay
+   readable and the page scrolls a little instead. */
+
+/* Bingo tiles glow in their own colour on hover. Uses filter rather than
+   box-shadow: every tile sets box-shadow inline for its completed and
+   bingo-line rings, and an inline style would beat a stylesheet rule — a
+   drop-shadow filter layers on top instead of fighting it. */
+.bingo-glow { transition: filter 0.2s ease; }
+@media (hover: hover) {
+  .bingo-glow:hover {
+    filter:
+      drop-shadow(0 0 6px var(--tc))
+      drop-shadow(0 0 18px var(--tc))
+      brightness(1.06);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .bingo-glow { transition: none; }
+}
+
+/* Accent glow on hover, used by the sample tree app's cards. The card sets its
+   own --tc, so each one glows in its own colour. Gated behind hover:hover so a
+   touch device never leaves the glow stuck on after a tap. */
+.glow-card {
+  --tc: rgba(255, 255, 255, 0.6);
+  transition: box-shadow 0.25s ease, transform 0.25s ease, border-color 0.25s ease;
+}
+@media (hover: hover) {
+  .glow-card:hover {
+    transform: translateY(-4px);
+    box-shadow:
+      0 0 0 1px var(--tc),
+      0 10px 34px -8px var(--tc),
+      0 0 26px -6px var(--tc);
+  }
+}
+.glow-card:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--tc), 0 0 26px -6px var(--tc);
+}
+@media (prefers-reduced-motion: reduce) {
+  .glow-card { transition: box-shadow 0.25s ease; }
+  .glow-card:hover { transform: none; }
+}
+
 @keyframes alarm-flash {
   0%, 49% { background-color: rgba(127, 29, 29, 0.92); }
   50%, 100% { background-color: rgba(220, 38, 38, 0.96); }

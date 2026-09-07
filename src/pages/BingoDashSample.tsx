@@ -13,12 +13,15 @@ import { TaskLinkButtons } from '../components/TaskLinkButtons'
 import { DemoBundleCard } from '../components/DemoBundleCard'
 import { AitbMissionModule } from '../components/AitbMissionModule'
 import { BonusBar } from '../components/AitbBonusBar'
-import { aitbByName, aitbToolUrl, aitbToolCaption, AITB_POINTS } from '../lib/aitbActivities'
+import { aitbByName, aitbToolUrl, aitbToolCaption, aitbWithTimer, AITB_POINTS } from '../lib/aitbActivities'
 import { InstructionPage } from '../components/InstructionPage'
 import { PageNavigator } from '../components/PageNavigator'
 import { SwipeablePages } from '../components/SwipeablePages'
 import { ParticleBackground } from '../components/ParticleBackground'
 import { TileFace } from '../components/BingoTileFace'
+import { SpeedEditTargets } from '../components/SpeedEditTargets'
+import { SampleTreeApp } from '../components/SampleTreeApp'
+import { RetroGamesSample } from '../components/RetroGamesSample'
 import { normalizeTileDisplay, type TileDisplay } from '../lib/bingoTileDisplay'
 import { normalizeUrl } from '../lib/normalizeUrl'
 import type { BingoSection, BingoTask } from '../types/database'
@@ -353,9 +356,11 @@ function BingoTile({
       onClick={onClick}
       title={task.title}
       aria-label={task.title}
-      className="relative rounded-xl overflow-hidden flex items-center justify-center aspect-square transition-all duration-200 hover:scale-105 active:scale-95 focus:outline-none"
+      className="bingo-glow relative rounded-xl overflow-hidden flex items-center justify-center aspect-square transition-all duration-200 hover:scale-105 active:scale-95 focus:outline-none"
       style={{
         backgroundColor: task.hex_code,
+        // drives the .bingo-glow hover glow
+        ['--tc' as string]: task.hex_code,
         boxShadow: status === 'completed'
           ? isInBingoLine
             ? `0 0 0 3px #fde68a, 0 0 0 5px ${task.hex_code}, 0 6px 24px ${task.hex_code}cc`
@@ -582,7 +587,7 @@ function BoardScreen({
       {popupLetters && <BingoPopup letters={popupLetters} onDismiss={() => setPopupLetters(null)} />}
 
       <header className="relative z-10 px-4 pt-5 pb-3">
-        <div className="max-w-md mx-auto flex items-start justify-between gap-3">
+        <div className="board-col flex items-start justify-between gap-3">
           <div>
             <p className="text-purple-400 text-[10px] font-black uppercase tracking-widest">Bingo Dash</p>
             <h1 className="text-white text-xl font-black tracking-tight leading-tight">{teamName}</h1>
@@ -611,7 +616,7 @@ function BoardScreen({
           </div>
         </div>
 
-        <div className="max-w-md mx-auto mt-3">
+        <div className="board-col mt-3">
           <div className="h-1.5 bg-white/10 rounded-full overflow-hidden">
             <div
               className="h-full rounded-full transition-all duration-700"
@@ -625,7 +630,7 @@ function BoardScreen({
       </header>
 
       <main className="relative z-10 px-3 pb-8">
-        <div className="max-w-md mx-auto">
+        <div className="board-col">
           {/* Face tabs. Only rendered on a cube board, so a normal game is
               visually unchanged — mirrors the real player view exactly. */}
           {faceCount > 1 && (
@@ -690,7 +695,7 @@ function BoardScreen({
 
       {boardNote.trim() !== '' && gridTasks.length > 0 && (
         <div className="relative z-10 px-4 pb-8">
-          <div className="max-w-md mx-auto">
+          <div className="board-col">
             <div className="rounded-2xl overflow-hidden border border-emerald-800/40 bg-emerald-950/30">
               <div className="px-4 py-3 flex items-center gap-2 border-b border-emerald-800/30">
                 <span className="text-base">🌱</span>
@@ -760,7 +765,11 @@ const SampleTaskDetail = forwardRef<SampleTaskDetailHandle, {
   // A standalone AITB card (not opened via the bundle tile) still carries the
   // same interactive module — the demo has no per-team progress row for it,
   // so the result just lives in this component's own state.
-  const aitbActivity = aitbByName(task.title)
+  const aitbBase = aitbByName(task.title)
+  // A card can rescale or switch off the AITB bonus clock — see
+  // supabase/020_aitb_card_timer.sql.
+  const aitbActivity = aitbBase ? aitbWithTimer(aitbBase, task.aitb_timer_minutes) : undefined
+  const aitbTimerOn = task.aitb_timer_enabled !== false
   const [aitbWords, setAitbWords] = useState<string[]>([])
   const [aitbStepsDone, setAitbStepsDone] = useState<number[]>([])
   // The demo has no check-in row to read a start time from, so the timer
@@ -876,7 +885,10 @@ const SampleTaskDetail = forwardRef<SampleTaskDetailHandle, {
   // column doesn't have — widening just for these lets a projector (wide,
   // landscape) show them at a useful size while a phone still gets the
   // narrower column at its own breakpoint, purely from viewport width.
-  const containerMaxW = aitbActivity ? 'max-w-lg sm:max-w-2xl lg:max-w-4xl' : 'max-w-lg'
+  // Every card widens with the viewport, not just AITB — see BingoDashParticipant.
+  const containerMaxW = aitbActivity
+    ? 'max-w-lg sm:max-w-2xl lg:max-w-4xl'
+    : 'max-w-lg sm:max-w-xl lg:max-w-3xl'
 
   // ── Main view ──
   return (
@@ -965,7 +977,7 @@ const SampleTaskDetail = forwardRef<SampleTaskDetailHandle, {
                 <span className="px-2 py-1 rounded-lg text-xs font-black bg-emerald-400/20 text-emerald-300">✓ Completed</span>
               )}
             </div>
-            <BonusBar elapsedMs={completed ? 0 : now - aitbStartedAt} activity={aitbActivity} completed={completed} bankedBonus={0} />
+            {aitbTimerOn && <BonusBar elapsedMs={completed ? 0 : now - aitbStartedAt} activity={aitbActivity} completed={completed} bankedBonus={0} />}
             <div className="rounded-2xl p-4 mb-6" style={{ background: 'rgba(255,255,255,0.05)', border: '2px solid rgba(255,255,255,0.1)' }}>
               <h2 className="text-white font-black text-lg mb-2">{aitbActivity.tagline}</h2>
               <p className="text-gray-300 text-sm leading-relaxed">{aitbActivity.description}</p>
@@ -996,6 +1008,19 @@ const SampleTaskDetail = forwardRef<SampleTaskDetailHandle, {
               <AitbMissionModule activity={aitbActivity} savedWords={aitbWords}
                 disabled={completed} onSave={setAitbWords} progressId={`demo-standalone-${task.id}`} />
             )}
+
+            {/* Speed Edit Showdown works from a fixed set of target pictures. */}
+            {aitbActivity.name === 'Speed Edit Showdown' && (
+              <SpeedEditTargets color={aitbActivity.color} />
+            )}
+
+            {/* Resort Tree App Sprint ships with a worked example to aim at. */}
+            {aitbActivity.name === 'Resort Tree App Sprint' && (
+              <SampleTreeApp color={aitbActivity.color} />
+            )}
+
+            {/* Retro Game Speed Build ships the 3 games teams must rebuild. */}
+            {aitbActivity.name === 'Retro Game Speed Build' && <RetroGamesSample />}
 
             <div className="text-xs font-black tracking-widest uppercase text-gray-400 mb-2">
               ✅ Your mission — +{AITB_POINTS.step} pts per step
