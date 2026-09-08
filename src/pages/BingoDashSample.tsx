@@ -381,8 +381,15 @@ function BingoTile({
       {/* The lit ring. Drawn as an overlay rather than a border so it sits
           inside the tile's rounded corners and never shifts the layout. */}
       {glowing && (
-        <div className="absolute inset-0 rounded-xl pointer-events-none z-20"
-          style={{ boxShadow: 'inset 0 0 0 3px rgba(255,255,255,0.92), inset 0 0 14px rgba(255,255,255,0.45)' }} />
+        <>
+          <div className="absolute inset-0 rounded-xl pointer-events-none z-20"
+            style={{ boxShadow: 'inset 0 0 0 3px rgba(255,255,255,0.92), inset 0 0 14px rgba(255,255,255,0.45)' }} />
+          {/* Three sparks tracing the tile's edge, spaced a third of a lap
+              apart so one is always somewhere visible. */}
+          <div className="tile-sparks absolute inset-[5px] rounded-xl pointer-events-none z-30" aria-hidden="true">
+            <span /><span /><span />
+          </div>
+        </>
       )}
 
       {isInBingoLine && status === 'completed' && (
