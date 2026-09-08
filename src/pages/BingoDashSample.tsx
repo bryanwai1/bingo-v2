@@ -44,8 +44,6 @@ import type { BingoSection, BingoTask } from '../types/database'
 // ════════════════════════════════════════════════════════════════════════════
 
 const SAMPLE_TEAM_PASSWORD = '1234'   // demo "login" password (pre-filled on the join screen)
-// Where the demo remembers which tiles the presenter lit, per board.
-const GLOW_KEY = 'bingo_sample_glow'
 const DEMO_MARSHAL_PASSWORD = '4321'  // fixed demo marshal password — deliberately NOT the real
                                       // per-board marshal_password, so this public page never
                                       // leaks live-event secrets that could be used to cheat.
@@ -1445,16 +1443,35 @@ function SampleProjector() {
   // What the big screen is showing: the bingo board or the scoreboard.
   const [view, setView] = useState<SampleView>('board')
 
-  // Tiles the presenter has lit, per board. Kept here rather than in
-  // BoardScreen (which remounts on every board switch) and mirrored into
-  // localStorage so a reload mid-presentation doesn't lose the setup.
+  // Tiles the presenter has lit. Held on the board row so everyone who opens
+  // the link sees the same board, and kept here rather than in BoardScreen,
+  // which remounts on every board switch.
   const [glowMode, setGlowMode] = useState(false)
-  const [glowByBoard, setGlowByBoard] = useState<Record<string, number[]>>(() => {
-    try { return JSON.parse(localStorage.getItem(GLOW_KEY) ?? '{}') } catch { return {} }
-  })
+
+  // Someone else's change — another presenter, or the same one on their phone —
+  // reaches this page without a reload.
   useEffect(() => {
-    try { localStorage.setItem(GLOW_KEY, JSON.stringify(glowByBoard)) } catch { /* private mode */ }
-  }, [glowByBoard])
+    const channel = supabase
+      .channel('sample-board-glow')
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'bingo_sections' }, payload => {
+        const row = payload.new as BingoSection
+        setSections(prev => prev.map(s => (s.id === row.id ? { ...s, glow_slots: row.glow_slots } : s)))
+      })
+      .subscribe()
+    return () => { supabase.removeChannel(channel) }
+  }, [])
+
+  // Write through: the board row is the truth, and the local copy updates with
+  // it so the tile lights the moment it is tapped.
+  const setGlow = async (slots: number[]) => {
+    if (!selectedId) return
+    setSections(prev => prev.map(s => (s.id === selectedId ? { ...s, glow_slots: slots } : s)))
+    // Awaited, not fired and forgotten: a Supabase query builder is lazy and
+    // never sends the request unless something subscribes to it.
+    const { error } = await supabase.from('bingo_sections')
+      .update({ glow_slots: slots }).eq('id', selectedId)
+    if (error) console.error('Could not save the lit tiles', error)
+  }
 
   // Remote control: a code (generated on first "Remote" click) opens a broadcast
   // channel; a paired phone drives the state below via commands.
@@ -1648,16 +1665,15 @@ function SampleProjector() {
           gridTasks={gridTasks}
           scanState={scanState}
           section={selectedSection}
-          glowSlots={new Set(glowByBoard[selectedId ?? ''] ?? [])}
+          glowSlots={new Set(selectedSection?.glow_slots ?? [])}
           glowMode={glowMode}
           onToggleGlowMode={() => setGlowMode(v => !v)}
-          onToggleGlow={slot => setGlowByBoard(prev => {
-            const key = selectedId ?? ''
-            const lit = new Set(prev[key] ?? [])
+          onToggleGlow={slot => {
+            const lit = new Set(selectedSection?.glow_slots ?? [])
             if (!lit.delete(slot)) lit.add(slot)
-            return { ...prev, [key]: [...lit] }
-          })}
-          onClearGlow={() => setGlowByBoard(prev => ({ ...prev, [selectedId ?? '']: [] }))}
+            void setGlow([...lit].sort((a, b) => a - b))
+          }}
+          onClearGlow={() => { void setGlow([]) }}
           onOpenTask={handleOpenTask}
           onSwitchTeam={() => { setTeamName(null); setOpenTask(null) }}
         />

@@ -102,6 +102,8 @@ export interface BingoSection extends BoardTimer {
   // How the 5×5 tiles render for players: 'icon' (category icon) or 'words'
   // (category + shortened title). See components/BingoTileFace.tsx.
   tile_display: 'icon' | 'words'
+  /** Demo only: grid slots the presenter has lit up, shared with every viewer. */
+  glow_slots?: number[] | null
   owner_id: string | null
   created_at: string
 }
