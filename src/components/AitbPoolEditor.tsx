@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import type { AitbPoolItem } from '../types/database'
-import type { AitbPoolKey } from '../lib/aitbActivities'
 
 // CRUD for one interactive-module draw pool (e.g. Nerf Prompt Cups' Character
 // pool, Roulette's Genre pool) — admin can add/edit/delete/reorder options and
@@ -21,7 +20,7 @@ async function uploadPoolPhoto(file: File): Promise<string> {
   return supabase.storage.from(BUCKET).getPublicUrl(path).data.publicUrl
 }
 
-export function AitbPoolEditor({ poolKey, emoji, label }: { poolKey: AitbPoolKey; emoji: string; label: string }) {
+export function AitbPoolEditor({ poolKey, emoji, label }: { poolKey: string; emoji: string; label: string }) {
   const [items, setItems] = useState<AitbPoolItem[] | null>(null)
   const [newLabel, setNewLabel] = useState('')
   const [newFile, setNewFile] = useState<File | null>(null)

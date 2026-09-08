@@ -1,5 +1,13 @@
 @import "tailwindcss";
 
+/* Tailwind v4 gates `hover:`/`group-hover:` behind @media (hover: hover) by
+   default, which some Windows devices report as false even with a real mouse
+   attached (any touch digitizer present flips the OS's reported primary
+   pointer to coarse/touch). That silently hid every hover-only control in the
+   app (e.g. the board tile's ✕ remove button). Fall back to a plain :hover
+   so these controls work on mouse input regardless of what the OS reports. */
+@custom-variant hover (&:hover);
+
 body {
   margin: 0;
 }
@@ -83,6 +91,32 @@ body {
 }
 @media (prefers-reduced-motion: reduce) {
   .bingo-glow { transition: none; }
+}
+
+/* A tile the presenter has lit up on the demo board. Pulses in the tile's own
+   colour (--tc) so it reads from the back of a room, and uses filter rather
+   than box-shadow because the tile sets its shadow inline. */
+.bingo-glow-on {
+  animation: bingoTilePulse 1.8s ease-in-out infinite;
+  z-index: 1;
+}
+@keyframes bingoTilePulse {
+  0%, 100% {
+    filter: drop-shadow(0 0 8px var(--tc)) drop-shadow(0 0 22px var(--tc))
+            brightness(1.14) saturate(1.1);
+  }
+  50% {
+    filter: drop-shadow(0 0 16px var(--tc)) drop-shadow(0 0 40px var(--tc))
+            brightness(1.3) saturate(1.15);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  /* Still obviously lit, just not moving. */
+  .bingo-glow-on {
+    animation: none;
+    filter: drop-shadow(0 0 12px var(--tc)) drop-shadow(0 0 30px var(--tc))
+            brightness(1.2) saturate(1.12);
+  }
 }
 
 /* Accent glow on hover, used by the sample tree app's cards. The card sets its

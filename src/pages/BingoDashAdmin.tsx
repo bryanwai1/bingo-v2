@@ -231,6 +231,11 @@ function BoardTile({
   onDragEnd: () => void
   onDragLeave: () => void
 }) {
+  // JS-driven hover state rather than Tailwind's group-hover: some Windows
+  // setups (pen/touch digitizer drivers, even with no touchscreen) report
+  // `hover: none` to the browser, which silently hides CSS-only group-hover
+  // reveals. A real mouseenter/mouseleave pair always fires regardless.
+  const [isHovered, setIsHovered] = useState(false)
   return (
     <div
       draggable
@@ -239,7 +244,9 @@ function BoardTile({
       onDragOver={onDragOver}
       onDrop={onDrop}
       onDragLeave={onDragLeave}
-      className={`relative group aspect-square rounded-lg overflow-hidden cursor-grab active:cursor-grabbing select-none transition-all duration-150 ${
+      onMouseEnter={() => setIsHovered(true)}
+      onMouseLeave={() => setIsHovered(false)}
+      className={`relative aspect-square rounded-lg overflow-hidden cursor-grab active:cursor-grabbing select-none transition-all duration-150 ${
         isBeingDragged ? 'opacity-40 scale-95' : ''
       } ${isDragOver ? 'ring-2 ring-white scale-105' : ''}`}
       style={{ backgroundColor: task.hex_code }}
@@ -266,7 +273,7 @@ function BoardTile({
       </div>
 
       {/* Hover controls */}
-      <div className="absolute inset-0 bg-black/65 opacity-0 group-hover:opacity-100 transition-opacity duration-150 flex flex-col z-20">
+      <div className={`absolute inset-0 bg-black/65 transition-opacity duration-150 flex flex-col z-20 ${isHovered ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
         <div className="flex-1 flex items-center justify-center">
           <button
             onClick={e => { e.stopPropagation(); onEdit() }}
@@ -577,7 +584,7 @@ export function BingoDashAdmin() {
   const [formHex, setFormHex] = useState('#3B82F6')
   const [formCategory, setFormCategory] = useState('')
   const [formPoints, setFormPoints] = useState(0)
-  const [formTaskType, setFormTaskType] = useState<'standard' | 'answer' | 'photo' | 'sign_splice'>('standard')
+  const [formTaskType, setFormTaskType] = useState<'standard' | 'answer' | 'photo' | 'sign_splice' | 'breakout_hunt'>('standard')
   const [formAnswerQuestion, setFormAnswerQuestion] = useState('')
   const [formAnswerText, setFormAnswerText] = useState('')
   const [formSaving, setFormSaving] = useState(false)
@@ -603,7 +610,7 @@ export function BingoDashAdmin() {
   const [tileCategory, setTileCategory] = useState('')
   const [tilePoints, setTilePoints] = useState(0)
   const [tileSectionId, setTileSectionId] = useState<string>('')
-  const [tileTaskType, setTileTaskType] = useState<'standard' | 'answer' | 'photo' | 'sign_splice'>('standard')
+  const [tileTaskType, setTileTaskType] = useState<'standard' | 'answer' | 'photo' | 'sign_splice' | 'breakout_hunt'>('standard')
   const [tileAnswerQuestion, setTileAnswerQuestion] = useState('')
   const [tileAnswerText, setTileAnswerText] = useState('')
   const [tileSaving, setTileSaving] = useState(false)
@@ -625,6 +632,30 @@ export function BingoDashAdmin() {
   })
 
   const [ledMenuId, setLedMenuId] = useState<string | null>(null)
+
+  // Breakout cards show a one-line puzzle summary on their library tile; the
+  // editor itself lives on the card's edit page.
+  const [breakoutCounts, setBreakoutCounts] = useState<Record<string, { total: number; withImage: number }>>({})
+  const breakoutTaskIds = tasks.filter(t => t.task_type === 'breakout_hunt').map(t => t.id).sort().join(',')
+  useEffect(() => {
+    const ids = breakoutTaskIds ? breakoutTaskIds.split(',') : []
+    if (ids.length === 0) { setBreakoutCounts({}); return }
+    let cancelled = false
+    void supabase.from('bingo_breakout_puzzles').select('task_id, image_url').in('task_id', ids)
+      .then(({ data }) => {
+        if (cancelled) return
+        const map: Record<string, { total: number; withImage: number }> = {}
+        for (const id of ids) map[id] = { total: 0, withImage: 0 }
+        for (const row of data ?? []) {
+          const m = map[row.task_id as string]
+          if (!m) continue
+          m.total++
+          if (row.image_url) m.withImage++
+        }
+        setBreakoutCounts(map)
+      })
+    return () => { cancelled = true }
+  }, [breakoutTaskIds])
 
   const setLed = async (taskId: string, led: string | null) => {
     setTasks(prev => prev.map(t => t.id === taskId ? { ...t, led } : t))
@@ -1795,8 +1826,25 @@ export function BingoDashAdmin() {
   }
 
   const deleteTeam = async (id: string, name: string) => {
-    if (!confirm(`Delete team "${name}" and all their scan records?`)) return
-    await supabase.from('bingo_teams').delete().eq('id', id)
+    const teamSubs = photoSubmissions.filter(s => s.team_id === id)
+    const team = teams.find(t => t.id === id)
+    if (!confirm(
+      `Delete team "${name}"?
+
+Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${teamSubs.length === 1 ? '' : 's'}` : ''} will be removed for good.`
+    )) return
+    // Rows go with the team via ON DELETE CASCADE, but storage does not — the
+    // image files have to be swept up here or they linger in the bucket with
+    // nothing left pointing at them.
+    const photoPaths = [
+      ...teamSubs.map(s => extractStoragePath(s.photo_url)),
+      team?.photo_url ? extractStoragePath(team.photo_url) : null,
+    ].filter((p): p is string => !!p)
+
+    setPhotoSubmissions(prev => prev.filter(s => s.team_id !== id))
+    const { error } = await supabase.from('bingo_teams').delete().eq('id', id)
+    if (error) { alert('Could not delete the team: ' + error.message); await fetchAll(); return }
+    if (photoPaths.length > 0) await supabase.storage.from('media').remove(photoPaths)
     await fetchAll()
   }
 
@@ -1952,6 +2000,21 @@ export function BingoDashAdmin() {
     }
   }
 
+  // A reviewer judges a Breakout set as one job: tick the photos that are
+  // wrong, and everything else in the set is approved. Ticking nothing approves
+  // the lot, which is the common case.
+  const settleBundle = async (subs: BingoPhotoSubmission[]) => {
+    const bad = subs.filter(x => selectedSubmissionIds.has(x.id))
+    const good = subs.filter(x => !selectedSubmissionIds.has(x.id))
+    if (bad.length > 0) await bulkSetStatus(bad, 'rejected')
+    if (good.length > 0) await bulkSetStatus(good, 'approved')
+    setSelectedSubmissionIds(prev => {
+      const next = new Set(prev)
+      for (const x of subs) next.delete(x.id)
+      return next
+    })
+  }
+
   const bulkSetStatus = async (subs: BingoPhotoSubmission[], status: 'approved' | 'rejected') => {
     if (subs.length === 0) return
     setBulkActioning(true)
@@ -1960,6 +2023,15 @@ export function BingoDashAdmin() {
       const ids = subs.map(s => s.id)
       setPhotoSubmissions(prev => prev.map(s => ids.includes(s.id) ? { ...s, status } : s))
       await supabase.from('bingo_photo_submissions').update({ status }).in('id', ids)
+      // Breakout Hunt rows point back at a puzzle: mirror the decision onto the
+      // team's progress so the card can show "approved" or offer a retake.
+      const breakout = subs.filter(s => s.puzzle_id)
+      if (breakout.length > 0) {
+        await Promise.all(breakout.map(s =>
+          supabase.from('bingo_breakout_progress')
+            .update({ review_status: status })
+            .eq('team_id', s.team_id).eq('puzzle_id', s.puzzle_id!)))
+      }
       // Cascade to scans:
       // - approve → mark scans completed
       // - reject  → if any of these were previously approved, un-complete the scan
@@ -3054,6 +3126,11 @@ export function BingoDashAdmin() {
                       className={`flex-1 py-2 text-sm font-bold transition-colors ${formTaskType === 'sign_splice' ? 'bg-teal-600 a-text' : 'a-surface a-text-3 hover:a-surface-2'}`}>
                       Sign Splice
                     </button>
+                    <button type="button" onClick={() => setFormTaskType('breakout_hunt')}
+                      title="Teams decode 10 puzzles, then photograph each object in the venue"
+                      className={`flex-1 py-2 text-sm font-bold transition-colors ${formTaskType === 'breakout_hunt' ? 'bg-teal-600 a-text' : 'a-surface a-text-3 hover:a-surface-2'}`}>
+                      Breakout
+                    </button>
                   </div>
                 </div>
                 {formTaskType === 'answer' && (
@@ -3331,6 +3408,31 @@ export function BingoDashAdmin() {
                                       {task.require_marshal ? '🔒 Marshal ON' : '🔓 Marshal OFF'}
                                     </button>
                                   )}
+
+                                  {/* ── Breakout Hunt summary ────────────────
+                                      The puzzle editor lives on the card's edit
+                                      page; the tile just reports the state and
+                                      links across. */}
+                                  {(!section.foreign || isOwner) && task.task_type === 'breakout_hunt' && (() => {
+                                    const c = breakoutCounts[task.id]
+                                    const missing = c ? c.total - c.withImage : 0
+                                    return (
+                                      <div className="mt-1.5 p-2 rounded-lg a-surface-2">
+                                        <p className="a-text-3 text-[10px] font-black uppercase tracking-wider mb-1">Puzzles</p>
+                                        <p className="a-text text-[11px] font-bold">
+                                          {!c ? 'Loading…'
+                                            : c.total === 0 ? 'None set up yet'
+                                            : `${c.total} puzzle${c.total === 1 ? '' : 's'}${missing > 0 ? ` · ${missing} missing an image` : ' · all have images'}`}
+                                        </p>
+                                        <button
+                                          onClick={() => navigate(`/bingo-dash/admin/task/${task.id}?from=${activeTab}`)}
+                                          className="mt-1.5 w-full py-1.5 rounded-lg text-[11px] font-bold a-chip-btn transition-colors"
+                                        >
+                                          Edit puzzles →
+                                        </button>
+                                      </div>
+                                    )
+                                  })()}
 
                                   {/* ── AI Team Building timer ───────────────
                                       AITB cards run a speed-bonus ladder that
@@ -4078,6 +4180,11 @@ export function BingoDashAdmin() {
                       className={`flex-1 py-2 text-sm font-bold transition-colors ${formTaskType === 'sign_splice' ? 'bg-teal-600 a-text' : 'a-surface a-text-3 hover:a-surface-2'}`}>
                       Sign Splice
                     </button>
+                    <button type="button" onClick={() => setFormTaskType('breakout_hunt')}
+                      title="Teams decode 10 puzzles, then photograph each object in the venue"
+                      className={`flex-1 py-2 text-sm font-bold transition-colors ${formTaskType === 'breakout_hunt' ? 'bg-teal-600 a-text' : 'a-surface a-text-3 hover:a-surface-2'}`}>
+                      Breakout
+                    </button>
                   </div>
                 </div>
                 {formTaskType === 'answer' && (
@@ -4655,9 +4762,93 @@ export function BingoDashAdmin() {
                 </div>
               )
             }
+            // Breakout Hunt photos arrive as a set of ten from one team, so
+            // they are reviewed together rather than scattered through the grid.
+            const bundleMap = new Map<string, BingoPhotoSubmission[]>()
+            const loose: BingoPhotoSubmission[] = []
+            for (const sub of filteredSubmissions) {
+              if (!sub.puzzle_id) { loose.push(sub); continue }
+              const key = `${sub.team_id}|${sub.task_id}`
+              const list = bundleMap.get(key) ?? []
+              list.push(sub)
+              bundleMap.set(key, list)
+            }
+            const bundles = [...bundleMap.values()].map(list =>
+              [...list].sort((a, b) => (a.label ?? '').localeCompare(b.label ?? '', undefined, { numeric: true })))
+
             return (
+              <>
+              {bundles.map(list => {
+                const first = list[0]
+                const bTeam = teams.find(t => t.id === first.team_id)
+                const bTask = tasks.find(t => t.id === first.task_id)
+                const ticked = list.filter(x => selectedSubmissionIds.has(x.id)).length
+                const pending = list.filter(x => x.status === 'pending').length
+                return (
+                  <div key={`${first.team_id}|${first.task_id}`}
+                       className="mb-6 rounded-2xl border-2 a-border a-surface-2 p-3">
+                    <div className="flex flex-wrap items-center gap-3 mb-3">
+                      <div className="min-w-0">
+                        <p className="text-sm font-black a-text truncate">
+                          {bTeam?.name ?? 'Unknown team'} · {bTask?.title ?? 'Breakout Hunt'}
+                        </p>
+                        <p className="text-[11px] a-text-3">
+                          {list.length} photos · {pending} awaiting review
+                          {ticked > 0 && ` · ${ticked} ticked as wrong`}
+                        </p>
+                      </div>
+                      <div className="flex-1" />
+                      {pending > 0 && (
+                        <button
+                          onClick={() => void settleBundle(list.filter(x => x.status === 'pending'))}
+                          disabled={bulkActioning}
+                          className="px-4 py-2 rounded-lg text-xs font-bold bg-green-500 a-text hover:bg-green-600 disabled:opacity-40 transition-colors"
+                        >
+                          {ticked > 0
+                            ? `✓ Approve the other ${pending - ticked}, reject ${ticked}`
+                            : `✓ Approve all ${pending}`}
+                        </button>
+                      )}
+                    </div>
+                    <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))' }}>
+                      {list.map(sub => {
+                        const isSel = selectedSubmissionIds.has(sub.id)
+                        const ring = sub.status === 'approved' ? '#16a34a'
+                          : sub.status === 'rejected' ? '#dc2626' : 'var(--a-border)'
+                        return (
+                          <button
+                            key={sub.id}
+                            onClick={() => toggleSubmissionSelected(sub.id)}
+                            className="rounded-xl overflow-hidden border-2 text-left transition-all"
+                            style={{ borderColor: isSel ? '#dc2626' : ring, background: 'var(--a-surface)' }}
+                          >
+                            <div className="a-surface-2 relative">
+                              <SubmissionThumb url={sub.photo_url} fill />
+                              {isSel && (
+                                <span className="absolute top-1 right-1 text-[10px] font-black text-white bg-red-600 px-1.5 py-0.5 rounded">
+                                  WRONG
+                                </span>
+                              )}
+                            </div>
+                            <p className="px-2 py-1.5 text-[11px] font-black a-text truncate">
+                              {sub.label ?? 'Photo'}
+                              {sub.status !== 'pending' && (
+                                <span style={{ color: ring }}>{sub.status === 'approved' ? ' ✓' : ' ✗'}</span>
+                              )}
+                            </p>
+                          </button>
+                        )
+                      })}
+                    </div>
+                    <p className="a-text-3 text-[10px] mt-2">
+                      Tap any photo that is wrong, then approve — untapped photos are approved.
+                    </p>
+                  </div>
+                )
+              })}
+
               <div className="grid gap-4" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))' }}>
-                {filteredSubmissions.map(sub => {
+                {loose.map(sub => {
                   const subTeam = teams.find(t => t.id === sub.team_id)
                   const subTask = tasks.find(t => t.id === sub.task_id)
                   const isSelected = selectedSubmissionIds.has(sub.id)
@@ -4685,8 +4876,12 @@ export function BingoDashAdmin() {
                             className="w-4 h-4 accent-teal-500 mt-0.5 flex-shrink-0"
                           />
                           <div className="min-w-0 flex-1">
-                            <p className="text-sm font-black a-text truncate">{subTeam?.name ?? 'Unknown team'}</p>
-                            <p className="text-[11px] a-text-3 truncate">{subTask?.title ?? 'Unknown challenge'}</p>
+                            <p className="text-sm font-black a-text truncate">
+                              {sub.label ?? subTeam?.name ?? 'Unknown team'}
+                            </p>
+                            <p className="text-[11px] a-text-3 truncate">
+                              {sub.label ? subTeam?.name ?? 'Unknown team' : subTask?.title ?? 'Unknown challenge'}
+                            </p>
                           </div>
                         </div>
 
@@ -4725,6 +4920,7 @@ export function BingoDashAdmin() {
                   )
                 })}
               </div>
+              </>
             )
           })()}
         </section>

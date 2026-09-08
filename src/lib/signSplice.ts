@@ -323,6 +323,3 @@ export function matchShop(detectedText: string, shopNames: string[]): { name: st
   }
   return best && best.score >= 60 ? best : null
 }
-
-/** Rule 12: a wall of text is a directory board, not one shop's sign. */
-export const DIRECTORY_BOARD_WORD_LIMIT = 25

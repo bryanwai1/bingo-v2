@@ -135,7 +135,7 @@ export interface BingoTask {
   in_grid: boolean
   category: string
   points: number
-  task_type: 'standard' | 'answer' | 'photo' | 'sign_splice'
+  task_type: 'standard' | 'answer' | 'photo' | 'sign_splice' | 'breakout_hunt'
   answer_question: string | null
   answer_text: string | null
   completion_warning: string | null
@@ -150,6 +150,23 @@ export interface BingoTask {
   // duration. See supabase/020_aitb_card_timer.sql.
   aitb_timer_enabled?: boolean
   aitb_timer_minutes?: number | null
+  // Sign Splice cards only: whether Screen 4 asks for the shop name / lot
+  // number, and whether it insists. See supabase/021_sign_splice_shop_entry.sql.
+  sign_splice_shop_input?: 'hidden' | 'optional' | 'compulsory'
+  sign_splice_lot_input?: 'hidden' | 'optional' | 'compulsory'
+  // Title rules and the OCR bar, per card. See 021_sign_splice_settings.sql.
+  sign_splice_min_letters?: number
+  sign_splice_max_letters?: number
+  sign_splice_allow_spaces?: boolean
+  sign_splice_allow_numbers?: boolean
+  sign_splice_min_confidence?: number
+  // How many items this card deals to each team from its own bank.
+  // 0 = no draw. See supabase/025_card_draws.sql.
+  draw_count?: number
+  /** How the draw is presented; null means the card has no draw. */
+  draw_style?: 'pick' | 'spin' | 'deal' | 'gamepick' | 'list' | null
+  draw_spins?: number
+  draw_images?: boolean
   contest_game: string
   contest_bonus: number
   maps_url: string | null
@@ -279,6 +296,10 @@ export interface BingoPhotoSubmission {
   scan_id: string | null
   photo_url: string
   status: 'pending' | 'approved' | 'rejected'
+  // Breakout Hunt sets only: what the photo should show, and which puzzle it
+  // answers. See supabase/023_breakout_review.sql.
+  label?: string | null
+  puzzle_id?: string | null
   created_at: string
 }
 

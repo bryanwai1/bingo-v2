@@ -5,16 +5,20 @@ import { useBingoTaskPages } from '../hooks/useBingoTaskPages'
 import { useBingoTaskPhotos } from '../hooks/useBingoTaskPhotos'
 import { useTaskLinks } from '../hooks/useTaskLinks'
 import { BingoAdminPhotoUpload } from '../components/BingoAdminPhotoUpload'
+import { SignSpliceAdminPanel } from '../components/SignSpliceAdminPanel'
+import { BreakoutHuntAdminPanel } from '../components/BreakoutHuntAdminPanel'
+import { CardDrawAdminPanel } from '../components/CardDrawAdminPanel'
 import { PageForm } from '../components/PageForm'
 import { InstructionPage } from '../components/InstructionPage'
 import { TaskLinksEditor } from '../components/TaskLinksEditor'
 import { TaskLinkButtons } from '../components/TaskLinkButtons'
 import { ParticleBackground } from '../components/ParticleBackground'
-import { AitbPoolEditor } from '../components/AitbPoolEditor'
+import { CardDrawEditor } from '../components/CardDrawEditor'
 import { AitbMissionModule } from '../components/AitbMissionModule'
 import { BonusBar } from '../components/AitbBonusBar'
 import { useBingoAuth } from '../hooks/useBingoAuth'
-import { aitbByName, AITB_MODULE_SLOTS, AITB_POINTS, aitbToolUrl, aitbToolCaption } from '../lib/aitbActivities'
+import { aitbByName, AITB_POINTS, aitbToolUrl, aitbToolCaption } from '../lib/aitbActivities'
+import { useCardDrawConfig } from '../hooks/useCardDrawConfig'
 import type { BingoTask, BingoTaskPage } from '../types/database'
 
 export function BingoDashTaskEdit() {
@@ -31,6 +35,7 @@ export function BingoDashTaskEdit() {
     : from && ADMIN_TABS.includes(from) ? `/bingo-dash/admin?tab=${from}`
     : '/bingo-dash/admin?tab=library'
   const [task, setTask] = useState<BingoTask | null>(null)
+  const { reload: reloadDraw } = useCardDrawConfig(taskId)
   const [editingTitle, setEditingTitle] = useState(false)
   const [titleValue, setTitleValue] = useState('')
   const [titleSaving, setTitleSaving] = useState(false)
@@ -588,6 +593,26 @@ export function BingoDashTaskEdit() {
           </div>
         )}
 
+        {/* Sign Splice cards carry their own game settings. */}
+        {task.task_type === 'sign_splice' && (
+          <SignSpliceAdminPanel
+            task={task}
+            onChange={patch => setTask(prev => (prev ? { ...prev, ...patch } : prev))}
+          />
+        )}
+
+        {task.task_type === 'breakout_hunt' && <BreakoutHuntAdminPanel taskId={task.id} />}
+
+        {/* The older stand-alone per-team draw. A card that uses one of the
+            draw designs deals through its slots instead, so this shows only
+            for a card that has no design chosen. */}
+        {(task.draw_style === 'list' || (!task.draw_style && (task.draw_count ?? 0) > 0)) && (
+        <CardDrawAdminPanel
+          task={task}
+          onChange={patch => setTask(prev => (prev ? { ...prev, ...patch } : prev))}
+        />
+        )}
+
         {/* Completion Warning (for Standard/Marshal mode) */}
         <div className="bg-white rounded-xl border border-gray-200 p-6 mt-6">
           <h2 className="text-lg font-bold text-gray-900 mb-1">Completion Warning</h2>
@@ -666,27 +691,21 @@ export function BingoDashTaskEdit() {
           />
         </div>
 
-        {/* AI Team Building draw pools — only for cards matched by name to an
-            AITB activity that carries an interactive module (Nerf cups,
-            roulette, the card deal). Every option a team can draw is editable
-            here, including its photo, live for every player immediately. */}
-        {(() => {
-          const activity = aitbByName(task.title)
-          if (!activity?.module) return null
-          const slots = AITB_MODULE_SLOTS[activity.module]
-          if (slots.length === 0) return null
-          return (
-            <div className="mt-6">
-              <h2 className="text-lg font-bold text-gray-900">🎲 AI Team Building draw pools</h2>
-              <p className="text-xs text-gray-400 mt-1">
-                This card runs the {activity.name} interactive module. Manage what each slot can draw below.
-              </p>
-              {slots.map(s => (
-                <AitbPoolEditor key={s.pool} poolKey={s.pool} emoji={s.emoji} label={s.label} />
-              ))}
-            </div>
-          )
-        })()}
+        {/* Draw — style, slots and every option a team can land on. Any card
+            can carry one; an AITB card's wheels and cups are the same thing. */}
+        <CardDrawEditor
+          taskId={task.id}
+          style={task.draw_style ?? null}
+          spins={task.draw_spins ?? 1}
+          images={task.draw_images ?? false}
+          onTaskChange={async changes => {
+            setTask(prev => (prev ? { ...prev, ...changes } : prev))
+            const { error } = await supabase.from('bingo_tasks').update(changes).eq('id', task.id)
+            if (error) alert('Failed to save draw settings: ' + error.message)
+            void reloadDraw()
+          }}
+          onSlotsChange={() => { void reloadDraw() }}
+        />
       </main>
     </div>
   )

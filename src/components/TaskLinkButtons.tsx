@@ -13,7 +13,7 @@ export function TaskLinkButtons({ links, hexCode, heading = 'Links for this task
 
   return (
     <div className="flex flex-col gap-3">
-      <p className="text-xs font-black uppercase tracking-[0.15em] a-text-2">
+      <p className="text-xs font-black uppercase tracking-[0.15em] text-white/70">
         🔗 <T>{heading}</T>
       </p>
       <div className="flex flex-col gap-2.5">

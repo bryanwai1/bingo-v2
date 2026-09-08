@@ -21,6 +21,11 @@ import { ParticleBackground } from '../components/ParticleBackground'
 import { TileFace } from '../components/BingoTileFace'
 import { SpeedEditTargets } from '../components/SpeedEditTargets'
 import { SampleTreeApp } from '../components/SampleTreeApp'
+import { SignSpliceCard } from '../components/SignSpliceCard'
+import { BreakoutHuntCard } from '../components/BreakoutHuntCard'
+import { CardDrawPanel } from '../components/CardDrawPanel'
+import { useCardDrawConfig } from '../hooks/useCardDrawConfig'
+import { drawHeading } from '../lib/cardDraw'
 import { RetroGamesSample } from '../components/RetroGamesSample'
 import { normalizeTileDisplay, type TileDisplay } from '../lib/bingoTileDisplay'
 import { normalizeUrl } from '../lib/normalizeUrl'
@@ -39,6 +44,8 @@ import type { BingoSection, BingoTask } from '../types/database'
 // ════════════════════════════════════════════════════════════════════════════
 
 const SAMPLE_TEAM_PASSWORD = '1234'   // demo "login" password (pre-filled on the join screen)
+// Where the demo remembers which tiles the presenter lit, per board.
+const GLOW_KEY = 'bingo_sample_glow'
 const DEMO_MARSHAL_PASSWORD = '4321'  // fixed demo marshal password — deliberately NOT the real
                                       // per-board marshal_password, so this public page never
                                       // leaks live-event secrets that could be used to cheat.
@@ -343,12 +350,14 @@ function JoinScreen({ onJoin }: { onJoin: (groupName: string) => void }) {
 // ── Bingo Tile ────────────────────────────────────────────────────────────────
 
 function BingoTile({
-  task, status, isInBingoLine, display, onClick,
+  task, status, isInBingoLine, display, glowing, onClick,
 }: {
   task: BingoTask
   status: TileStatus
   isInBingoLine: boolean
   display: TileDisplay
+  /** Demo only — a tile the presenter has lit up to draw the room's eye. */
+  glowing: boolean
   onClick: () => void
 }) {
   return (
@@ -356,7 +365,7 @@ function BingoTile({
       onClick={onClick}
       title={task.title}
       aria-label={task.title}
-      className="bingo-glow relative rounded-xl overflow-hidden flex items-center justify-center aspect-square transition-all duration-200 hover:scale-105 active:scale-95 focus:outline-none"
+      className={`bingo-glow relative rounded-xl overflow-hidden flex items-center justify-center aspect-square transition-all duration-200 hover:scale-105 active:scale-95 focus:outline-none${glowing ? ' bingo-glow-on' : ''}`}
       style={{
         backgroundColor: task.hex_code,
         // drives the .bingo-glow hover glow
@@ -369,6 +378,13 @@ function BingoTile({
         opacity: status === 'locked' ? 0.72 : 1,
       }}
     >
+      {/* The lit ring. Drawn as an overlay rather than a border so it sits
+          inside the tile's rounded corners and never shifts the layout. */}
+      {glowing && (
+        <div className="absolute inset-0 rounded-xl pointer-events-none z-20"
+          style={{ boxShadow: 'inset 0 0 0 3px rgba(255,255,255,0.92), inset 0 0 14px rgba(255,255,255,0.45)' }} />
+      )}
+
       {isInBingoLine && status === 'completed' && (
         <div className="absolute inset-0 bg-yellow-300/10 z-0 pointer-events-none" />
       )}
@@ -503,12 +519,19 @@ function TimerDisplay({ settings }: { settings: BingoSection | null }) {
 // ── Board Screen (sandbox) ────────────────────────────────────────────────────
 
 function BoardScreen({
-  teamName, gridTasks, scanState, section, onOpenTask, onSwitchTeam,
+  teamName, gridTasks, scanState, section, glowSlots, glowMode,
+  onToggleGlow, onClearGlow, onToggleGlowMode, onOpenTask, onSwitchTeam,
 }: {
   teamName: string
   gridTasks: BingoTask[]
   scanState: ScanState
   section: BingoSection | null
+  /** Slots lit on THIS board. Held by the page so a board switch keeps them. */
+  glowSlots: Set<number>
+  glowMode: boolean
+  onToggleGlow: (slot: number) => void
+  onClearGlow: () => void
+  onToggleGlowMode: () => void
   onOpenTask: (task: BingoTask) => void
   onSwitchTeam: () => void
 }) {
@@ -600,6 +623,24 @@ function BoardScreen({
           </div>
           <div className="flex flex-col items-end gap-2 flex-shrink-0 mt-1">
             <TimerDisplay settings={section} />
+            {/* Presenter control: pick the tiles to light up while talking the
+                room through the board. Demo only — nothing is saved. */}
+            <div className="flex items-center gap-2">
+              <button
+                onClick={onToggleGlowMode}
+                title="Tap tiles to light them up"
+                className={`text-xs font-bold px-2 py-0.5 rounded-full border transition-colors ${
+                  glowMode
+                    ? 'bg-purple-500 text-white border-purple-400'
+                    : 'text-gray-500 border-white/15 hover:text-gray-300'}`}
+              >
+                ✨ Glow{glowMode ? ' · tap tiles' : ''}
+              </button>
+              {glowSlots.size > 0 && (
+                <button onClick={onClearGlow}
+                  className="text-xs text-gray-500 hover:text-gray-300">Clear</button>
+              )}
+            </div>
             {!showLeaveConfirm ? (
               <button onClick={() => setShowLeaveConfirm(true)} className="text-xs text-gray-500 hover:text-gray-300 transition-colors">
                 Switch Team
@@ -669,12 +710,16 @@ function BoardScreen({
               {slots.map((task, i) =>
                 task ? (
                   <BingoTile
-                    key={task.id}
+                    key={`${i}-${task.id}`}
                     task={task}
                     status={getStatus(task.id)}
                     isInBingoLine={bingoSlots.has(i)}
                     display={tileDisplay}
-                    onClick={() => onOpenTask(task)}
+                    glowing={glowSlots.has(i)}
+                    onClick={() => {
+                      if (glowMode) onToggleGlow(i)
+                      else onOpenTask(task)
+                    }}
                   />
                 ) : (
                   <EmptyTile key={`empty-${i}`} />
@@ -765,6 +810,7 @@ const SampleTaskDetail = forwardRef<SampleTaskDetailHandle, {
   // A standalone AITB card (not opened via the bundle tile) still carries the
   // same interactive module — the demo has no per-team progress row for it,
   // so the result just lives in this component's own state.
+  const { config: drawConfig } = useCardDrawConfig(task.id)
   const aitbBase = aitbByName(task.title)
   // A card can rescale or switch off the AITB bonus clock — see
   // supabase/020_aitb_card_timer.sql.
@@ -1002,13 +1048,18 @@ const SampleTaskDetail = forwardRef<SampleTaskDetailHandle, {
         {/* Interactive module (Nerf cups, roulette wheels, card deal, retro
             tracker), a tickable mission checklist, and AI tool links — all
             apply to every AITB activity, whether or not it carries a module. */}
+        {/* Driven by the card's own draw configuration, not by whether the
+            card happens to be an AI Team Building activity. */}
+        {drawConfig && (
+          <div className="mb-8 mt-8 animate-slide-up">
+            <AitbMissionModule activity={aitbActivity} color={task.hex_code} storeId={task.id}
+              drawConfig={drawConfig} savedWords={aitbWords}
+              disabled={completed} onSave={setAitbWords} progressId={`demo-standalone-${task.id}`} />
+          </div>
+        )}
+
         {aitbActivity && (
           <div className="mb-8 mt-8 animate-slide-up">
-            {aitbActivity.module && (
-              <AitbMissionModule activity={aitbActivity} savedWords={aitbWords}
-                disabled={completed} onSave={setAitbWords} progressId={`demo-standalone-${task.id}`} />
-            )}
-
             {/* Speed Edit Showdown works from a fixed set of target pictures. */}
             {aitbActivity.name === 'Speed Edit Showdown' && (
               <SpeedEditTargets color={aitbActivity.color} />
@@ -1067,6 +1118,19 @@ const SampleTaskDetail = forwardRef<SampleTaskDetailHandle, {
           </div>
         )}
 
+        {/* Whatever this card deals the team — colours, a riddle,
+            checkpoints. Sits after the instructions and before the AI
+            tool links, so it reads in the order the team acts. */}
+              {(task.draw_count ?? 0) > 0 && (task.draw_style === 'list' || !task.draw_style) && (
+                <CardDrawPanel
+                  demo
+                  teamId="demo"
+                  taskId={task.id}
+                  count={task.draw_count!}
+                  heading={drawHeading(task.title, task.draw_count!)}
+                />
+              )}
+
         {/* Helpful links */}
         {links.length > 0 && (
           <div className="mt-8 animate-slide-up">
@@ -1117,6 +1181,29 @@ const SampleTaskDetail = forwardRef<SampleTaskDetailHandle, {
                   boxShadow: `0 0 24px ${task.hex_code}44, inset 0 0 24px ${task.hex_code}11`,
                 }}
               >
+                {/* Sign Splice Title. The demo has no real team row, so the
+                    card runs entirely in memory — fully playable, but it
+                    forgets when the page reloads. */}
+                {/* Breakout Hunt — in-memory on the demo board. */}
+                {task.task_type === 'breakout_hunt' && (
+                  <BreakoutHuntCard demo teamId="demo" taskId={task.id} />
+                )}
+
+                {task.task_type === 'sign_splice' && (
+                  <SignSpliceCard
+                    demo
+                    teamId="demo"
+                    taskId={task.id}
+                    shopInput={task.sign_splice_shop_input ?? 'optional'}
+                    lotInput={task.sign_splice_lot_input ?? 'optional'}
+                    minLetters={task.sign_splice_min_letters}
+                    maxLetters={task.sign_splice_max_letters}
+                    allowSpaces={task.sign_splice_allow_spaces}
+                    allowNumbers={task.sign_splice_allow_numbers}
+                    minConfidence={task.sign_splice_min_confidence}
+                  />
+                )}
+
                 {/* Standard: Marshal password + Complete */}
                 {task.task_type === 'standard' && (
                   <>
@@ -1351,6 +1438,17 @@ function SampleProjector() {
   // What the big screen is showing: the bingo board or the scoreboard.
   const [view, setView] = useState<SampleView>('board')
 
+  // Tiles the presenter has lit, per board. Kept here rather than in
+  // BoardScreen (which remounts on every board switch) and mirrored into
+  // localStorage so a reload mid-presentation doesn't lose the setup.
+  const [glowMode, setGlowMode] = useState(false)
+  const [glowByBoard, setGlowByBoard] = useState<Record<string, number[]>>(() => {
+    try { return JSON.parse(localStorage.getItem(GLOW_KEY) ?? '{}') } catch { return {} }
+  })
+  useEffect(() => {
+    try { localStorage.setItem(GLOW_KEY, JSON.stringify(glowByBoard)) } catch { /* private mode */ }
+  }, [glowByBoard])
+
   // Remote control: a code (generated on first "Remote" click) opens a broadcast
   // channel; a paired phone drives the state below via commands.
   const [remoteCode, setRemoteCode] = useState<string | null>(null)
@@ -1543,6 +1641,16 @@ function SampleProjector() {
           gridTasks={gridTasks}
           scanState={scanState}
           section={selectedSection}
+          glowSlots={new Set(glowByBoard[selectedId ?? ''] ?? [])}
+          glowMode={glowMode}
+          onToggleGlowMode={() => setGlowMode(v => !v)}
+          onToggleGlow={slot => setGlowByBoard(prev => {
+            const key = selectedId ?? ''
+            const lit = new Set(prev[key] ?? [])
+            if (!lit.delete(slot)) lit.add(slot)
+            return { ...prev, [key]: [...lit] }
+          })}
+          onClearGlow={() => setGlowByBoard(prev => ({ ...prev, [selectedId ?? '']: [] }))}
           onOpenTask={handleOpenTask}
           onSwitchTeam={() => { setTeamName(null); setOpenTask(null) }}
         />

@@ -214,42 +214,17 @@ export const AITB_POOLS: Record<AitbPoolKey, string[]> = {
   style: ['Cartoon Animated','Horror Movie','Old School Black & White','Slow-Motion Epic'],
 }
 
-export type AitbModuleSlot = { emoji: string; label: string; pool: AitbPoolKey }
+/** One wheel / reel / cup on a card. `pool` is the key its options are
+ *  looked up under — a shared house pool or the card's own list. */
+export type AitbModuleSlot = { emoji: string; label: string; pool: string; count: number; inPrompt: boolean }
 
-/** Mode each module renders its slots as. */
-export const AITB_MODULE_MODE: Record<AitbModule, 'pick' | 'spin' | 'deal' | 'gamepick'> = {
-  cups: 'pick', roulette: 'spin', cards: 'deal', retro: 'gamepick',
-}
 
-export const AITB_MODULE_SLOTS: Record<AitbModule, AitbModuleSlot[]> = {
-  cups: [
-    { emoji: '🔴', label: 'Character', pool: 'cupCharacter' },
-    { emoji: '🔵', label: 'Action', pool: 'cupAction' },
-    { emoji: '🟡', label: 'Scene', pool: 'cupScene' },
-  ],
-  roulette: [
-    { emoji: '🎭', label: 'Genre', pool: 'genre' },
-    { emoji: '💬', label: 'Topic', pool: 'topic' },
-  ],
-  cards: [
-    { emoji: '🌍', label: 'Country', pool: 'country' },
-    { emoji: '🎭', label: 'Character', pool: 'cardChar' },
-    { emoji: '🎬', label: 'Scene', pool: 'cardScene' },
-    { emoji: '🎨', label: 'Style', pool: 'style' },
-  ],
-  // Retro's 'gamepick' mode doesn't draw from pools — it tracks a fixed list
-  // of games instead. Keep an empty entry so every AitbModule key resolves.
-  retro: [],
-}
 
 /** The pie-wheel (roulette) and card-deal modules render their own art via
  *  ResultRevealCard / reel images directly, not through the slot-machine
  *  image variants below — so this stays false for every module; it's kept
  *  only so those slot-machine components have somewhere to resolve from if
  *  they're ever used again. */
-export function aitbModuleHasImages(module: AitbModule): boolean {
-  return module === 'cards'
-}
 
 
 /** The 3 games a Retro Game Speed Build team races to finish, ported from

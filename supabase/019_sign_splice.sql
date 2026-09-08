@@ -91,3 +91,52 @@ begin
     create policy ss_photos_all on bingo_sign_splice_photos for all using (true) with check (true);
   end if;
 end $$;
+
+-- ── Screen 4: shop details entry ─────────────────────────────────────────────
+--
+-- The shop the participant types becomes the identity behind "one shop = one
+-- letter" (Rules 4-6), which is far more reliable than guessing it from the
+-- first OCR word. No venue directory is preloaded, so Rule 11's fuzzy matching
+-- is deliberately out of scope and there is no shop_id.
+--
+-- Rules 8/10 are logged rather than queued: play never blocks on a marshal, but
+-- every low-confidence or near-duplicate submission is recorded so a
+-- facilitator can audit or settle a dispute afterwards.
+
+-- Per-card configuration, set in the admin Card Library.
+alter table bingo_tasks
+  add column if not exists sign_splice_shop_input text not null default 'optional';
+
+alter table bingo_tasks
+  add column if not exists sign_splice_lot_input text not null default 'optional';
+
+alter table bingo_tasks
+  drop constraint if exists bingo_tasks_sign_splice_shop_input_check;
+alter table bingo_tasks
+  add constraint bingo_tasks_sign_splice_shop_input_check
+  check (sign_splice_shop_input in ('hidden', 'optional', 'compulsory'));
+
+alter table bingo_tasks
+  drop constraint if exists bingo_tasks_sign_splice_lot_input_check;
+alter table bingo_tasks
+  add constraint bingo_tasks_sign_splice_lot_input_check
+  check (sign_splice_lot_input in ('hidden', 'optional', 'compulsory'));
+
+-- What the participant typed, kept alongside the collected letter.
+alter table bingo_sign_splice_letters
+  add column if not exists shop_lot text;
+
+-- Audit trail for flagged submissions.
+alter table bingo_sign_splice_photos
+  add column if not exists shop_name text;
+alter table bingo_sign_splice_photos
+  add column if not exists shop_lot text;
+alter table bingo_sign_splice_photos
+  add column if not exists low_confidence boolean not null default false;
+alter table bingo_sign_splice_photos
+  add column if not exists similar_flag boolean not null default false;
+
+-- Lets a facilitator pull just the questionable submissions after the event.
+create index if not exists idx_ss_photos_flagged
+  on bingo_sign_splice_photos (team_id, task_id)
+  where low_confidence or similar_flag;

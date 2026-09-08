@@ -14,6 +14,10 @@ import { ParticleBackground } from '../components/ParticleBackground'
 import { TimeUpAlarm } from '../components/TimeUpAlarm'
 import { ContestCard } from '../components/ContestCard'
 import { SignSpliceCard } from '../components/SignSpliceCard'
+import { BreakoutHuntCard } from '../components/BreakoutHuntCard'
+import { CardDrawPanel } from '../components/CardDrawPanel'
+import { useCardDrawConfig } from '../hooks/useCardDrawConfig'
+import { drawHeading } from '../lib/cardDraw'
 import { SpeedEditTargets } from '../components/SpeedEditTargets'
 import { SampleTreeApp } from '../components/SampleTreeApp'
 import { RetroGamesSample } from '../components/RetroGamesSample'
@@ -81,6 +85,9 @@ export function BingoDashParticipant() {
   const { photos, loading: photosLoading } = useBingoTaskPhotos(taskId)
   const { links } = useTaskLinks(taskId, 'bingo_task_links')
   const { recordScan, toggleComplete, submitTile, saveWords, saveSteps } = useBingoScans()
+  // A card can define its own draw slots; otherwise the module keeps its
+  // hardcoded shape.
+  const { config: drawConfig } = useCardDrawConfig(taskId)
   const memberId = localStorage.getItem('bingo-dash-member-id')
   const isLeader = localStorage.getItem('bingo-dash-member-role') === 'leader'
   const [submittedForApproval, setSubmittedForApproval] = useState(false)
@@ -282,6 +289,20 @@ export function BingoDashParticipant() {
     setShowLeaveConfirm(false)
     setLeaving(false)
   }
+
+  // Sign Splice and Breakout verify themselves — OCR for one, a marshal's
+  // approval of the photo set for the other — so finishing the card crosses the
+  // tile off directly. Without this a team could collect all ten objects and
+  // still score nothing.
+  const completeSelfVerifiedCard = useCallback(async () => {
+    if (!scanRecord || scanRecord.completed) return
+    try {
+      await toggleComplete(scanRecord.id, true)
+      setScanRecord(prev => (prev ? { ...prev, completed: true } : prev))
+    } catch (err) {
+      console.warn('Could not complete card:', err)
+    }
+  }, [scanRecord, toggleComplete])
 
   const handlePhotoUpload = async (file: File) => {
     if (!team || !taskId || !scanRecord) return
@@ -600,18 +621,23 @@ export function BingoDashParticipant() {
             team's bingo_scans row rather than a bundle's aitb_progress row —
             then the tickable mission checklist and AI tool links, which apply
             to every AITB activity whether or not it carries a module. */}
+        {/* The draw is driven by the card's own configuration, so a card
+            outside AI Team Building can carry one too. */}
+        {drawConfig && scanRecord && (
+          <div className="mb-8 mt-8 animate-slide-up">
+            <AitbMissionModule activity={aitbActivity} color={task.hex_code} storeId={task.id}
+              drawConfig={drawConfig} savedWords={scanRecord.words}
+              disabled={scanRecord.completed}
+              onSave={words => {
+                setScanRecord(prev => (prev ? { ...prev, words } : prev))
+                void saveWords(scanRecord.id, words)
+              }}
+              progressId={scanRecord.id} />
+          </div>
+        )}
+
         {aitbActivity && scanRecord && (
           <div className="mb-8 mt-8 animate-slide-up">
-            {aitbActivity.module && (
-              <AitbMissionModule activity={aitbActivity} savedWords={scanRecord.words}
-                disabled={scanRecord.completed}
-                onSave={words => {
-                  setScanRecord(prev => (prev ? { ...prev, words } : prev))
-                  void saveWords(scanRecord.id, words)
-                }}
-                progressId={scanRecord.id} />
-            )}
-
             {/* Speed Edit Showdown works from a fixed set of target pictures. */}
             {aitbActivity.name === 'Speed Edit Showdown' && (
               <SpeedEditTargets color={aitbActivity.color} />
@@ -670,6 +696,20 @@ export function BingoDashParticipant() {
             </div>
           </div>
         )}
+
+        {/* Whatever this card deals the team — colours, a riddle,
+            checkpoints. Sits after the instructions and before the AI
+            tool links, so it reads in the order the team acts. */}
+            {/* Cards that promise the team something in-app — their colours,
+                their riddle, their checkpoints — deal it here. */}
+            {(task.draw_count ?? 0) > 0 && (task.draw_style === 'list' || !task.draw_style) && team && taskId && (
+              <CardDrawPanel
+                teamId={team.id}
+                taskId={taskId}
+                count={task.draw_count!}
+                heading={drawHeading(task.title, task.draw_count!)}
+              />
+            )}
 
         {/* Helpful links */}
         {links.length > 0 && (
@@ -766,8 +806,24 @@ export function BingoDashParticipant() {
               {/* ── Standard: Marshal password + Complete button ── */}
               {/* Sign Splice Title: hunt each letter of your title on a
                   different shop sign. OCR and stitching run in the page. */}
+              {/* Breakout Hunt: decode 10 puzzles, photograph each object. */}
+              {task.task_type === 'breakout_hunt' && team && taskId && (
+                <BreakoutHuntCard teamId={team.id} taskId={taskId} onComplete={completeSelfVerifiedCard} />
+              )}
+
               {task.task_type === 'sign_splice' && team && taskId && (
-                <SignSpliceCard teamId={team.id} taskId={taskId} />
+                <SignSpliceCard
+                  teamId={team.id}
+                  taskId={taskId}
+                  shopInput={task.sign_splice_shop_input ?? 'optional'}
+                  lotInput={task.sign_splice_lot_input ?? 'optional'}
+                  minLetters={task.sign_splice_min_letters}
+                  maxLetters={task.sign_splice_max_letters}
+                  allowSpaces={task.sign_splice_allow_spaces}
+                  allowNumbers={task.sign_splice_allow_numbers}
+                  minConfidence={task.sign_splice_min_confidence}
+                  onComplete={completeSelfVerifiedCard}
+                />
               )}
 
               {task.task_type === 'standard' && (

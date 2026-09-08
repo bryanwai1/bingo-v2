@@ -1,7 +1,7 @@
 /**
  * AITB — interactive mission-page modules. Rendered on the mission page once a
  * team has checked in; each writes its result into aitb_progress.words (positions
- * match AITB_MODULE_SLOTS) so the admin sees it live via realtime.
+ * match the card's configured slots) so the admin sees it live via realtime.
  *
  *   · cups     (Nerf)             → tap the word on each cup you collected
  *   · roulette (Jingle/Dance)     → spin two wheels: genre, then topic
@@ -14,14 +14,21 @@
  */
 import { useEffect, useRef, useState } from 'react'
 import {
-  AITB_MODULE_SLOTS, AITB_MODULE_MODE, AITB_RETRO_GAMES,
-  aitbModuleHasImages,
-  type AitbActivity, type AitbModuleSlot, type AitbPoolKey,
+  AITB_RETRO_GAMES,
+  type AitbActivity, type AitbModuleSlot,
 } from '../lib/aitbActivities'
-import { useAitbPools, type AitbPoolOption } from '../hooks/useAitbPools'
+
+import type { DrawConfig } from '../hooks/useCardDrawConfig'
+import { DEAL_SEP, type DrawOption } from '../lib/drawOptions'
 
 type ModuleProps = {
-  activity: AitbActivity
+  /** Present only for AI Team Building cards; a plain card supplies its own
+   *  colour and store id instead. */
+  activity?: AitbActivity | null
+  /** Accent colour, when there is no activity to take it from. */
+  color?: string
+  /** Namespaces the spin counter when there is no activity id. */
+  storeId?: string
   savedWords: string[]
   disabled: boolean
   onSave: (words: string[]) => void
@@ -29,6 +36,9 @@ type ModuleProps = {
    *  deletes the row) hands the next attempt a clean 2 spins, and so switching
    *  teams on one phone never inherits the other team's burnt spins. */
   progressId: string
+  /** Slots and presentation read from the database. When absent the card keeps
+   *  its hardcoded module shape. */
+  drawConfig?: DrawConfig | null
 }
 
 type SubProps = {
@@ -39,20 +49,109 @@ type SubProps = {
   onSave: (words: string[]) => void
   /** localStorage namespace for this activity — used to remember spins used. */
   storeKey: string
-  /** Admin-editable word/photo pools, live from aitb_pool_items (falls back
-   *  to the hardcoded defaults while loading or if a pool is still empty). */
-  pools: Record<AitbPoolKey, AitbPoolOption[]>
+  /** Options for each slot, keyed by the slot's source key. Covers both the
+   *  shared house pools and a card's own list — the module does not care which. */
+  pools: Record<string, DrawOption[]>
+  /** Re-draws allowed before the result locks. */
+  maxSpins: number
 }
 
-/** Plain label list for a slot's pool — the common case (drawing, sizing,
+/** Plain label list for a slot's options — the common case (drawing, sizing,
  *  wheel text) that doesn't need the photo. */
-function poolLabels(pools: Record<AitbPoolKey, AitbPoolOption[]>, key: AitbPoolKey): string[] {
-  return pools[key].map(o => o.label)
+function poolLabels(pools: Record<string, DrawOption[]>, key: string): string[] {
+  return (pools[key] ?? []).map(o => o.label)
+}
+
+/**
+ * What one slot lands on: `slot.count` items, never repeating within the slot,
+ * joined into the single string the slot saves. A count of 1 — every wheel, and
+ * every card until an admin says otherwise — returns just the one label.
+ */
+function drawSlot(pools: Record<string, DrawOption[]>, slot: AitbModuleSlot, taken?: Set<string>): string {
+  const available = poolLabels(pools, slot.pool).filter(v => !taken?.has(v))
+  const picks: string[] = []
+  const left = [...available]
+  for (let i = 0; i < Math.max(1, slot.count) && left.length; i++) {
+    const [pick] = left.splice(Math.floor(Math.random() * left.length), 1)
+    picks.push(pick)
+    taken?.add(pick)
+  }
+  return picks.join(DEAL_SEP)
+}
+
+/** One slot's result: a single word, or a chip each when it dealt several. */
+function DealtWords({ value, color, hexOf }: {
+  value: string
+  color?: string
+  /** Swatch for a part, when the option carries one. */
+  hexOf?: (label: string) => string | null
+}) {
+  const parts = (value || '').split(DEAL_SEP).filter(Boolean)
+  if (parts.length <= 1) return <>{value}</>
+  return (
+    <div className="flex flex-wrap gap-1 justify-center">
+      {parts.map((p, i) => {
+        const hex = hexOf?.(p) ?? null
+        return (
+          <span key={i} className="px-2 py-0.5 rounded-full text-xs font-black inline-flex items-center gap-1"
+            style={{ background: color ? `${color}26` : 'rgba(255,255,255,0.1)', color: color ?? '#fff' }}>
+            {hex && <span className="w-2.5 h-2.5 rounded-full border border-white/40" style={{ background: hex }} />}
+            {p}
+          </span>
+        )
+      })}
+    </div>
+  )
+}
+
+/**
+ * The nudge a team may ask for, on whatever they drew.
+ *
+ * Ported from the per-team draw this module replaced. The answer lives on the
+ * item too and is never fetched here — solving it is the point of the card.
+ */
+function DrawHints({ pools, slots, vals, color }: {
+  pools: Record<string, DrawOption[]>
+  slots: AitbModuleSlot[]
+  vals: string[]
+  color: string
+}) {
+  const [show, setShow] = useState(false)
+  const hints = slots.flatMap((s, i) =>
+    (vals[i] ?? '').split(DEAL_SEP).filter(Boolean).map(label => {
+      const hint = (pools[s.pool] ?? []).find(o => o.label === label)?.hint
+      return hint ? { label, hint } : null
+    }))
+    .filter((h): h is { label: string; hint: string } => !!h)
+  if (hints.length === 0) return null
+  return (
+    <>
+      {show && (
+        <div className="rounded-2xl px-4 py-3 mt-3" style={{ background: `${color}14`, border: `1px solid ${color}55` }}>
+          {hints.map((h, i) => (
+            <p key={i} className="text-white/70 text-xs font-bold leading-snug mb-1 last:mb-0">
+              💡 <b className="text-white/90">{h.label}</b> — {h.hint}
+            </p>
+          ))}
+        </div>
+      )}
+      <button onClick={() => setShow(v => !v)}
+        className="mt-2 w-full py-2 rounded-xl bg-white/10 border border-white/25 text-white/70 text-xs font-black">
+        {show ? 'Hide hint' : `💡 Need a hint?`}
+      </button>
+    </>
+  )
+}
+
+/** Swatch for one drawn label — a card's own colour list carries a hex
+ *  instead of a photo, and painting it beats showing a placeholder. */
+function poolHex(pools: Record<string, DrawOption[]>, key: string, label: string): string | null {
+  return (pools[key] ?? []).find(o => o.label === label)?.hex ?? null
 }
 
 /** Photo for one drawn label, if the admin attached one to that pool item. */
-function poolPhoto(pools: Record<AitbPoolKey, AitbPoolOption[]>, key: AitbPoolKey, label: string): string | null {
-  return pools[key].find(o => o.label === label)?.photoUrl ?? null
+function poolPhoto(pools: Record<string, DrawOption[]>, key: string, label: string): string | null {
+  return (pools[key] ?? []).find(o => o.label === label)?.photoUrl ?? null
 }
 
 /* Each roulette wheel may be spun at most twice: the first spin plus one
@@ -64,7 +163,7 @@ function poolPhoto(pools: Record<AitbPoolKey, AitbPoolOption[]>, key: AitbPoolKe
    the first one used, a wheel whose value this device did NOT spin is treated as
    fully used — erring strict, so a team can't farm extra re-rolls by passing the
    mission around their phones. The spinning phone keeps its own count either way. */
-const MAX_SPINS = 2
+const DEFAULT_MAX_SPINS = 2
 
 function readSpins(key: string, n: number): number[] {
   try {
@@ -78,20 +177,25 @@ function writeSpins(key: string, arr: number[]) {
   try { localStorage.setItem(key, JSON.stringify(arr)) } catch { /* private mode — cap is best-effort */ }
 }
 
-export function AitbMissionModule({ activity, savedWords, disabled, onSave, progressId }: ModuleProps) {
-  const mod = activity.module
-  const { pools } = useAitbPools()
-  if (!mod) return null
-  const slots = AITB_MODULE_SLOTS[mod]
-  const mode = AITB_MODULE_MODE[mod]
+export function AitbMissionModule({ activity, color, storeId, savedWords, disabled, onSave, progressId, drawConfig }: ModuleProps) {
+  // Shape and options both come from the card's own configuration — slots,
+  // style, artwork and the option lists are rows in the database, so a new draw
+  // is an admin task rather than a deploy.
+  if (!drawConfig) return null
+  const { slots, mode, images: hasImages, options: pools } = drawConfig
   const sub: SubProps = {
-    color: activity.color, slots, savedWords, disabled, onSave, pools,
-    storeKey: `aitb_spins_${activity.id}_${progressId}`,
+    color: color ?? activity?.color ?? '#64748b', slots: slots ?? [], savedWords, disabled, onSave, pools,
+    storeKey: `aitb_spins_${storeId ?? activity?.id ?? 'card'}_${progressId}`,
+    maxSpins: drawConfig?.spins ?? DEFAULT_MAX_SPINS,
   }
   if (mode === 'pick') return <CupsPicker {...sub} />
-  if (mode === 'spin') return aitbModuleHasImages(mod) ? <ImageSpinModule {...sub} /> : <SpinModule {...sub} />
+  if (mode === 'spin') return hasImages ? <ImageSpinModule {...sub} /> : <SpinModule {...sub} />
   if (mode === 'gamepick') return <GamePickModule {...sub} />
-  return aitbModuleHasImages(mod) ? <ImageDealModule {...sub} /> : <TextDealModule {...sub} />
+  // 'list' is the plain per-team draw, owned by CardDrawPanel — it deals from
+  // the card's bank and remembers what each team got, which this module does
+  // not do. Rendering nothing here avoids showing the draw twice.
+  if (mode === 'list') return null
+  return hasImages ? <ImageDealModule {...sub} /> : <TextDealModule {...sub} />
 }
 
 // ── Nerf: tap the word printed on each cup you collected ─────────────────────
@@ -111,7 +215,7 @@ function CupsPicker({ color, slots, savedWords, disabled, onSave, pools }: SubPr
   }, [savedWords, dealtSaved, slots])
 
   const copyPrompt = () => {
-    navigator.clipboard?.writeText(vals.join(' '))
+    navigator.clipboard?.writeText(dealCells(slots, vals).filter(c => c.slot.inPrompt).map(c => c.value).join(' '))
       .then(() => { setCopied(true); setTimeout(() => setCopied(false), 1800) })
       .catch(() => { /* clipboard blocked — the text is on screen to type */ })
   }
@@ -122,10 +226,11 @@ function CupsPicker({ color, slots, savedWords, disabled, onSave, pools }: SubPr
     setDealing(true)
     let ticks = 0
     const iv = setInterval(() => {
-      setFlash(slots.map(s => { const p = poolLabels(pools, s.pool); return p[Math.floor(Math.random() * p.length)] }))
+      setFlash(slots.map(s => drawSlot(pools, s)))
       if (++ticks > 16) {
         clearInterval(iv)
-        const result = slots.map(s => { const p = poolLabels(pools, s.pool); return p[Math.floor(Math.random() * p.length)] })
+        const taken: Record<string, Set<string>> = {}
+        const result = slots.map(s => drawSlot(pools, s, taken[s.pool] ??= new Set<string>()))
         setFlash([])
         setVals(result)
         setDealing(false)
@@ -137,6 +242,10 @@ function CupsPicker({ color, slots, savedWords, disabled, onSave, pools }: SubPr
 
   const showVals = flash.length ? flash : vals
   const done = vals.length > 0
+  const cells = dealCells(slots, showVals)
+  // Whether the draw reads as a prompt is the admin's call, per slot.
+  const promptWords = cells.filter(c => c.slot.inPrompt).map(c => c.value).filter(Boolean)
+  const isPrompt = promptWords.length > 0
   // Red / blue / yellow, matching the cups themselves — distinct per slot
   // rather than one shared activity color, so each result card reads as its
   // own cup at a glance (the "🔴 CHARACTER" header, etc).
@@ -145,24 +254,37 @@ function CupsPicker({ color, slots, savedWords, disabled, onSave, pools }: SubPr
   return (
     <div className="mb-6">
       <div className="text-xs font-black tracking-widest uppercase text-gray-400 mb-2">
-        🎯 {done ? 'Your draw — no re-draws!' : 'Tap DRAW to reveal your 3 secret words'}
+        🎯 {done ? 'Your draw — no re-draws!' : `Tap DRAW to reveal your ${totalDealt(slots)} secret ${totalDealt(slots) === 1 ? 'word' : 'words'}`}
       </div>
-      {/* Stacks on a phone; sits side-by-side once there's room for it (a
-          wide phone in landscape, a tablet, or a projector display). */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-        {slots.map((s, i) => {
-          const slotColor = SLOT_COLORS[i % SLOT_COLORS.length]
-          const shown = showVals[i]
+      {/* One card per item dealt, not per slot — a slot set to deal 4 puts
+          four cards on the table. Two across on a phone so each stays readable,
+          opening out to the full row on a laptop or projector. Auto-fit would
+          leave 4 cards as an awkward 3 + 1 at middling widths, so the column
+          count follows how many were dealt. */}
+      <div className={`grid gap-3 ${gridCols(cells.length)}`}>
+        {cells.map((cell, i) => {
+          const slotColor = SLOT_COLORS[cell.slotIndex % SLOT_COLORS.length]
+          const hex = cell.value ? poolHex(pools, cell.slot.pool, cell.value) : null
+          const photo = cell.value ? poolPhoto(pools, cell.slot.pool, cell.value) : null
           return (
             <div key={i} className="rounded-2xl p-3 flex flex-col"
-              style={{ background: 'rgba(255,255,255,0.04)', border: `2px solid ${done ? slotColor : 'rgba(255,255,255,0.12)'}`, transition: 'border-color .3s' }}>
+              style={{ background: 'rgba(255,255,255,0.04)', border: `2px solid ${done ? (hex ?? slotColor) : 'rgba(255,255,255,0.12)'}`, transition: 'border-color .3s' }}>
               <div className="flex items-center gap-1.5 justify-center mb-2">
-                <span className="w-2 h-2 rounded-full" style={{ background: slotColor }} />
-                <span className="text-[11px] font-black uppercase tracking-widest" style={{ color: slotColor }}>{s.label}</span>
+                <span className="w-2 h-2 rounded-full" style={{ background: hex ?? slotColor }} />
+                <span className="text-[11px] font-black uppercase tracking-widest truncate" style={{ color: slotColor }}>
+                  {cell.heading}
+                </span>
               </div>
-              <div className="text-center font-black flex-1 flex items-center justify-center min-h-[3rem]"
-                style={{ color: shown ? '#fff' : 'rgba(255,255,255,0.25)', letterSpacing: shown ? 'normal' : '0.1em', filter: dealing ? 'blur(0.5px)' : 'none' }}>
-                {shown || `— ${s.label.toLowerCase()} —`}
+              {photo && (
+                <img src={photo} alt="" className="w-full rounded-xl mb-2"
+                  style={{ aspectRatio: '4 / 3', objectFit: 'cover' }} />
+              )}
+              {!photo && hex && (
+                <div className="w-full rounded-xl mb-2" style={{ aspectRatio: '4 / 3', background: hex }} />
+              )}
+              <div className="text-center font-black flex-1 flex items-center justify-center min-h-[3rem] text-sm sm:text-base lg:text-lg leading-tight"
+                style={{ color: cell.value ? '#fff' : 'rgba(255,255,255,0.25)', letterSpacing: cell.value ? 'normal' : '0.1em', filter: dealing ? 'blur(0.5px)' : 'none' }}>
+                {cell.value || `— ${cell.slot.label.toLowerCase()} —`}
               </div>
             </div>
           )
@@ -177,13 +299,16 @@ function CupsPicker({ color, slots, savedWords, disabled, onSave, pools }: SubPr
       )}
       {done && (
         <div className="rounded-2xl px-4 py-3 mt-3 text-center" style={{ background: `${color}18`, border: `2px solid ${color}` }}>
-          <div className="text-[11px] font-black uppercase tracking-widest text-gray-400 mb-1">✨ Your prompt</div>
-          <div className="font-black" style={{ color }}>{vals.join(' ')}</div>
-          <button onClick={copyPrompt}
-            className="w-full mt-2.5 py-2 rounded-xl font-black text-sm transition-all active:scale-95"
-            style={{ background: color, color: '#000' }}>
-            {copied ? '✅ Copied!' : '📋 Copy this prompt'}
-          </button>
+          {isPrompt && <div className="text-[11px] font-black uppercase tracking-widest text-gray-400 mb-1">✨ Your prompt</div>}
+          {isPrompt && <div className="font-black" style={{ color }}>{promptWords.join(' ')}</div>}
+          {isPrompt && (
+            <button onClick={copyPrompt}
+              className="w-full mt-2.5 py-2 rounded-xl font-black text-sm transition-all active:scale-95"
+              style={{ background: color, color: '#000' }}>
+              {copied ? '✅ Copied!' : '📋 Copy this prompt'}
+            </button>
+          )}
+          <DrawHints pools={pools} slots={slots} vals={vals} color={color} />
           <div className="text-emerald-400 text-xs font-bold mt-2">✅ Saved — your host can see it live!</div>
         </div>
       )}
@@ -191,8 +316,61 @@ function CupsPicker({ color, slots, savedWords, disabled, onSave, pools }: SubPr
   )
 }
 
+/** One card on the table: what a slot dealt, item by item. */
+type DealCell = { slot: AitbModuleSlot; slotIndex: number; heading: string; value: string }
+
+/**
+ * Every draw is a set of cards, not a set of slots — a slot dealing four puts
+ * four cards down, numbered so they read as four separate draws.
+ */
+function dealCells(slots: AitbModuleSlot[], values: string[]): DealCell[] {
+  return slots.flatMap((slot, slotIndex) => {
+    const n = Math.max(1, slot.count)
+    const parts = (values[slotIndex] ?? '').split(DEAL_SEP)
+    return Array.from({ length: n }, (_, k) => ({
+      slot, slotIndex,
+      heading: n > 1 ? `${slot.label} ${k + 1}` : slot.label,
+      value: parts[k] ?? '',
+    }))
+  })
+}
+
+/**
+ * Column counts for the reveal, by how many cards are on the table.
+ *
+ * Written as whole class names because Tailwind reads them literally — a
+ * composed `grid-cols-${n}` would never make it into the stylesheet.
+ */
+function gridCols(n: number): string {
+  if (n <= 1) return 'grid-cols-1'
+  if (n === 2) return 'grid-cols-2'
+  if (n === 3) return 'grid-cols-1 sm:grid-cols-3'
+  if (n === 4) return 'grid-cols-2 lg:grid-cols-4'
+  if (n <= 6) return 'grid-cols-2 sm:grid-cols-3 lg:grid-cols-6'
+  return 'grid-cols-2 sm:grid-cols-4 lg:grid-cols-6'
+}
+
+/** Everything the card deals — a slot may hand out several items. */
+function totalDealt(slots: AitbModuleSlot[]): number {
+  return slots.reduce((n, s) => n + Math.max(1, s.count), 0)
+}
+
+/** How many wheels there really are, and how many spins each — the copy used
+ *  to hardcode Roulette's two wheels, which read wrong on any other card. */
+function spinHeading(icon: string, n: number, maxSpins: number): string {
+  const wheels = n === 1 ? 'the wheel' : n === 2 ? 'both wheels' : `all ${n} wheels`
+  const spins = maxSpins === 1 ? '1 spin' : `${maxSpins} spins`
+  return `${icon} Spin ${wheels} — ${spins} each, then it locks!`
+}
+
+/** The song brief only makes sense for the Roulette pair (a genre and a
+ *  topic). Any other draw just shows what it landed on. */
+function isSongDraw(slots: AitbModuleSlot[]): boolean {
+  return slots.length === 2 && slots[0].pool === 'pool:genre' && slots[1].pool === 'pool:topic'
+}
+
 /* The ready-to-use song brief, built from the two wheels. Slot order is
-   [Genre, Topic] (AITB_MODULE_SLOTS.roulette), so the sentence reads
+   [Genre, Topic] (the card's configured slots), so the sentence reads
    "Create a song about The Office Coffee in a Nursery Rhyme Style". */
 function SongPrompt({ genre, topic, color }: { genre: string; topic: string; color: string }) {
   const sentence = `Create a song about ${topic} in a ${genre} Style`
@@ -327,19 +505,21 @@ function WheelDial({ pool, rotation, spinning }: { pool: string[]; rotation: num
 }
 
 // ── Roulette: spin each wheel one at a time ──────────────────────────────────
-function SpinModule({ color, slots, savedWords, disabled, onSave, storeKey, pools }: SubProps) {
+function SpinModule({ color, slots, savedWords, disabled, onSave, storeKey, pools, maxSpins }: SubProps) {
   const [spins, setSpins] = useState<number[]>(() => readSpins(storeKey, slots.length))
 
   // A wheel already spun elsewhere (teammate's phone) is locked here — this
-  // device can't know how many of the team's 2 spins are left, so it assumes none.
+  // device can't know how many of the team's spins are left, so it assumes none.
+  // maxSpins is a dependency because it arrives with the card's config after
+  // the first render, so the effect must re-run once the real cap is known.
   useEffect(() => {
     setSpins(prev => {
-      const next = prev.map((c, i) => (savedWords[i] && c === 0 ? MAX_SPINS : c))
+      const next = prev.map((c, i) => (savedWords[i] && c === 0 ? maxSpins : c))
       if (next.every((c, i) => c === prev[i])) return prev
       writeSpins(storeKey, next)
       return next
     })
-  }, [savedWords, storeKey])
+  }, [savedWords, storeKey, maxSpins])
 
   const bumpSpin = (i: number) => setSpins(prev => {
     const next = [...prev]
@@ -357,7 +537,7 @@ function SpinModule({ color, slots, savedWords, disabled, onSave, storeKey, pool
   }, [savedWords, slots])
 
   const spin = (i: number) => {
-    if (disabled || spinning !== null || (spins[i] || 0) >= MAX_SPINS) return
+    if (disabled || spinning !== null || (spins[i] || 0) >= maxSpins) return
     const pool = poolLabels(pools, slots[i].pool)
     const idx = Math.floor(Math.random() * pool.length)
     const final = pool[idx]
@@ -383,12 +563,12 @@ function SpinModule({ color, slots, savedWords, disabled, onSave, storeKey, pool
   return (
     <div className="mb-6">
       <div className="text-xs font-black tracking-widest uppercase text-gray-400 mb-2">
-        🎡 Spin both wheels — {MAX_SPINS} spins each, then it locks!
+        {spinHeading('🎡', slots.length, maxSpins)}
       </div>
       <div className="grid grid-cols-2 gap-3">
         {slots.map((s, i) => {
           const isSpin = spinning === i
-          const left = MAX_SPINS - (spins[i] || 0)
+          const left = maxSpins - (spins[i] || 0)
           return (
             <div key={i} className="rounded-2xl p-3 flex flex-col items-center text-center gap-2"
               style={{ background: 'rgba(255,255,255,0.04)', border: `2px solid ${vals[i] ? color : 'rgba(255,255,255,0.1)'}` }}>
@@ -416,8 +596,8 @@ function SpinModule({ color, slots, savedWords, disabled, onSave, storeKey, pool
               <ResultRevealCard key={i} photoUrl={poolPhoto(pools, s.pool, vals[i])} label={s.label} emoji={s.emoji} word={vals[i]} color={color} />
             ))}
           </div>
-          <SongPrompt genre={vals[0]} topic={vals[1]} color={color} />
-          <div className="text-emerald-400 text-xs font-bold mt-2 text-center">✅ Genre + topic locked in — your host can see it live!</div>
+          {isSongDraw(slots) && <SongPrompt genre={vals[0]} topic={vals[1]} color={color} />}
+          <div className="text-emerald-400 text-xs font-bold mt-2 text-center">✅ Locked in — your host can see it live!</div>
         </>
       )}
     </div>
@@ -452,8 +632,8 @@ const CELL = 132          // px height of one image cell (reel window height)
 const REEL_PAD = 20       // random frames that scroll past before the result
 
 function ImageReel({ pool, pools, color, label, emoji, final, spinning, durationMs }: {
-  pool: AitbPoolKey
-  pools: Record<AitbPoolKey, AitbPoolOption[]>
+  pool: string
+  pools: Record<string, DrawOption[]>
   color: string
   label: string
   emoji: string
@@ -497,7 +677,9 @@ function ImageReel({ pool, pools, color, label, emoji, final, spinning, duration
                     {src
                       ? <img src={src} alt="" draggable={false}
                           style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
-                      : <div style={{ width: '100%', height: '100%', background: 'rgba(255,255,255,0.06)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 28 }}>❔</div>}
+                      : <div style={{ width: '100%', height: '100%', background: poolHex(pools, pool, item) ?? 'rgba(255,255,255,0.06)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 28 }}>
+                          {poolHex(pools, pool, item) ? '' : '❔'}
+                        </div>}
                   </div>
                 )
               })}
@@ -509,7 +691,7 @@ function ImageReel({ pool, pools, color, label, emoji, final, spinning, duration
       </div>
       <div className="text-xs font-black px-2 pb-2 pt-1.5 text-center leading-tight flex items-center justify-center"
         style={{ color: settled ? '#fff' : '#94a3b8', minHeight: '2.4em' }}>
-        {settled ? final : spinning ? '🎰' : '—'}
+        {settled ? <DealtWords value={final!} color={color} hexOf={l => poolHex(pools, pool, l)} /> : spinning ? '🎰' : '—'}
       </div>
     </div>
   )
@@ -541,19 +723,13 @@ function ImageDealModule({ color, slots, savedWords, disabled, onSave, pools }: 
   const deal = () => {
     if (disabled || busy.current || vals.length) return
     busy.current = true
-    // Final draw — keep values distinct within any shared pool (e.g. 2 animals).
+    // Keep values distinct within any shared pool — across slots reading the
+    // same pool, and within one slot that deals several.
     const taken: Record<string, Set<string>> = {}
-    const result = slots.map(s => {
-      const pool = poolLabels(pools, s.pool)
-      const t = taken[s.pool] ?? (taken[s.pool] = new Set<string>())
-      const avail = pool.filter(v => !t.has(v))
-      const pick = avail[Math.floor(Math.random() * avail.length)]
-      t.add(pick)
-      return pick
-    })
+    const result = slots.map(s => drawSlot(pools, s, taken[s.pool] ??= new Set<string>()))
     setFinals(result)
     setDealing(true)
-    const maxMs = SPIN_BASE + (slots.length - 1) * SPIN_STAGGER + 200
+    const maxMs = SPIN_BASE + (totalDealt(slots) - 1) * SPIN_STAGGER + 200
     setTimeout(() => {
       setVals(result)
       setDealing(false)
@@ -563,33 +739,37 @@ function ImageDealModule({ color, slots, savedWords, disabled, onSave, pools }: 
   }
 
   const done = vals.length > 0
-  const isAnimals = slots.length === 2
-  const cols = slots.length >= 3 ? 'grid-cols-2 sm:grid-cols-4' : 'grid-cols-2'
+  const cells = dealCells(slots, finals)
+  const isAnimals = slots.every(sl => /animal/i.test(sl.label))
   return (
     <div className="mb-6">
       <div className="text-xs font-black tracking-widest uppercase text-gray-400 mb-2">
-        🎰 {done ? 'Your draw — no re-draws!' : isAnimals ? 'Tap to draw your 2 animals' : 'Tap to deal your 4 cards'}
+        🎰 {done ? 'Your draw — no re-draws!' : isAnimals ? `Tap to draw your ${totalDealt(slots)} animals` : `Tap to deal your ${totalDealt(slots)} cards`}
       </div>
-      <div className={`grid ${cols} gap-2`}>
-        {slots.map((s, i) => (
-          <ImageReel key={i} pool={s.pool} pools={pools} color={color} label={s.label} emoji={s.emoji}
-            final={finals[i] ?? null} spinning={dealing} durationMs={SPIN_BASE + i * SPIN_STAGGER} />
+      {/* A reel per item, so a slot dealing four spins four — each stopping a
+          beat after the last, left to right. */}
+      <div className={`grid gap-2 ${gridCols(cells.length)}`}>
+        {cells.map((cell, i) => (
+          <ImageReel key={i} pool={cell.slot.pool} pools={pools} color={color}
+            label={cell.heading} emoji={cell.slot.emoji}
+            final={cell.value || null} spinning={dealing} durationMs={SPIN_BASE + i * SPIN_STAGGER} />
         ))}
       </div>
       {!done && (
         <button onClick={deal} disabled={disabled || dealing}
           className="w-full mt-3 py-3.5 rounded-2xl font-black text-lg transition-all active:scale-95 disabled:opacity-50"
           style={{ background: color, color: '#000' }}>
-          {dealing ? 'Dealing…' : isAnimals ? '🎲 DRAW MY 2 ANIMALS' : '🎴 DEAL MY 4 CARDS'}
+          {dealing ? 'Dealing…' : isAnimals ? `🎲 DRAW MY ${totalDealt(slots)} ANIMALS` : `🎴 DEAL MY ${totalDealt(slots)} CARDS`}
         </button>
       )}
+      {done && <DrawHints pools={pools} slots={slots} vals={vals} color={color} />}
       {done && <div className="text-emerald-400 text-xs font-bold mt-2 text-center">✅ Locked in — your host can see it live!</div>}
     </div>
   )
 }
 
 // ── Roulette (image slot-machine): spin each wheel one at a time ─────────────
-function ImageSpinModule({ color, slots, savedWords, disabled, onSave, storeKey, pools }: SubProps) {
+function ImageSpinModule({ color, slots, savedWords, disabled, onSave, storeKey, pools, maxSpins }: SubProps) {
   const seed = () => slots.map((_, i) => savedWords[i] ?? '')
   const [vals, setVals] = useState<string[]>(seed)
   const [finals, setFinals] = useState<string[]>(seed)
@@ -602,15 +782,15 @@ function ImageSpinModule({ color, slots, savedWords, disabled, onSave, storeKey,
     setFinals(prev => (prev.some(Boolean) ? prev : seed()))
   }, [savedWords, slots])
 
-  // A wheel already spun elsewhere is locked here — see MAX_SPINS note.
+  // A wheel already spun elsewhere is locked here — see maxSpins note.
   useEffect(() => {
     setSpins(prev => {
-      const next = prev.map((c, i) => (savedWords[i] && c === 0 ? MAX_SPINS : c))
+      const next = prev.map((c, i) => (savedWords[i] && c === 0 ? maxSpins : c))
       if (next.every((c, i) => c === prev[i])) return prev
       writeSpins(storeKey, next)
       return next
     })
-  }, [savedWords, storeKey])
+  }, [savedWords, storeKey, maxSpins])
 
   useEffect(() => {
     slots.forEach(s => poolLabels(pools, s.pool).forEach(item => {
@@ -620,7 +800,7 @@ function ImageSpinModule({ color, slots, savedWords, disabled, onSave, storeKey,
   }, [slots, pools])
 
   const spin = (i: number) => {
-    if (disabled || spinning !== null || (spins[i] || 0) >= MAX_SPINS) return
+    if (disabled || spinning !== null || (spins[i] || 0) >= maxSpins) return
     const pool = poolLabels(pools, slots[i].pool)
     const final = pool[Math.floor(Math.random() * pool.length)]
     setFinals(prev => { const n = [...prev]; n[i] = final; return n })
@@ -643,11 +823,11 @@ function ImageSpinModule({ color, slots, savedWords, disabled, onSave, storeKey,
   return (
     <div className="mb-6">
       <div className="text-xs font-black tracking-widest uppercase text-gray-400 mb-2">
-        🎰 Spin both wheels — {MAX_SPINS} spins each, then it locks!
+        {spinHeading('🎰', slots.length, maxSpins)}
       </div>
       <div className="grid grid-cols-2 gap-3">
         {slots.map((s, i) => {
-          const left = MAX_SPINS - (spins[i] || 0)
+          const left = maxSpins - (spins[i] || 0)
           return (
             <div key={i} className="flex flex-col gap-2">
               <ImageReel pool={s.pool} pools={pools} color={color} label={s.label} emoji={s.emoji}
@@ -666,8 +846,8 @@ function ImageSpinModule({ color, slots, savedWords, disabled, onSave, storeKey,
       </div>
       {vals.every(Boolean) && spinning === null && (
         <>
-          <SongPrompt genre={vals[0]} topic={vals[1]} color={color} />
-          <div className="text-emerald-400 text-xs font-bold mt-2 text-center">✅ Genre + topic locked in — your host can see it live!</div>
+          {isSongDraw(slots) && <SongPrompt genre={vals[0]} topic={vals[1]} color={color} />}
+          <div className="text-emerald-400 text-xs font-bold mt-2 text-center">✅ Locked in — your host can see it live!</div>
         </>
       )}
     </div>
@@ -692,19 +872,13 @@ function TextDealModule({ color, slots, savedWords, disabled, onSave, pools }: S
     setDealing(true)
     let ticks = 0
     const iv = setInterval(() => {
-      setFlash(slots.map(s => { const p = poolLabels(pools, s.pool); return p[Math.floor(Math.random() * p.length)] }))
+      setFlash(slots.map(s => drawSlot(pools, s)))
       if (++ticks > 16) {
         clearInterval(iv)
-        // Final draw — keep values distinct within any shared pool (e.g. 2 animals).
+        // Keep values distinct within any shared pool — across slots reading the
+        // same pool, and within one slot that deals several.
         const taken: Record<string, Set<string>> = {}
-        const result = slots.map(s => {
-          const pool = poolLabels(pools, s.pool)
-          const t = taken[s.pool] ?? (taken[s.pool] = new Set<string>())
-          const avail = pool.filter(v => !t.has(v))
-          const pick = avail[Math.floor(Math.random() * avail.length)]
-          t.add(pick)
-          return pick
-        })
+        const result = slots.map(s => drawSlot(pools, s, taken[s.pool] ??= new Set<string>()))
         setFlash([])
         setVals(result)
         setDealing(false)
@@ -716,31 +890,39 @@ function TextDealModule({ color, slots, savedWords, disabled, onSave, pools }: S
 
   const showVals = flash.length ? flash : vals
   const done = vals.length > 0
-  const isAnimals = slots.length === 2
+  const cells = dealCells(slots, showVals)
+  const isAnimals = slots.every(sl => /animal/i.test(sl.label))
   return (
     <div className="mb-6">
       <div className="text-xs font-black tracking-widest uppercase text-gray-400 mb-2">
-        🎴 {done ? 'Your draw — no re-draws!' : isAnimals ? 'Tap to draw your 2 animals' : 'Tap to deal your 4 cards'}
+        🎴 {done ? 'Your draw — no re-draws!' : isAnimals ? `Tap to draw your ${totalDealt(slots)} animals` : `Tap to deal your ${totalDealt(slots)} cards`}
       </div>
-      <div className="grid grid-cols-2 gap-2">
-        {slots.map((s, i) => (
-          <div key={i} className="rounded-2xl p-3 flex flex-col items-center text-center gap-1"
-            style={{ background: 'rgba(255,255,255,0.04)', border: `2px solid ${done ? color : 'rgba(255,255,255,0.1)'}`, transition: 'border-color .3s' }}>
-            <div className="text-[10px] font-black uppercase tracking-widest" style={{ color }}>{s.emoji} {s.label}</div>
-            <div className="font-black text-base min-h-[2.5rem] flex items-center justify-center leading-tight"
-              style={{ color: showVals[i] ? '#fff' : '#6b7280', filter: dealing ? 'blur(0.5px)' : 'none' }}>
-              {showVals[i] || '❔'}
+      {/* One card per item dealt, two up on a phone and out to a full row on
+          a projector — the same shape the instant reveal uses. */}
+      <div className={`grid gap-2 ${gridCols(cells.length)}`}>
+        {cells.map((cell, i) => {
+          const hex = cell.value ? poolHex(pools, cell.slot.pool, cell.value) : null
+          return (
+            <div key={i} className="rounded-2xl p-3 flex flex-col items-center text-center gap-1"
+              style={{ background: 'rgba(255,255,255,0.04)', border: `2px solid ${done ? (hex ?? color) : 'rgba(255,255,255,0.1)'}`, transition: 'border-color .3s' }}>
+              <div className="text-[10px] font-black uppercase tracking-widest" style={{ color }}>{cell.slot.emoji} {cell.heading}</div>
+              {hex && <div className="w-full rounded-xl" style={{ aspectRatio: '4 / 3', background: hex }} />}
+              <div className="font-black text-sm sm:text-base lg:text-lg min-h-[2.5rem] flex items-center justify-center leading-tight"
+                style={{ color: cell.value ? '#fff' : '#6b7280', filter: dealing ? 'blur(0.5px)' : 'none' }}>
+                {cell.value || '❔'}
+              </div>
             </div>
-          </div>
-        ))}
+          )
+        })}
       </div>
       {!done && (
         <button onClick={deal} disabled={disabled || dealing}
           className="w-full mt-3 py-3.5 rounded-2xl font-black text-lg transition-all active:scale-95 disabled:opacity-50"
           style={{ background: color, color: '#000' }}>
-          {dealing ? 'Dealing…' : isAnimals ? '🎲 DRAW MY 2 ANIMALS' : '🎴 DEAL MY 4 CARDS'}
+          {dealing ? 'Dealing…' : isAnimals ? `🎲 DRAW MY ${totalDealt(slots)} ANIMALS` : `🎴 DEAL MY ${totalDealt(slots)} CARDS`}
         </button>
       )}
+      {done && <DrawHints pools={pools} slots={slots} vals={vals} color={color} />}
       {done && <div className="text-emerald-400 text-xs font-bold mt-2 text-center">✅ Locked in — your host can see it live!</div>}
     </div>
   )
