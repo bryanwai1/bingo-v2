@@ -67,13 +67,13 @@ No marshal. All submissions go through the app.
 
 ## B · AI CREATION
 
-### 7. Team Poster — Act 1 · Setup `#FF7F5C`
-1. Agree on your movie title and tagline as a team.
+### 7. Comic Creator — Act 1 · Setup `#FF7F5C`
+1. Agree on your cartoon title as a team.
 2. Take one group "cast" photo somewhere bright in the mall.
-3. Use AI to turn that photo into a movie poster.
-4. Add your title onto the poster.
+3. Use AI to turn that photo into a short comic — keep it fun and clear for a children's audience.
+4. Add your title onto the comic.
 5. Check the title is spelled correctly and clearly readable.
-6. Upload the finished poster in the app.
+6. Upload the finished comic in the app.
 
 ### 8. AI Establishing World — Act 1 · Setup `#FF7F5C`
 1. Describe the world your story is set in to your AI tool.
@@ -91,13 +91,13 @@ No marshal. All submissions go through the app.
 5. Rebuild it as one clean trilingual menu page.
 6. Upload the trilingual page and a reveal clip in the app.
 
-### 10. Box Office Forecast — Act 3 · The Mission `#6C63D9`
-1. Imagine your film opening in 5 different cities.
-2. Ask AI to invent the ticket sales for each city.
-3. Ask AI to build a chart from those numbers.
-4. Film a mock press conference revealing the results.
-5. Sum up your box office in one spoken line.
-6. Upload the chart and the clip in the app.
+### 10. AI Movie Poster — Act 3 · The Mission `#6C63D9`
+1. Go to the cinema and find 5 different movie posters on display.
+2. Photograph at least 2 team members together near each poster.
+3. Use AI to place your team members into each poster scene.
+4. Match the poster's own colours and lighting style.
+5. Keep it reasonable and creative — tell a little story in the edit.
+6. Upload all 5 finished posters in the app.
 
 ### 11. AI Action Scene — Act 4 · Action `#E4536B`
 1. Picture one epic action beat — a chase, a blast or an escape.
@@ -181,11 +181,11 @@ No marshal. All submissions go through the app.
 
 ### 17. Route Master — Act 2 · The Hunt `#14A79A`
 1. Open the card in the app to get your 4 checkpoints.
-2. Ask AI for the fastest walking route between them.
+2. Ask AI to draw a map between the checkpoints — like a mall directory, naming each place.
 3. Follow that route together as one team.
 4. Film a short running "chase" clip at every checkpoint.
 5. Walk briskly but never run into crowds or block walkways.
-6. Upload the route plan and all 4 clips in the app.
+6. Upload the map and all 4 clips in the app.
 
 ### 18. Mission Control Budget — Act 3 · The Mission `#6C63D9`
 1. Your production has a pretend budget of RM500.
@@ -198,7 +198,7 @@ No marshal. All submissions go through the app.
 ### 19. Craft Services — Act 3 · The Mission `#6C63D9`
 1. Set a pretend budget for your wrap-party feast.
 2. Read the food court menu boards only — buy nothing.
-3. Ask AI to plan a meal for the team that fits the budget.
-4. Check every item on the plan really exists in this food court.
+3. Ask AI to plan a meal for the team that fits the budget, and check every item really exists in this food court.
+4. Make sure the budget number is written clearly on the meal plan, so the admin can check it.
 5. Film the team hyping up the imaginary feast.
 6. Upload the meal plan and clip in the app.

@@ -79,6 +79,10 @@ export interface TeamScan {
 // Per-board timer + time's-up alarm fields (subset of BingoSection).
 export interface BoardTimer {
   timer_seconds: number
+  /** The duration last configured (via Set / +/- while stopped, or a live
+   *  extension), kept separate from timer_seconds so Reset can hand back
+   *  the length the admin actually set instead of the paused remainder. */
+  timer_duration_seconds: number
   timer_end_at: string | null
   time_up_message: string
   time_up_label: string
@@ -137,7 +141,7 @@ export interface BingoTask {
   in_grid: boolean
   category: string
   points: number
-  task_type: 'standard' | 'answer' | 'photo' | 'sign_splice' | 'breakout_hunt'
+  task_type: 'standard' | 'answer' | 'photo' | 'video' | 'media' | 'sign_splice' | 'breakout_hunt'
   answer_question: string | null
   answer_text: string | null
   completion_warning: string | null
@@ -164,6 +168,12 @@ export interface BingoTask {
   sign_splice_min_confidence?: number
   // How many items this card deals to each team from its own bank.
   // 0 = no draw. See supabase/025_card_draws.sql.
+  /** Photo and video cards: let a team send more than one file. */
+  photo_multiple?: boolean
+  /** Which inputs the card collects, and whether each is compulsory.
+   *  See src/lib/completionInputs.ts. Empty means the card still runs on
+   *  task_type alone. */
+  completion_inputs?: Record<string, string>
   draw_count?: number
   /** How the draw is presented; null means the card has no draw. */
   draw_style?: 'pick' | 'spin' | 'deal' | 'gamepick' | 'list' | null
@@ -257,6 +267,10 @@ export interface BingoScan {
   words: string[]
   // AI Team Building cards only: indexes of ticked mission steps.
   steps_done: number[]
+  /** Cards collecting a typed answer: whether this team's answer was accepted.
+   *  The answer used to complete the tile outright, so it needed nowhere to
+   *  live; alongside other inputs it does. */
+  answer_ok?: boolean
 }
 
 // A head-to-head duel on a contest card. The challenger scans the defender's QR
@@ -297,6 +311,8 @@ export interface BingoPhotoSubmission {
   task_id: string
   scan_id: string | null
   photo_url: string
+  /** Whether photo_url points at a picture or a video clip. */
+  media_type?: 'image' | 'video'
   status: 'pending' | 'approved' | 'rejected'
   // Breakout Hunt sets only: what the photo should show, and which puzzle it
   // answers. See supabase/023_breakout_review.sql.

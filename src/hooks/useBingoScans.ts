@@ -4,12 +4,18 @@ import type { BingoScan } from '../types/database'
 
 export function useBingoScans() {
   const recordScan = useCallback(async (teamId: string, taskId: string): Promise<BingoScan | null> => {
+    // .single() errors when it finds anything other than exactly one row, so a
+    // team that somehow ended up with two scans for a card would get null here
+    // and be given a third, and a fourth. Take the oldest and carry on: the
+    // duplicates then heal instead of multiplying.
     const { data: existing } = await supabase
       .from('bingo_scans')
       .select('*')
       .eq('team_id', teamId)
       .eq('task_id', taskId)
-      .single()
+      .order('scanned_at', { ascending: true })
+      .limit(1)
+      .maybeSingle()
     if (existing) return existing
 
     const { data, error } = await supabase

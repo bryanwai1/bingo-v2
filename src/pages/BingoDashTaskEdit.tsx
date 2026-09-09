@@ -14,6 +14,10 @@ import { TaskLinksEditor } from '../components/TaskLinksEditor'
 import { TaskLinkButtons } from '../components/TaskLinkButtons'
 import { ParticleBackground } from '../components/ParticleBackground'
 import { CardDrawEditor } from '../components/CardDrawEditor'
+import {
+  INPUT_KINDS, INPUT_LABELS, fileNoun, inputKinds, effectiveInputs, usesInputs,
+  type CompletionInputs,
+} from '../lib/completionInputs'
 import { AitbMissionModule } from '../components/AitbMissionModule'
 import { BonusBar } from '../components/AitbBonusBar'
 import { useBingoAuth } from '../hooks/useBingoAuth'
@@ -44,7 +48,33 @@ export function BingoDashTaskEdit() {
   const [carouselIdx, setCarouselIdx] = useState(0)
   const [activeTab, setActiveTab] = useState<'instructions' | 'answer'>('instructions')
   // Answer tab state
-  const [taskType, setTaskType] = useState<'standard' | 'answer' | 'photo'>('standard')
+  const [taskType, setTaskType] = useState<'standard' | 'answer' | 'photo' | 'video' | 'media'>('standard')
+  const [inputs, setInputs] = useState<CompletionInputs>({})
+
+  /**
+   * Save the card's completion setup. task_type stays in step with the set so
+   * older code paths (and the card library's badges) still read sensibly: a
+   * card collecting files is 'photo'/'video'/'media', one collecting only a
+   * typed answer is 'answer', and no inputs at all means marshal.
+   */
+  const saveInputs = async (_hint: string, next: CompletionInputs) => {
+    if (!task) return
+    const kinds = inputKinds(next)
+    const type = kinds.length === 0
+      ? 'standard'
+      : next.photo && next.video ? 'media'
+      : next.video ? 'video'
+      : next.photo ? 'photo'
+      : 'answer'
+    setInputs(next)
+    setTaskType(type as typeof taskType)
+    setTask(prev => (prev ? { ...prev, task_type: type as typeof prev.task_type, completion_inputs: next } : prev))
+    const patch: Record<string, unknown> = { task_type: type, completion_inputs: next }
+    // Dropping the typed answer clears the question with it.
+    if (!next.answer) { patch.answer_question = null; patch.answer_text = null }
+    const { error } = await supabase.from('bingo_tasks').update(patch).eq('id', task.id)
+    if (error) alert('Failed to save: ' + error.message)
+  }
   const [answerQuestion, setAnswerQuestion] = useState('')
   const [answerText, setAnswerText] = useState('')
   const [answerSaving, setAnswerSaving] = useState(false)
@@ -69,7 +99,8 @@ export function BingoDashTaskEdit() {
       if (data) {
         setTask(data)
         setTitleValue(data.title)
-        setTaskType((data.task_type ?? 'standard') as 'standard' | 'answer' | 'photo')
+        setTaskType((data.task_type ?? 'standard') as 'standard' | 'answer' | 'photo' | 'video' | 'media')
+        setInputs(effectiveInputs(data.task_type, data.completion_inputs))
         setAnswerQuestion(data.answer_question ?? '')
         setAnswerText(data.answer_text ?? '')
         setCompletionWarning(data.completion_warning ?? '')
@@ -491,54 +522,112 @@ export function BingoDashTaskEdit() {
           <div className="bg-white rounded-xl border border-gray-200 p-6">
             <h2 className="text-lg font-bold text-gray-900 mb-4">Answer Input Settings</h2>
 
-            {/* Task type toggle */}
+            {/* Marshal is on its own — a password vouches for the whole card.
+                Everything else is a set the admin picks from, each piece either
+                compulsory or optional. */}
             <div className="mb-6">
-              <label className="block text-sm font-semibold text-gray-700 mb-2">Completion Type</label>
-              <div className="flex rounded-lg overflow-hidden border border-gray-200">
-                <button
-                  onClick={async () => {
-                    setTaskType('standard')
-                    if (task) await supabase.from('bingo_tasks').update({ task_type: 'standard', answer_question: null, answer_text: null }).eq('id', task.id)
-                  }}
-                  className={`flex-1 py-2.5 text-sm font-bold transition-colors ${
-                    taskType === 'standard' ? 'bg-violet-600 text-white' : 'bg-white text-gray-500 hover:bg-gray-50'
-                  }`}
-                >
-                  👮 Marshal
-                </button>
-                <button
-                  onClick={async () => {
-                    setTaskType('photo')
-                    if (task) await supabase.from('bingo_tasks').update({ task_type: 'photo', answer_question: null, answer_text: null }).eq('id', task.id)
-                  }}
-                  className={`flex-1 py-2.5 text-sm font-bold transition-colors border-l border-gray-200 ${
-                    taskType === 'photo' ? 'bg-violet-600 text-white' : 'bg-white text-gray-500 hover:bg-gray-50'
-                  }`}
-                >
-                  📸 Photo
-                </button>
-                <button
-                  onClick={async () => {
-                    setTaskType('answer')
-                    if (task) await supabase.from('bingo_tasks').update({ task_type: 'answer' }).eq('id', task.id)
-                  }}
-                  className={`flex-1 py-2.5 text-sm font-bold transition-colors border-l border-gray-200 ${
-                    taskType === 'answer' ? 'bg-violet-600 text-white' : 'bg-white text-gray-500 hover:bg-gray-50'
-                  }`}
-                >
-                  ✏️ Answer
-                </button>
+              <label className="block text-sm font-semibold text-gray-700 mb-2">How this card is completed</label>
+
+              <button
+                onClick={() => saveInputs('standard', {})}
+                className={`w-full py-2.5 rounded-lg text-sm font-bold border transition-colors ${
+                  taskType === 'standard'
+                    ? 'bg-violet-600 text-white border-violet-600'
+                    : 'bg-white text-gray-500 border-gray-200 hover:bg-gray-50'
+                }`}
+              >
+                👮 Marshal password only
+              </button>
+
+              <p className="text-[11px] font-bold uppercase tracking-wider text-gray-400 mt-4 mb-2">
+                …or collect any combination of these
+              </p>
+
+              <div className="flex flex-col gap-2">
+                {INPUT_KINDS.map(kind => {
+                  const rule = inputs[kind]
+                  return (
+                    <div key={kind} className={`flex items-center gap-3 rounded-lg border px-3 py-2 transition-colors ${
+                      rule ? 'border-violet-300 bg-violet-50' : 'border-gray-200 bg-white'
+                    }`}>
+                      <label className="flex items-center gap-2 flex-1 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={!!rule}
+                          onChange={e => {
+                            const next = { ...inputs }
+                            if (e.target.checked) next[kind] = 'required'
+                            else delete next[kind]
+                            saveInputs(Object.keys(next).length ? 'answer' : 'standard', next)
+                          }}
+                        />
+                        <span className="text-sm font-bold text-gray-700">
+                          {INPUT_LABELS[kind].emoji} {INPUT_LABELS[kind].label}
+                        </span>
+                      </label>
+                      {rule && (
+                        <div className="flex rounded-md overflow-hidden border border-violet-200">
+                          {(['required', 'optional'] as const).map(r => (
+                            <button
+                              key={r}
+                              onClick={() => saveInputs('answer', { ...inputs, [kind]: r })}
+                              className={`px-2.5 py-1 text-xs font-bold transition-colors ${
+                                rule === r ? 'bg-violet-600 text-white' : 'bg-white text-gray-500 hover:bg-violet-50'
+                              }`}
+                            >
+                              {r === 'required' ? 'Compulsory' : 'Optional'}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
               </div>
-              <p className="text-xs text-gray-400 mt-1.5">
-                {taskType === 'standard'
+
+              <p className="text-xs text-gray-400 mt-2">
+                {taskType === 'standard' && !usesInputs(inputs)
                   ? 'Participants complete via marshal password.'
-                  : taskType === 'photo'
-                  ? 'Participants submit a photo — marshal approves in admin.'
-                  : 'Participants type the answer — auto-completes when correct.'}
+                  : (() => {
+                      const kinds = inputKinds(inputs)
+                      const must = kinds.filter(k => inputs[k] === 'required').map(k => INPUT_LABELS[k].label)
+                      if (kinds.length === 0) return 'Pick at least one input, or leave the card on marshal.'
+                      return must.length > 0
+                        ? `The tile turns green once ${must.join(' and ')} ${must.length > 1 ? 'are' : 'is'} in — a marshal approves each submission in admin.`
+                        : 'Everything here is optional, so any one of them completes the card.'
+                    })()}
               </p>
             </div>
 
-            {taskType === 'answer' && (
+            {/* Photo cards: one shot, or as many as the challenge needs. Each
+                photo is reviewed on its own in the admin either way. */}
+            {(inputs.photo || inputs.video) && task && (
+              <label className="flex items-start gap-2.5 mb-6 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={task.photo_multiple ?? false}
+                  onChange={async e => {
+                    const photo_multiple = e.target.checked
+                    setTask(prev => (prev ? { ...prev, photo_multiple } : prev))
+                    const { error } = await supabase.from('bingo_tasks')
+                      .update({ photo_multiple }).eq('id', task.id)
+                    if (error) alert('Failed to save: ' + error.message)
+                  }}
+                  className="mt-0.5"
+                />
+                <span>
+                  <span className="block text-sm font-semibold text-gray-700">
+                    Allow multiple {fileNoun(inputs, true)}
+                  </span>
+                  <span className="block text-xs text-gray-400">
+                    The team can keep sending {fileNoun(inputs, true)} instead of stopping after one.
+                    Each arrives separately on the admin Photos page to approve or reject.
+                  </span>
+                </span>
+              </label>
+            )}
+
+            {inputs.answer && (
               <>
                 <div className="mb-5">
                   <label className="block text-sm font-semibold text-gray-700 mb-1.5">Question / Prompt</label>

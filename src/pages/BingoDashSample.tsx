@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { QRCodeSVG } from 'qrcode.react'
 import { supabase } from '../lib/supabase'
 import { fetchBoardTasks, tasksForFace } from '../lib/boardCards'
+import { effectiveInputs, fileAccept, fileEmoji, fileHeading, fileNoun } from '../lib/completionInputs'
 import { activeFaces, faceName, faceColor, normaliseFaceCount } from '../lib/cubeFaces'
 import { buildBingoSlots, completedBingoLines } from '../lib/bingoLines'
 import { useSampleRemote, makeRemoteCode, type RemoteCommand, type RemoteState, type SampleView, type DetailStep } from '../hooks/useSampleRemote'
@@ -815,6 +816,9 @@ const SampleTaskDetail = forwardRef<SampleTaskDetailHandle, {
   const [marshalError, setMarshalError] = useState('')
   const [photoPreview, setPhotoPreview] = useState<string | null>(null)
   const [photoSubmitted, setPhotoSubmitted] = useState(false)
+  const [staged, setStaged] = useState<{ id: string; file: File; preview: string }[]>([])
+  const inputs = effectiveInputs(task.task_type, task.completion_inputs)
+  const [sentCount, setSentCount] = useState(0)
   const [answerInputs, setAnswerInputs] = useState<string[]>([])
   const letterRefs = useRef<(HTMLInputElement | null)[][]>([])
   const scrollRef = useRef<HTMLDivElement | null>(null)
@@ -846,7 +850,7 @@ const SampleTaskDetail = forwardRef<SampleTaskDetailHandle, {
     setAitbStepsDone(prev => (prev.includes(i) ? prev.filter(x => x !== i) : [...prev, i]))
   }
 
-  const answerRows = task.task_type === 'answer' && task.answer_text
+  const answerRows = inputs.answer && task.answer_text
     ? task.answer_text.split('\n').map(r => r.trim()).filter(Boolean)
     : []
 
@@ -875,6 +879,37 @@ const SampleTaskDetail = forwardRef<SampleTaskDetailHandle, {
   const handlePhotoSelect = (file: File) => {
     const url = URL.createObjectURL(file)
     setPhotoPreview(url)
+    setPhotoSubmitted(true)
+  }
+
+  const stageFiles = (files: File[]) => {
+    const room = task.photo_multiple ? Infinity : 1
+    setStaged(prev => {
+      const next = [...prev]
+      for (const file of files) {
+        if (next.length >= room) break
+        next.push({ id: `${Date.now()}-${Math.random().toString(36).slice(2)}`, file, preview: URL.createObjectURL(file) })
+      }
+      return next
+    })
+  }
+
+  const unstage = (id: string) => {
+    setStaged(prev => {
+      const gone = prev.find(x => x.id === id)
+      if (gone) URL.revokeObjectURL(gone.preview)
+      return prev.filter(x => x.id !== id)
+    })
+  }
+
+  const submitStaged = () => {
+    if (staged.length === 0) return
+    // The demo keeps the last frame to show the marshal what arrived, then
+    // clears the tray the way a real send does.
+    setPhotoPreview(staged[staged.length - 1].preview)
+    setSentCount(staged.length)
+    staged.slice(0, -1).forEach(x => URL.revokeObjectURL(x.preview))
+    setStaged([])
     setPhotoSubmitted(true)
   }
 
@@ -1261,15 +1296,27 @@ const SampleTaskDetail = forwardRef<SampleTaskDetailHandle, {
                 )}
 
                 {/* Photo: submit → marshal approve (demo) */}
-                {task.task_type === 'photo' && (
+                {(inputs.photo || inputs.video) && (
                   <>
-                    <p className="text-white font-black text-lg text-center mb-4">📸 Submit Your Photo</p>
-                    <p className="text-white/50 text-sm text-center mb-5">A marshal will review and approve your submission.</p>
-                    {photoSubmitted ? (
-                      <div className="p-4 rounded-2xl bg-green-400/15 border border-green-400/40 text-center">
-                        {photoPreview && <img src={photoPreview} alt="submission" className="w-full max-h-56 object-cover rounded-xl mb-3" />}
+                    <p className="text-white font-black text-lg text-center mb-4">{fileHeading(inputs)}</p>
+                    <p className="text-white/50 text-sm text-center mb-5">
+                      {task.photo_multiple
+                        ? `Send as many ${fileNoun(inputs, true)} as the challenge needs — a marshal reviews each one.`
+                        : 'A marshal will review and approve your submission.'}
+                    </p>
+                    {/* Same tray as the player view: files are held here, can be
+                        removed, and only leave on Submit. */}
+                    {photoSubmitted && staged.length === 0 && (
+                      <div className="p-4 rounded-2xl bg-green-400/15 border border-green-400/40 text-center mb-4">
+                        {photoPreview && (task.task_type === 'video'
+                          ? <video src={photoPreview} controls className="w-full max-h-56 object-cover rounded-xl mb-3 bg-black" />
+                          : <img src={photoPreview} alt="submission" className="w-full max-h-56 object-cover rounded-xl mb-3" />)}
                         <div className="text-3xl mb-2">⏳</div>
-                        <p className="text-green-300 font-black">Photo submitted!</p>
+                        <p className="text-green-300 font-black">
+                          {sentCount > 1
+                            ? `${sentCount} files submitted!`
+                            : `${fileNoun(inputs).replace(/^./, (c: string) => c.toUpperCase())} submitted!`}
+                        </p>
                         <p className="text-green-300/60 text-sm mt-1 mb-3">Waiting for marshal review</p>
                         <button
                           onClick={onComplete}
@@ -1279,18 +1326,65 @@ const SampleTaskDetail = forwardRef<SampleTaskDetailHandle, {
                           👮 Approve as marshal (demo)
                         </button>
                       </div>
-                    ) : (
-                      <label className="flex flex-col items-center justify-center gap-3 w-full py-6 rounded-2xl border-2 border-dashed border-white/30 text-white/60 font-bold text-sm cursor-pointer hover:border-white/50 hover:text-white/80 hover:bg-white/5 transition-all">
-                        <span className="text-4xl">📷</span>
-                        <span>Tap to take or upload a photo</span>
-                        <input type="file" accept="image/*" className="hidden" onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; if (f) handlePhotoSelect(f) }} />
-                      </label>
+                    )}
+
+                    {(!photoSubmitted || task.photo_multiple) && (
+                      <>
+                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                          {staged.map(item => (
+                            <div key={item.id} className="relative rounded-2xl overflow-hidden bg-black/40 border-2 border-white/15 aspect-square">
+                              {item.file.type.startsWith('video/')
+                                ? <video src={item.preview} className="w-full h-full object-cover" muted playsInline />
+                                : <img src={item.preview} alt="" className="w-full h-full object-cover" />}
+                              {item.file.type.startsWith('video/') && (
+                                <span className="absolute top-1.5 left-1.5 text-lg drop-shadow">🎬</span>
+                              )}
+                              <button
+                                onClick={() => unstage(item.id)}
+                                className="absolute bottom-2 left-1/2 -translate-x-1/2 px-3 py-1 rounded-full bg-red-500 text-white text-xs font-black hover:bg-red-600 transition-colors"
+                              >
+                                Delete
+                              </button>
+                            </div>
+                          ))}
+
+                          {(task.photo_multiple || staged.length === 0) && (
+                            <label className="flex flex-col items-center justify-center gap-1.5 rounded-2xl border-2 border-dashed border-white/30 text-white/60 font-bold text-sm cursor-pointer hover:border-white/50 hover:text-white/80 hover:bg-white/5 transition-all aspect-square">
+                              <span className="text-3xl">{fileEmoji(inputs)}</span>
+                              <span className="text-center px-2 leading-tight">
+                                {staged.length === 0 ? `Add a ${fileNoun(inputs)}` : 'Add more'}
+                              </span>
+                              <input
+                                type="file"
+                                accept={fileAccept(inputs) ?? 'image/*'}
+                                multiple={task.photo_multiple ?? false}
+                                className="hidden"
+                                onChange={e => { const files = [...(e.target.files ?? [])]; e.target.value = ''; stageFiles(files) }}
+                              />
+                            </label>
+                          )}
+                        </div>
+
+                        {inputs.video && (
+                          <p className="text-white/40 text-xs font-bold text-center mt-3">Max 100 MB per clip</p>
+                        )}
+
+                        {staged.length > 0 && (
+                          <button
+                            onClick={submitStaged}
+                            className="w-full mt-4 py-3.5 rounded-2xl font-black uppercase tracking-wider transition-all active:scale-95"
+                            style={{ backgroundColor: task.hex_code, color: '#000' }}
+                          >
+                            {`Submit ${staged.length} ${fileNoun(inputs, staged.length !== 1)} for approval`}
+                          </button>
+                        )}
+                      </>
                     )}
                   </>
                 )}
 
                 {/* Answer: letter boxes */}
-                {task.task_type === 'answer' && (
+                {inputs.answer && (
                   <>
                     {task.answer_question && (
                       <p className="text-white font-black text-lg mb-4 text-center leading-snug">{task.answer_question}</p>
@@ -1392,8 +1486,8 @@ const SampleTaskDetail = forwardRef<SampleTaskDetailHandle, {
                 </button>
               </div>
 
-              {/* Optional evidence photo for non-photo tasks */}
-              {task.task_type !== 'photo' && (
+              {/* Optional evidence photo for tasks that don't already collect media */}
+              {!inputs.photo && !inputs.video && (
                 <div className="mt-4 rounded-3xl p-5 border-2 border-white/15 bg-black/30">
                   <p className="text-white font-black text-base text-center mb-1">📸 Optional Photo</p>
                   <p className="text-white/50 text-xs text-center mb-4">Attach an image as evidence — your marshal will review it.</p>
@@ -1503,7 +1597,7 @@ function SampleProjector() {
     (async () => {
       const [{ data: secs }, { data: settings }] = await Promise.all([
         supabase.from('bingo_sections').select('*').order('sort_order'),
-        supabase.from('bingo_settings').select('active_section_id').eq('id', 'main').single(),
+        supabase.from('bingo_settings').select('active_section_id').eq('id', 'main').maybeSingle(),
       ])
       const list = (secs ?? []) as BingoSection[]
       setSections(list)
@@ -1708,7 +1802,11 @@ function SampleProjector() {
       )}
 
       {showTryIt && (
-        <TryItModal boardId={selectedId} onClose={() => setShowTryIt(false)} />
+        <TryItModal
+          boardId={selectedId}
+          onClose={() => setShowTryIt(false)}
+          onShowScoreboard={() => setView('scoreboard')}
+        />
       )}
     </div>
   )
@@ -1772,7 +1870,13 @@ function RemotePairModal({ code, onClose }: { code: string; onClose: () => void 
 // session (own join screen, own board, own BINGO) on their own phone. No two
 // phones share state, and nothing is written to Supabase.
 
-function TryItModal({ boardId, onClose }: { boardId: string | null; onClose: () => void }) {
+function TryItModal({
+  boardId, onClose, onShowScoreboard,
+}: {
+  boardId: string | null
+  onClose: () => void
+  onShowScoreboard: () => void
+}) {
   const url = boardId
     ? `${window.location.origin}/bingo-dash/sample?board=${boardId}`
     : `${window.location.origin}/bingo-dash/sample`
@@ -1784,34 +1888,65 @@ function TryItModal({ boardId, onClose }: { boardId: string | null; onClose: () 
     })
   }
   return (
-    <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[70] px-4" onClick={onClose}>
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm animate-bounce-in" onClick={e => e.stopPropagation()}>
-        <div className="px-6 py-5 border-b border-gray-100 flex items-center justify-between">
-          <div>
-            <h3 className="text-lg font-black text-gray-900">📱 Try it yourself</h3>
-            <p className="text-xs text-gray-400 mt-0.5">Everyone scans this to play on their own phone</p>
+    <div className="fixed inset-0 bg-gray-950 z-[70] overflow-y-auto">
+      <ParticleBackground />
+      <button onClick={onClose}
+        className="fixed top-5 right-5 z-10 flex items-center gap-1.5 px-4 py-2 rounded-xl bg-white/10 hover:bg-white/15 border border-white/15 text-white text-sm font-bold transition-colors">
+        <span className="text-lg leading-none">&times;</span> Close
+      </button>
+
+      <div className="relative z-[1] min-h-screen flex items-center justify-center px-6 py-16">
+        <div className="w-full max-w-4xl animate-bounce-in">
+          <div className="text-center mb-10">
+            <p className="text-pink-400 text-xs font-black uppercase tracking-[0.35em] mb-3">Bingo Dash · Live Demo</p>
+            <h2 className="text-white text-4xl sm:text-6xl font-black tracking-tight">Scan to Play</h2>
+            <p className="text-gray-400 text-sm sm:text-lg font-bold mt-3">
+              Point your camera here — everyone gets their own board the moment they join
+            </p>
           </div>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-700 text-2xl font-light">&times;</button>
-        </div>
-        <div className="p-6 flex flex-col items-center gap-4">
-          <div className="bg-white p-3 rounded-2xl border border-gray-100 shadow-sm">
-            <QRCodeSVG value={url} size={220} level="H" />
-          </div>
-          <div className="w-full flex items-center gap-2">
-            <div className="flex-1 px-3 py-2.5 bg-gray-50 rounded-lg text-[11px] font-mono text-gray-600 break-all select-all border border-gray-200">
-              {url}
+
+          <div className="flex flex-col sm:flex-row items-center gap-8 sm:gap-12 justify-center">
+            <div className="bg-white p-4 rounded-2xl shadow-2xl flex-shrink-0">
+              <QRCodeSVG value={url} size={280} level="H" />
             </div>
-            <button onClick={copy}
-              className={`px-3 py-2.5 rounded-lg text-xs font-bold transition-all flex-shrink-0 ${
-                copied ? 'bg-green-100 text-green-700 border border-green-300' : 'bg-purple-600 text-white hover:bg-purple-700'
-              }`}>
-              {copied ? 'Copied!' : 'Copy'}
+
+            <div className="flex flex-col gap-4 w-full max-w-sm">
+              <div className="flex gap-3">
+                <div className="flex-1 px-4 py-3 rounded-xl bg-purple-500/15 border border-purple-400/30">
+                  <p className="text-purple-300 text-[10px] font-black uppercase tracking-wide">🔑 Team password</p>
+                  <p className="text-white text-2xl font-black tracking-widest mt-0.5">{SAMPLE_TEAM_PASSWORD}</p>
+                </div>
+                <div className="flex-1 px-4 py-3 rounded-xl bg-white/5 border border-white/15">
+                  <p className="text-yellow-400 text-[10px] font-black uppercase tracking-wide">🧑‍✈️ Marshal</p>
+                  <p className="text-white text-2xl font-black tracking-widest mt-0.5">{DEMO_MARSHAL_PASSWORD}</p>
+                </div>
+              </div>
+
+              <p className="text-gray-500 text-xs leading-relaxed">
+                Each scan opens a private sandbox on that phone — its own join screen, its own board, its own BINGO.
+                Nothing anyone does here is saved.
+              </p>
+
+              <div className="flex items-center gap-2">
+                <div className="flex-1 px-3 py-2.5 bg-white/5 rounded-lg text-[11px] font-mono text-gray-400 break-all select-all border border-white/10">
+                  {url}
+                </div>
+                <button onClick={copy}
+                  className={`px-3 py-2.5 rounded-lg text-xs font-bold transition-all flex-shrink-0 ${
+                    copied ? 'bg-green-500/20 text-green-300 border border-green-400/40' : 'bg-purple-600 text-white hover:bg-purple-700'
+                  }`}>
+                  {copied ? 'Copied!' : 'Copy'}
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div className="text-center mt-10">
+            <button onClick={() => { onShowScoreboard(); onClose() }}
+              className="inline-flex items-center gap-2 px-6 py-3 rounded-2xl bg-white/10 hover:bg-white/15 border border-white/15 text-white font-bold transition-colors">
+              📊 Show the live scoreboard
             </button>
           </div>
-          <p className="text-[11px] text-gray-400 text-center">
-            One link, any number of people — everyone gets their own private join screen and board. Nothing anyone
-            does here is saved, so it's safe to hand out to the whole room. Sample password <span className="font-black text-purple-500">{SAMPLE_TEAM_PASSWORD}</span> is pre-filled for them.
-          </p>
         </div>
       </div>
     </div>

@@ -16,8 +16,8 @@ interface PageFormProps {
 }
 
 export function PageForm({ page, index, hexCode, onSave, onDelete, onMoveUp, onMoveDown, isFirst, isLast }: PageFormProps) {
-  const [mediaUrl, setMediaUrl] = useState(page.media_url || '')
-  const [mediaType, setMediaType] = useState<'image' | 'video' | ''>(page.media_type || '')
+  const mediaUrl = page.media_url || ''
+  const mediaType = page.media_type || ''
   const [pointers, setPointers] = useState([
     page.pointer_1 || '',
     page.pointer_2 || '',
@@ -44,10 +44,8 @@ export function PageForm({ page, index, hexCode, onSave, onDelete, onMoveUp, onM
   ])
   const [iconPickerOpen, setIconPickerOpen] = useState<number | null>(null)
   const [saving, setSaving] = useState(false)
-  const [uploading, setUploading] = useState(false)
   const [uploadingExample, setUploadingExample] = useState<number | null>(null)
   const [showPreview, setShowPreview] = useState(false)
-  const fileRef = useRef<HTMLInputElement>(null)
   const exampleFileRefs = useRef<(HTMLInputElement | null)[]>([])
 
   const updatePointer = (i: number, val: string) => {
@@ -149,47 +147,6 @@ export function PageForm({ page, index, hexCode, onSave, onDelete, onMoveUp, onM
     }
   }
 
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (!file) return
-    const isVideo = file.type.startsWith('video/')
-    const maxMB = isVideo ? 20 : 5
-    if (file.size > maxMB * 1024 * 1024) {
-      alert(`File too large! Max ${maxMB} MB for ${isVideo ? 'videos' : 'images'}.`)
-      if (fileRef.current) fileRef.current.value = ''
-      return
-    }
-
-    setUploading(true)
-    try {
-      const ext = file.name.split('.').pop()
-      const fileName = `${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`
-      const filePath = `task-media/${fileName}`
-
-      const { error: uploadError } = await supabase.storage
-        .from('media')
-        .upload(filePath, file)
-
-      if (uploadError) throw uploadError
-
-      const { data: urlData } = supabase.storage
-        .from('media')
-        .getPublicUrl(filePath)
-
-      const url = urlData.publicUrl
-      setMediaUrl(url)
-
-      // Auto-detect media type
-      const isVideo = file.type.startsWith('video/')
-      setMediaType(isVideo ? 'video' : 'image')
-    } catch (err: unknown) {
-      alert(`Upload failed: ${err instanceof Error ? err.message : 'Unknown error'}`)
-    } finally {
-      setUploading(false)
-      if (fileRef.current) fileRef.current.value = ''
-    }
-  }
-
   const [saveError, setSaveError] = useState<string | null>(null)
   const [saveSuccess, setSaveSuccess] = useState(false)
 
@@ -287,64 +244,6 @@ export function PageForm({ page, index, hexCode, onSave, onDelete, onMoveUp, onM
       )}
 
       <div className="flex flex-col gap-4">
-        {/* Media Section */}
-        <div className="p-4 bg-gray-50 rounded-xl border border-gray-200">
-          <label className="block text-sm font-bold text-gray-700 mb-1">Media (Photo/Video)</label>
-          <p className="text-xs text-gray-400 mb-3">Images: max 5 MB, best 800×600px · Videos: max 20 MB</p>
-
-          {/* Upload button */}
-          <div className="flex gap-3 items-start mb-3">
-            <div className="flex-1">
-              <input
-                ref={fileRef}
-                type="file"
-                accept="image/*,video/*"
-                onChange={handleFileUpload}
-                className="block w-full text-sm text-gray-500 file:mr-3 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-medium file:bg-blue-100 file:text-blue-700 hover:file:bg-blue-200 cursor-pointer"
-              />
-              {uploading && <p className="text-sm text-blue-600 font-medium mt-1 animate-pulse">Uploading...</p>}
-            </div>
-            <select
-              value={mediaType}
-              onChange={(e) => setMediaType(e.target.value as 'image' | 'video' | '')}
-              className="px-3 py-2 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-            >
-              <option value="">No media</option>
-              <option value="image">Image</option>
-              <option value="video">Video</option>
-            </select>
-          </div>
-
-          {/* URL input */}
-          <div className="flex gap-2 items-center">
-            <span className="text-xs text-gray-400 shrink-0">or URL:</span>
-            <input
-              type="text"
-              value={mediaUrl}
-              onChange={(e) => setMediaUrl(e.target.value)}
-              placeholder="https://..."
-              className="flex-1 px-3 py-2 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
-          </div>
-
-          {/* Media thumbnail preview */}
-          {mediaUrl && mediaType && (
-            <div className="mt-3 rounded-lg overflow-hidden bg-gray-100 max-h-[150px] relative">
-              {mediaType === 'video' ? (
-                <video src={mediaUrl} className="w-full max-h-[150px] object-contain" controls />
-              ) : (
-                <img src={mediaUrl} alt="Preview" className="w-full max-h-[150px] object-contain" />
-              )}
-              <button
-                onClick={() => { setMediaUrl(''); setMediaType('') }}
-                className="absolute top-2 right-2 w-6 h-6 bg-red-500 a-text rounded-full text-xs font-bold hover:bg-red-600"
-              >
-                ×
-              </button>
-            </div>
-          )}
-        </div>
-
         {/* Pointers */}
         <div className="grid grid-cols-2 gap-3">
           {pointers.map((val, i) => (

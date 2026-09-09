@@ -57,7 +57,7 @@ export function BingoDashProjector() {
         supabase.from('bingo_teams').select('*').order('created_at'),
         supabase.from('bingo_scans').select('*'),
         supabase.from('bingo_sections').select('*').order('sort_order'),
-        supabase.from('bingo_settings').select('*').eq('id', 'main').single(),
+        supabase.from('bingo_settings').select('*').eq('id', 'main').maybeSingle(),
         supabase.from('bingo_duels').select('*').eq('status', 'done'),
       ])
       if (tasksRes.data) setTasks(tasksRes.data)
@@ -81,7 +81,7 @@ export function BingoDashProjector() {
         if (what === 'teams')    { const { data } = await supabase.from('bingo_teams').select('*').order('created_at'); if (data) setTeams(data) }
         if (what === 'tasks')    { const { data } = await supabase.from('bingo_tasks').select('*'); if (data) setTasks(data) }
         if (what === 'cards')    { const { data } = await supabase.from('bingo_board_cards').select('*').order('slot'); if (data) setBoardCards(data) }
-        if (what === 'settings') { const { data } = await supabase.from('bingo_settings').select('*').eq('id','main').single(); if (data) setSettings(data) }
+        if (what === 'settings') { const { data } = await supabase.from('bingo_settings').select('*').eq('id','main').maybeSingle(); if (data) setSettings(data) }
       }, 400)
     }
     const channel = supabase

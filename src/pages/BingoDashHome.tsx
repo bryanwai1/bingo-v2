@@ -61,7 +61,7 @@ function JoinScreen({ onJoin }: { onJoin: (teamId: string, password: string) => 
   useEffect(() => {
     (async () => {
       const { data: settings } = await supabase
-        .from('bingo_settings').select('active_section_id').eq('id', 'main').single()
+        .from('bingo_settings').select('active_section_id').eq('id', 'main').maybeSingle()
       const sectionId = settings?.active_section_id
       if (!sectionId) { setGroupsLoading(false); return }
       const { data: teams } = await supabase
@@ -693,7 +693,7 @@ export function BingoDashHome() {
 
   // Load grid tasks + the active section (timer/alarm settings live on it)
   useEffect(() => {
-    supabase.from('bingo_settings').select('active_section_id').eq('id', 'main').single()
+    supabase.from('bingo_settings').select('active_section_id').eq('id', 'main').maybeSingle()
       .then(async ({ data: settingsData }) => {
         const sectionId = settingsData?.active_section_id
         if (!sectionId) { setGridTasks([]); setDataLoading(false); return }

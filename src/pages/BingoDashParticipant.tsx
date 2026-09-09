@@ -1,8 +1,12 @@
-import { useEffect, useState, useRef, useCallback } from 'react'
+import { useEffect, useState, useRef, useCallback, useMemo } from 'react'
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useBingoDashTeam } from '../hooks/useBingoDashTeam'
 import { useBingoTaskPages } from '../hooks/useBingoTaskPages'
+import {
+  fileAccept, fileEmoji, fileHeading, fileNoun, inputKinds, isComplete, missingLabels,
+  effectiveInputs, usesInputs,
+} from '../lib/completionInputs'
 import { useBingoTaskPhotos } from '../hooks/useBingoTaskPhotos'
 import { useBingoScans } from '../hooks/useBingoScans'
 import { useTaskLinks } from '../hooks/useTaskLinks'
@@ -94,7 +98,11 @@ export function BingoDashParticipant() {
 
   const [task, setTask] = useState<BingoTask | null>(null)
   const [showSplash, setShowSplash] = useState(!isSnakeLadder)
-  const [scanRecord, setScanRecord] = useState<{ id: string; completed: boolean; words: string[]; stepsDone: number[]; scannedAt: string } | null>(null)
+  const [scanRecord, setScanRecord] = useState<{ id: string; completed: boolean; answerOk: boolean; words: string[]; stepsDone: number[]; scannedAt: string } | null>(null)
+  // Which of this card's inputs the team has already satisfied. Files count
+  // once a marshal has approved them, which is why this is read back from the
+  // submissions rather than from what was sent.
+  const [approvedKinds, setApprovedKinds] = useState<{ photo: boolean; video: boolean }>({ photo: false, video: false })
   const [now, setNow] = useState(Date.now())
   const [scanRecorded, setScanRecorded] = useState(false)
   const [currentPage, setCurrentPage] = useState(0)
@@ -111,6 +119,10 @@ export function BingoDashParticipant() {
   // Photo submission state
   const [photoUploading, setPhotoUploading] = useState(false)
   const [photoSubmitted, setPhotoSubmitted] = useState(false)
+  const [photosSent, setPhotosSent] = useState(0)
+  // Files the team has chosen but not sent. Nothing is uploaded and no marshal
+  // sees anything until they press Submit, so a wrong shot is simply removed.
+  const [staged, setStaged] = useState<{ id: string; file: File; preview: string }[]>([])
   // Answer-input state: one string per answer row
   const [answerInputs, setAnswerInputs] = useState<string[]>([])
   const [carouselIdx, setCarouselIdx] = useState(0)
@@ -231,7 +243,11 @@ export function BingoDashParticipant() {
   }, [taskId, answerInputs])
 
   // Derived: the answer rows expected by the task
-  const answerRows = task?.task_type === 'answer' && task.answer_text
+  const inputs = useMemo(() => effectiveInputs(task?.task_type, task?.completion_inputs), [task?.task_type, task?.completion_inputs])
+
+  // Driven by the input set, not the old exclusive type: a card can want a
+  // typed answer alongside a photo or a clip.
+  const answerRows = inputs.answer && task?.answer_text
     ? task.answer_text.split('\n').map(r => r.trim()).filter(Boolean)
     : []
 
@@ -248,8 +264,8 @@ export function BingoDashParticipant() {
       recordScan(team.id, taskId).then((scan) => {
         setScanRecorded(true)
         if (scan) setScanRecord({
-          id: scan.id, completed: scan.completed, words: scan.words ?? [],
-          stepsDone: scan.steps_done ?? [], scannedAt: scan.scanned_at,
+          id: scan.id, completed: scan.completed, answerOk: scan.answer_ok ?? false,
+          words: scan.words ?? [], stepsDone: scan.steps_done ?? [], scannedAt: scan.scanned_at,
         })
       })
     }
@@ -270,15 +286,59 @@ export function BingoDashParticipant() {
     void saveSteps(scanRecord.id, next)
   }
 
-  // Auto-complete when answer-input card answer is correct
+  // What this card collects, and what the team has satisfied of it.
+  const progress = useMemo(() => ({
+    photo: approvedKinds.photo,
+    video: approvedKinds.video,
+    answer: scanRecord?.answerOk ?? false,
+  }), [approvedKinds, scanRecord?.answerOk])
+  const outstanding = missingLabels(inputs, progress)
+
+  /** An approved submission is what makes a file input count. */
+  useEffect(() => {
+    if (!team || !taskId || !usesInputs(inputs)) return
+    let live = true
+    const read = () => {
+      supabase.from('bingo_photo_submissions')
+        .select('media_type, status').eq('team_id', team.id).eq('task_id', taskId).eq('status', 'approved')
+        .then(({ data }) => {
+          if (!live) return
+          const rows = data ?? []
+          setApprovedKinds({
+            photo: rows.some(r => (r.media_type ?? 'image') === 'image'),
+            video: rows.some(r => r.media_type === 'video'),
+          })
+        })
+    }
+    read()
+    const channel = supabase
+      .channel(`subs-${team.id}-${taskId}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'bingo_photo_submissions', filter: `team_id=eq.${team.id}` }, read)
+      .subscribe()
+    return () => { live = false; supabase.removeChannel(channel) }
+  }, [team, taskId, inputs])
+
+  const markAnswerOk = async (scanId: string) => {
+    await supabase.from('bingo_scans').update({ answer_ok: true }).eq('id', scanId)
+  }
+
+  // A card can ask for several things at once, so a correct answer no longer
+  // finishes the card on its own — it satisfies one input, and the tile turns
+  // green when every compulsory one is in.
   useEffect(() => {
     if (isSnakeLadder) return
     if (!answerMatches || !scanRecord || scanRecord.completed || completing) return
     setCompleting(true)
-    toggleComplete(scanRecord.id, true).then(() => {
-      setScanRecord(prev => prev ? { ...prev, completed: true } : prev)
+    ;(async () => {
+      await markAnswerOk(scanRecord.id)
+      setScanRecord(prev => (prev ? { ...prev, answerOk: true } : prev))
+      const done = { ...progress, answer: true }
+      if (isComplete(inputs, done) || !usesInputs(inputs)) {
+        await toggleComplete(scanRecord.id, true)
+        setScanRecord(prev => (prev ? { ...prev, completed: true } : prev))
+      }
       setCompleting(false)
-    })
+    })()
   }, [answerMatches]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleLeave = async () => {
@@ -304,23 +364,68 @@ export function BingoDashParticipant() {
     }
   }, [scanRecord, toggleComplete])
 
-  const handlePhotoUpload = async (file: File) => {
-    if (!team || !taskId || !scanRecord) return
-    if (file.size > 25 * 1024 * 1024) { alert('Photo too large (max 25 MB).'); return }
+  /** Queue a chosen file, refusing anything too big before it takes up room. */
+  const stageFiles = (files: File[]) => {
+    const room = task?.photo_multiple ? Infinity : 1
+    for (const file of files) {
+      if (staged.length >= room) break
+      const isVideo = file.type.startsWith('video/')
+      const maxMb = isVideo ? 100 : 25
+      if (file.size > maxMb * 1024 * 1024) {
+        alert(`"${file.name}" is too large (max ${maxMb} MB for a ${isVideo ? 'video' : 'photo'}).`)
+        continue
+      }
+      setStaged(prev => (prev.length >= room ? prev : [
+        ...prev,
+        { id: `${Date.now()}-${Math.random().toString(36).slice(2)}`, file, preview: URL.createObjectURL(file) },
+      ]))
+    }
+  }
+
+  const unstage = (id: string) => {
+    setStaged(prev => {
+      const gone = prev.find(x => x.id === id)
+      if (gone) URL.revokeObjectURL(gone.preview)
+      return prev.filter(x => x.id !== id)
+    })
+  }
+
+  /** Send everything staged, one submission row per file. */
+  const submitStaged = async () => {
+    if (staged.length === 0) return
     setPhotoUploading(true)
     try {
+      for (const item of staged) await uploadOne(item.file)
+      staged.forEach(x => URL.revokeObjectURL(x.preview))
+      setStaged([])
+      setPhotoSubmitted(true)
+    } finally {
+      setPhotoUploading(false)
+    }
+  }
+
+  const uploadOne = async (file: File) => {
+    if (!team || !taskId || !scanRecord) return
+    const isVideo = file.type.startsWith('video/')
+    {
       let upload: Blob = file
-      try {
-        upload = await compressToJpeg(file)
-      } catch (err) {
-        if (file.type === 'image/heic' || file.type === 'image/heif' || /\.(heic|heif)$/i.test(file.name)) {
-          alert("This iPhone photo format (HEIC) couldn't be processed on this device. In iPhone Settings → Camera → Formats, choose 'Most Compatible', or share the photo via the Photos app.")
-          return
+      // A clip is sent as filmed — there is no in-browser compression for it,
+      // and re-encoding a minute of footage on a phone is not worth the wait.
+      if (!isVideo) {
+        try {
+          upload = await compressToJpeg(file)
+        } catch (err) {
+          if (file.type === 'image/heic' || file.type === 'image/heif' || /\.(heic|heif)$/i.test(file.name)) {
+            alert("This iPhone photo format (HEIC) couldn't be processed on this device. In iPhone Settings → Camera → Formats, choose 'Most Compatible', or share the photo via the Photos app.")
+            return
+          }
+          console.warn('Image compression failed, uploading original:', err)
         }
-        console.warn('Image compression failed, uploading original:', err)
       }
-      const path = `bingo-media/photo-submissions/${team.id}-${taskId}-${Date.now()}.jpg`
-      const { error: uploadErr } = await supabase.storage.from('media').upload(path, upload, { upsert: false, contentType: 'image/jpeg' })
+      const ext = isVideo ? (file.name.split('.').pop() || 'mp4').toLowerCase() : 'jpg'
+      const contentType = isVideo ? (file.type || 'video/mp4') : 'image/jpeg'
+      const path = `bingo-media/photo-submissions/${team.id}-${taskId}-${Date.now()}.${ext}`
+      const { error: uploadErr } = await supabase.storage.from('media').upload(path, upload, { upsert: false, contentType })
       if (uploadErr) { alert('Upload failed: ' + uploadErr.message); return }
       const { data: urlData } = supabase.storage.from('media').getPublicUrl(path)
       const { error: insertErr } = await supabase.from('bingo_photo_submissions').insert({
@@ -328,12 +433,11 @@ export function BingoDashParticipant() {
         task_id: taskId,
         scan_id: scanRecord.id,
         photo_url: urlData.publicUrl,
+        media_type: isVideo ? 'video' : 'image',
         status: 'pending',
       })
       if (insertErr) { alert('Could not save submission: ' + insertErr.message); return }
-      setPhotoSubmitted(true)
-    } finally {
-      setPhotoUploading(false)
+      setPhotosSent(n => n + 1)
     }
   }
 
@@ -898,38 +1002,101 @@ export function BingoDashParticipant() {
               )}
 
               {/* ── Photo: Submit image for marshal approval ── */}
-              {task.task_type === 'photo' && photoSubmissionsEnabled && (
+              {inputKinds(inputs).length > 1 && outstanding.length > 0 && (
+                <div className="mb-5 px-4 py-3 rounded-2xl bg-white/5 border border-white/15 text-center">
+                  <p className="text-white/50 text-xs font-black uppercase tracking-widest mb-1">Still needed</p>
+                  <p className="text-white font-bold text-sm">{outstanding.join(' · ')}</p>
+                </div>
+              )}
+
+              {(inputs.photo || inputs.video) && photoSubmissionsEnabled && (
                 <>
-                  <p className="text-white font-black text-lg text-center mb-4">📸 Submit Your Photo</p>
-                  <p className="text-white/50 text-sm text-center mb-5">A marshal will review and approve your submission.</p>
-                  {photoSubmitted ? (
+                  <p className="text-white font-black text-lg text-center mb-4">{fileHeading(inputs)}</p>
+                  <p className="text-white/50 text-sm text-center mb-5">
+                    {task.photo_multiple
+                      ? `Send as many ${fileNoun(inputs, true)} as the challenge needs — a marshal reviews each one.`
+                      : 'A marshal will review and approve your submission.'}
+                  </p>
+                  {photoSubmitted && staged.length === 0 && (
                     <div className="p-4 rounded-2xl bg-green-400/15 border border-green-400/40 text-center">
                       <div className="text-3xl mb-2">⏳</div>
-                      <p className="text-green-300 font-black">Photo submitted!</p>
+                      <p className="text-green-300 font-black">
+                        {photosSent > 1
+                          ? `${photosSent} files submitted!`
+                          : `${fileNoun(inputs).replace(/^./, c => c.toUpperCase())} submitted!`}
+                      </p>
                       <p className="text-green-300/60 text-sm mt-1">Waiting for marshal review</p>
                     </div>
-                  ) : (
-                    <label className={`flex flex-col items-center justify-center gap-3 w-full py-6 rounded-2xl border-2 border-dashed border-white/30 text-white/60 font-bold text-sm cursor-pointer hover:border-white/50 hover:text-white/80 hover:bg-white/5 transition-all ${photoUploading ? 'opacity-50 pointer-events-none' : ''}`}>
-                      <span className="text-4xl">{photoUploading ? '⏳' : '📷'}</span>
-                      <span>{photoUploading ? 'Uploading...' : 'Tap to take or upload a photo'}</span>
-                      <input
-                        type="file"
-                        accept="image/*"
-                        className="hidden"
-                        disabled={photoUploading || !scanRecord}
-                        onChange={e => {
-                          const f = e.target.files?.[0]
-                          e.target.value = ''
-                          if (f) handlePhotoUpload(f)
-                        }}
-                      />
-                    </label>
+                  )}
+
+                  {/* Nothing leaves the phone until Submit, so a bad shot is
+                      just removed from the tray and retaken. */}
+                  {(!photoSubmitted || task.photo_multiple) && (
+                    <>
+                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                        {staged.map(item => (
+                          <div key={item.id} className="relative rounded-2xl overflow-hidden bg-black/40 border-2 border-white/15 aspect-square">
+                            {item.file.type.startsWith('video/')
+                              ? <video src={item.preview} className="w-full h-full object-cover" muted playsInline />
+                              : <img src={item.preview} alt="" className="w-full h-full object-cover" />}
+                            {item.file.type.startsWith('video/') && (
+                              <span className="absolute top-1.5 left-1.5 text-lg drop-shadow">🎬</span>
+                            )}
+                            <button
+                              onClick={() => unstage(item.id)}
+                              disabled={photoUploading}
+                              className="absolute bottom-2 left-1/2 -translate-x-1/2 px-3 py-1 rounded-full bg-red-500 text-white text-xs font-black hover:bg-red-600 disabled:opacity-40 transition-colors"
+                            >
+                              Delete
+                            </button>
+                          </div>
+                        ))}
+
+                        {(task.photo_multiple || staged.length === 0) && (
+                          <label className={`flex flex-col items-center justify-center gap-1.5 rounded-2xl border-2 border-dashed border-white/30 text-white/60 font-bold text-sm cursor-pointer hover:border-white/50 hover:text-white/80 hover:bg-white/5 transition-all aspect-square ${photoUploading ? 'opacity-50 pointer-events-none' : ''}`}>
+                            <span className="text-3xl">{fileEmoji(inputs)}</span>
+                            <span className="text-center px-2 leading-tight">
+                              {staged.length === 0 ? `Add a ${fileNoun(inputs)}` : 'Add more'}
+                            </span>
+                            <input
+                              type="file"
+                              accept={fileAccept(inputs) ?? 'image/*'}
+                              multiple={task.photo_multiple ?? false}
+                              className="hidden"
+                              disabled={photoUploading || !scanRecord}
+                              onChange={e => {
+                                const files = [...(e.target.files ?? [])]
+                                e.target.value = ''
+                                stageFiles(files)
+                              }}
+                            />
+                          </label>
+                        )}
+                      </div>
+
+                      {inputs.video && (
+                        <p className="text-white/40 text-xs font-bold text-center mt-3">Max 100 MB per clip</p>
+                      )}
+
+                      {staged.length > 0 && (
+                        <button
+                          onClick={submitStaged}
+                          disabled={photoUploading}
+                          className="w-full mt-4 py-3.5 rounded-2xl font-black uppercase tracking-wider transition-all active:scale-95 disabled:opacity-50"
+                          style={{ backgroundColor: task.hex_code, color: '#000' }}
+                        >
+                          {photoUploading
+                            ? 'Sending…'
+                            : `Submit ${staged.length} ${fileNoun(inputs, staged.length !== 1)} for approval`}
+                        </button>
+                      )}
+                    </>
                   )}
                 </>
               )}
 
               {/* ── Answer: Letter-box input ── */}
-              {task.task_type === 'answer' && (
+              {inputs.answer && (
                 <>
                   {task.answer_question && (
                     <p className="text-white font-black text-lg mb-4 text-center leading-snug">
@@ -1044,7 +1211,7 @@ export function BingoDashParticipant() {
             </div>
 
             {/* ── Supplementary photo upload (any non-photo task, when toggle ON) ── */}
-            {task.task_type !== 'photo' && photoSubmissionsEnabled && (
+            {!inputs.photo && !inputs.video && photoSubmissionsEnabled && (
               <div className="mt-4 rounded-3xl p-5 border-2 border-white/15 bg-black/30">
                 <p className="text-white font-black text-base text-center mb-1">📸 Optional Photo</p>
                 <p className="text-white/50 text-xs text-center mb-4">Attach an image as evidence — your marshal will review it.</p>
@@ -1063,10 +1230,12 @@ export function BingoDashParticipant() {
                       accept="image/*"
                       className="hidden"
                       disabled={photoUploading || !scanRecord}
-                      onChange={e => {
+                      onChange={async e => {
                         const f = e.target.files?.[0]
                         e.target.value = ''
-                        if (f) handlePhotoUpload(f)
+                        if (!f) return
+                        setPhotoUploading(true)
+                        try { await uploadOne(f); setPhotoSubmitted(true) } finally { setPhotoUploading(false) }
                       }}
                     />
                   </label>

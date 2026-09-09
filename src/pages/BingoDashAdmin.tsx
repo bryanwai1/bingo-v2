@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
+import { isComplete, effectiveInputs, usesInputs } from '../lib/completionInputs'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { QRCodeSVG } from 'qrcode.react'
 import JSZip from 'jszip'
@@ -35,16 +36,29 @@ function extFromUrl(url: string): string {
   return match ? match[1].toLowerCase() : 'jpg'
 }
 
-function SubmissionThumb({ url, fill = false }: { url: string; fill?: boolean }) {
+function SubmissionThumb({ url, fill = false, video = false }: { url: string; fill?: boolean; video?: boolean }) {
   const [broken, setBroken] = useState(false)
+  if (video && !broken) {
+    // Inline so a reviewer can watch without leaving the queue; the link still
+    // opens the file full size.
+    return (
+      <video
+        src={url}
+        controls
+        preload="metadata"
+        onError={() => setBroken(true)}
+        className={`${fill ? 'w-full aspect-square' : 'w-28 h-28 rounded-lg border a-border'} object-cover bg-black`}
+      />
+    )
+  }
   if (broken) {
     return (
       <div
         className={`${fill ? "w-full aspect-square" : "w-28 h-28"} flex flex-col items-center justify-center rounded-lg border border-red-500/30 bg-red-500/10 text-red-300 text-[10px] font-bold flex-shrink-0 text-center px-2`}
-        title="The photo file is missing from storage. The submission row can be deleted."
+        title="The file is missing from storage. The submission row can be deleted."
       >
         <span className="text-2xl mb-1">🚫</span>
-        <span>Photo missing</span>
+        <span>File missing</span>
       </div>
     )
   }
@@ -320,7 +334,7 @@ function CategoryGroupBlock({
   categories, scans, copiedId,
   boardCountByTask,
   navigate,
-  saveCategoryInline, setBulkCategoryColor, setBulkCategoryPoints,
+  saveCategoryInline, setBulkCategoryColor, setBulkCategoryPoints, setTaskPoints, setPointsForTasks,
   renameCategoryByLabel,
   setQrTask, copyLink, duplicateTask, openTileEdit, deleteTask,
 }: {
@@ -335,6 +349,8 @@ function CategoryGroupBlock({
   saveCategoryInline: (taskId: string, cat: string) => void
   setBulkCategoryColor: (key: string, hex: string) => void
   setBulkCategoryPoints: (key: string, pts: number) => void
+  setTaskPoints: (id: string, pts: number) => void
+  setPointsForTasks: (ids: string[], pts: number) => void
   renameCategoryByLabel: (label: string, newName: string) => void
   setQrTask: (t: BingoTask) => void
   copyLink: (id: string) => void
@@ -346,7 +362,7 @@ function CategoryGroupBlock({
   return (
     <div>
       {/* Category header */}
-      <div className="flex items-center gap-3 mb-3">
+      <div className="flex items-center gap-3 mb-3 flex-wrap">
         {renaming ? (
           <input
             type="text"
@@ -357,7 +373,7 @@ function CategoryGroupBlock({
               if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
               if (e.key === 'Escape') { (e.target as HTMLInputElement).value = group.label; (e.target as HTMLInputElement).blur() }
             }}
-            className="text-xs font-black uppercase tracking-widest bg-gray-800 a-text border border-teal-500 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-teal-500"
+            className="text-xs font-black uppercase tracking-widest a-surface-2 a-text border border-teal-500 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-teal-500"
           />
         ) : (
           <h3 className="text-xs font-black a-text-2 uppercase tracking-widest">{group.label}</h3>
@@ -373,31 +389,63 @@ function CategoryGroupBlock({
         )}
         <span className="text-xs a-text-3 font-medium">{group.tasks.length}</span>
         <div className="flex-1 h-px a-surface/10" />
-        <div className="flex items-center gap-1.5 flex-shrink-0">
-          <span className="text-xs a-text-3">color for all:</span>
-          <input
-            type="color"
-            defaultValue={group.tasks[0]?.hex_code ?? '#3B82F6'}
-            key={group.key + '-color'}
-            className="w-7 h-7 rounded cursor-pointer border border-white/20"
-            onChange={e => setBulkCategoryColor(group.key, e.target.value)}
-            title={`Set color for all ${group.label} tasks`}
-          />
-        </div>
-        <div className="flex items-center gap-1.5 flex-shrink-0">
-          <span className="text-xs a-text-3">pts for all:</span>
-          <input
-            type="number" min={0}
-            defaultValue={group.tasks[0]?.points ?? 0}
-            key={group.key + '-pts'}
-            className="w-14 px-1.5 py-0.5 text-xs border border-white/20 bg-gray-800 a-text rounded text-center font-bold focus:outline-none focus:ring-1 focus:ring-teal-500"
-            onBlur={e => setBulkCategoryPoints(group.key, Math.max(0, parseInt(e.target.value) || 0))}
-            onKeyDown={e => {
-              if (e.key === 'Enter') setBulkCategoryPoints(group.key, Math.max(0, parseInt((e.target as HTMLInputElement).value) || 0))
-            }}
-            title={`Set points for all ${group.label} tasks`}
-          />
-        </div>
+        {group.label !== 'Mall Hunt' && (
+          <>
+            <div className="flex items-center gap-1.5 flex-shrink-0 flex-wrap">
+              <span className="text-xs a-text-3">color for all:</span>
+              <input
+                type="color"
+                defaultValue={group.tasks[0]?.hex_code ?? '#3B82F6'}
+                key={group.key + '-color'}
+                className="w-7 h-7 rounded cursor-pointer border border-white/20"
+                onChange={e => setBulkCategoryColor(group.key, e.target.value)}
+                title={`Set color for all ${group.label} tasks`}
+              />
+              <input
+                type="text"
+                defaultValue={group.tasks[0]?.hex_code ?? '#3B82F6'}
+                key={group.key + '-color-hex'}
+                className="w-20 px-1.5 py-0.5 text-xs border a-border a-surface-2 a-text rounded font-mono focus:outline-none focus:ring-1 focus:ring-teal-500"
+                onBlur={e => { const v = e.target.value.trim(); if (/^#[0-9a-fA-F]{6}$/.test(v)) setBulkCategoryColor(group.key, v) }}
+                onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
+                title={`Type an exact hex code for all ${group.label} tasks`}
+              />
+            </div>
+            <div className="flex items-center gap-1.5 flex-shrink-0">
+              <span className="text-xs a-text-3">pts for all:</span>
+              <input
+                type="number" min={0}
+                defaultValue={group.tasks[0]?.points ?? 0}
+                key={group.key + '-pts'}
+                className="w-14 px-1.5 py-0.5 text-xs border a-border a-surface-2 a-text rounded text-center font-bold focus:outline-none focus:ring-1 focus:ring-teal-500"
+                onBlur={e => setBulkCategoryPoints(group.key, Math.max(0, parseInt(e.target.value) || 0))}
+                onKeyDown={e => {
+                  if (e.key === 'Enter') setBulkCategoryPoints(group.key, Math.max(0, parseInt((e.target as HTMLInputElement).value) || 0))
+                }}
+                title={`Set points for all ${group.label} tasks`}
+              />
+            </div>
+          </>
+        )}
+        {group.label === 'Mall Hunt' && (
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <span className="text-xs a-text-3">act pts:</span>
+            {ACT_COLORS.map((c, i) => (
+              <div key={c.hex} className="flex items-center gap-1 rounded px-1 py-0.5 border" style={{ borderColor: c.hex, backgroundColor: `${c.hex}22` }}>
+                <span className="w-4 h-4 rounded-full text-[9px] font-black text-white flex items-center justify-center flex-shrink-0" style={{ backgroundColor: c.hex }}>{i + 1}</span>
+                <input
+                  type="number" min={0}
+                  defaultValue={group.tasks.find(t => t.hex_code === c.hex)?.points ?? 0}
+                  key={group.key + c.hex + '-actpts'}
+                  className="w-10 bg-transparent a-text text-xs font-bold text-center focus:outline-none"
+                  onBlur={e => setPointsForTasks(group.tasks.filter(t => t.hex_code === c.hex).map(t => t.id), Math.max(0, parseInt(e.target.value) || 0))}
+                  onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
+                  title={`Set points for all ${c.name} cards`}
+                />
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
@@ -429,16 +477,23 @@ function CategoryGroupBlock({
                   {task.category ? `📂 ${task.category}` : '+ category'}
                 </button>
               )}
-              <div className="flex items-center gap-2 mt-2">
+              <div className="flex items-center gap-2 mt-2 flex-wrap">
                 <p className="a-text-3 text-xs">
                   {scans.filter(s => s.task_id === task.id && s.completed).length} completed ·{' '}
                   {scans.filter(s => s.task_id === task.id).length} scanned
                 </p>
-                {(task.points ?? 0) > 0 && (
-                  <span className="bg-black/50 a-text text-[10px] font-black rounded px-1.5 py-0.5 shadow shadow-black/30 ring-1 ring-white/20">
-                    {task.points} pts
-                  </span>
-                )}
+                <div className="flex items-center gap-1 bg-black/50 rounded px-1.5 py-0.5 shadow shadow-black/30 ring-1 ring-white/20">
+                  <input
+                    type="number" min={0}
+                    defaultValue={task.points ?? 0}
+                    key={task.id + '-pts'}
+                    className="w-10 bg-transparent text-white text-[10px] font-black text-center focus:outline-none"
+                    onBlur={e => setTaskPoints(task.id, Math.max(0, parseInt(e.target.value) || 0))}
+                    onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
+                    title="Edit points for this card"
+                  />
+                  <span className="text-white/70 text-[10px] font-black">pts</span>
+                </div>
               </div>
               <p className="a-text-3 text-xs mt-0.5">
                 {(() => {
@@ -584,7 +639,7 @@ export function BingoDashAdmin() {
   const [formHex, setFormHex] = useState('#3B82F6')
   const [formCategory, setFormCategory] = useState('')
   const [formPoints, setFormPoints] = useState(0)
-  const [formTaskType, setFormTaskType] = useState<'standard' | 'answer' | 'photo' | 'sign_splice' | 'breakout_hunt'>('standard')
+  const [formTaskType, setFormTaskType] = useState<'standard' | 'answer' | 'photo' | 'video' | 'media' | 'sign_splice' | 'breakout_hunt'>('standard')
   const [formAnswerQuestion, setFormAnswerQuestion] = useState('')
   const [formAnswerText, setFormAnswerText] = useState('')
   const [formSaving, setFormSaving] = useState(false)
@@ -610,7 +665,7 @@ export function BingoDashAdmin() {
   const [tileCategory, setTileCategory] = useState('')
   const [tilePoints, setTilePoints] = useState(0)
   const [tileSectionId, setTileSectionId] = useState<string>('')
-  const [tileTaskType, setTileTaskType] = useState<'standard' | 'answer' | 'photo' | 'sign_splice' | 'breakout_hunt'>('standard')
+  const [tileTaskType, setTileTaskType] = useState<'standard' | 'answer' | 'photo' | 'video' | 'media' | 'sign_splice' | 'breakout_hunt'>('standard')
   const [tileAnswerQuestion, setTileAnswerQuestion] = useState('')
   const [tileAnswerText, setTileAnswerText] = useState('')
   const [tileSaving, setTileSaving] = useState(false)
@@ -755,6 +810,19 @@ export function BingoDashAdmin() {
   // Which card's three-dot action menu is open (library cards)
   const [cardMenuId, setCardMenuId] = useState<string | null>(null)
   const [cardMenuPos, setCardMenuPos] = useState<{ top: number; right: number } | null>(null)
+  // The menu is positioned against the button's viewport rect (the card clips
+  // its own overflow), so it cannot follow the page. Close it when the view
+  // moves instead of leaving it stranded over unrelated cards.
+  useEffect(() => {
+    if (!cardMenuId) return
+    const close = () => setCardMenuId(null)
+    window.addEventListener('scroll', close, true)
+    window.addEventListener('resize', close)
+    return () => {
+      window.removeEventListener('scroll', close, true)
+      window.removeEventListener('resize', close)
+    }
+  }, [cardMenuId])
 
   // ── Derived ────────────────────────────────────────────────────────────────
   // Boards this account actually manages: house boards for the owner, own
@@ -1442,7 +1510,7 @@ export function BingoDashAdmin() {
   }
 
   const fetchSettings = useCallback(async () => {
-    const { data } = await supabase.from('bingo_settings').select('*').eq('id', 'main').single()
+    const { data } = await supabase.from('bingo_settings').select('*').eq('id', 'main').maybeSingle()
     if (data) setSettings(data)
   }, [])
 
@@ -1522,13 +1590,23 @@ export function BingoDashAdmin() {
     } finally { setTimerSaving(false) }
   }
 
+  // +/- adjustments and Set redefine "the configured duration", so they
+  // always update timer_duration_seconds alongside the live value —
+  // that's what Reset hands back.
   const adjustTimer = (deltaMinutes: number) => {
     if (!currentBoard) return
     const delta = deltaMinutes * 60
+    const newDuration = Math.max(0, (currentBoard.timer_duration_seconds ?? 0) + delta)
     if (isTimerRunning && currentBoard.timer_end_at) {
-      updateBoardSettings({ timer_end_at: new Date(new Date(currentBoard.timer_end_at).getTime() + delta * 1000).toISOString() })
+      updateBoardSettings({
+        timer_end_at: new Date(new Date(currentBoard.timer_end_at).getTime() + delta * 1000).toISOString(),
+        timer_duration_seconds: newDuration,
+      })
     } else {
-      updateBoardSettings({ timer_seconds: Math.max(0, (currentBoard.timer_seconds ?? 0) + delta) })
+      updateBoardSettings({
+        timer_seconds: Math.max(0, (currentBoard.timer_seconds ?? 0) + delta),
+        timer_duration_seconds: newDuration,
+      })
     }
   }
 
@@ -1537,9 +1615,9 @@ export function BingoDashAdmin() {
     if (isNaN(mins) || mins < 0) return
     const seconds = Math.round(mins * 60)
     if (isTimerRunning) {
-      updateBoardSettings({ timer_end_at: new Date(Date.now() + seconds * 1000).toISOString(), timer_seconds: seconds })
+      updateBoardSettings({ timer_end_at: new Date(Date.now() + seconds * 1000).toISOString(), timer_seconds: seconds, timer_duration_seconds: seconds })
     } else {
-      updateBoardSettings({ timer_seconds: seconds })
+      updateBoardSettings({ timer_seconds: seconds, timer_duration_seconds: seconds })
     }
     setTimerMinutesInput('')
   }
@@ -1555,7 +1633,9 @@ export function BingoDashAdmin() {
     updateBoardSettings({ timer_seconds: remaining, timer_end_at: null })
   }
 
-  const resetTimer = () => updateBoardSettings({ timer_end_at: null })
+  // Stop the countdown and hand back the length that was actually set —
+  // not the paused remainder, and not zero.
+  const resetTimer = () => updateBoardSettings({ timer_end_at: null, timer_seconds: currentBoard?.timer_duration_seconds ?? 0 })
 
   // ── Board grid actions ─────────────────────────────────────────────────────
   // Grid membership lives in bingo_board_cards: one placement row per
@@ -1784,6 +1864,25 @@ export function BingoDashAdmin() {
     const affected = tasks.filter(t => matchesBulkCategory(t, categoryKey))
     await Promise.all(affected.map(t => supabase.from('bingo_tasks').update({ points }).eq('id', t.id)))
     setTasks(prev => prev.map(t => matchesBulkCategory(t, categoryKey) ? { ...t, points } : t))
+  }
+
+  const setTaskPoints = async (taskId: string, points: number) => {
+    setTasks(prev => prev.map(t => t.id === taskId ? { ...t, points } : t))
+    await supabase.from('bingo_tasks').update({ points }).eq('id', taskId)
+  }
+
+  // Mall Hunt cards carry their Act as a colour (see ACT_COLORS), not a
+  // separate field, so "points per Act" is a bulk set keyed by hex_code
+  // within one category — every other category has no such grouping.
+  // Takes the exact task ids to touch (from the group already on screen)
+  // rather than re-deriving them via currentSectionId: the Complete Library
+  // view lets you act on a compartment that isn't the active board, and
+  // matchesBulkCategory's section_id check would silently match nothing.
+  const setPointsForTasks = async (taskIds: string[], points: number) => {
+    if (taskIds.length === 0) return
+    const idSet = new Set(taskIds)
+    setTasks(prev => prev.map(t => idSet.has(t.id) ? { ...t, points } : t))
+    await Promise.all(taskIds.map(id => supabase.from('bingo_tasks').update({ points }).eq('id', id)))
   }
 
   const setBulkCategoryColor = async (categoryKey: string, hex: string) => {
@@ -2035,7 +2134,26 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
       // Cascade to scans:
       // - approve → mark scans completed
       // - reject  → if any of these were previously approved, un-complete the scan
-      const scansToComplete = subs.filter(s => s.scan_id && status === 'approved').map(s => s.scan_id!)
+      // Only once the card's compulsory inputs are all satisfied: a card
+      // asking for a clip AND an answer is not finished by the clip alone.
+      const scansToComplete: string[] = []
+      if (status === 'approved') {
+        for (const sub of subs) {
+          if (!sub.scan_id) continue
+          const task = tasks.find(t => t.id === sub.task_id)
+          const inputs = effectiveInputs(task?.task_type, task?.completion_inputs)
+          if (!usesInputs(inputs)) { scansToComplete.push(sub.scan_id); continue }
+          const mine = photoSubmissions.filter(x => x.team_id === sub.team_id && x.task_id === sub.task_id)
+          const approved = mine.filter(x => x.status === 'approved' || ids.includes(x.id))
+          const scan = scans.find(x => x.id === sub.scan_id)
+          const done = {
+            photo: approved.some(x => (x.media_type ?? 'image') === 'image'),
+            video: approved.some(x => x.media_type === 'video'),
+            answer: scan?.answer_ok ?? false,
+          }
+          if (isComplete(inputs, done)) scansToComplete.push(sub.scan_id)
+        }
+      }
       const scansToUncomplete = subs.filter(s => s.scan_id && status === 'rejected' && s.status === 'approved').map(s => s.scan_id!)
       if (scansToComplete.length > 0) {
         await supabase.from('bingo_scans').update({ completed: true, completed_at: new Date().toISOString() }).in('id', scansToComplete)
@@ -3285,7 +3403,7 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                       categoryGroups.map(group => (
                         <div key={group.key}>
                           {/* Category subheader */}
-                          <div className="flex items-center gap-3 mb-3 pl-4">
+                          <div className="flex items-center gap-3 mb-3 pl-4 flex-wrap">
                           {(() => {
                             const gKey = section.id + ':' + group.key
                             const hidden = collapsedGroups.has(gKey)
@@ -3309,23 +3427,52 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                             <h3 className="text-xs font-black a-text-2 uppercase tracking-widest">{group.label}</h3>
                             <span className="text-xs a-text-2 font-medium">{group.tasks.length}</span>
                             <div className="flex-1 h-px a-surface-2" />
-                            <div className="flex items-center gap-1.5 flex-shrink-0">
-                              <span className="text-xs a-text-2">color for all:</span>
-                              <input type="color" defaultValue={group.tasks[0]?.hex_code ?? '#3B82F6'}
-                                key={section.id + group.key + '-color'}
-                                className="w-7 h-7 rounded cursor-pointer border a-border"
-                                onChange={e => setBulkCategoryColor(group.key, e.target.value)}
-                                title={`Set color for all ${group.label} tasks`} />
-                            </div>
-                            <div className="flex items-center gap-1.5 flex-shrink-0">
-                              <span className="text-xs a-text-2">pts for all:</span>
-                              <input type="number" min={0} defaultValue={group.tasks[0]?.points ?? 0}
-                                key={section.id + group.key + '-pts'}
-                                className="w-14 px-1.5 py-0.5 text-xs border border-white/20 bg-gray-800 a-text rounded text-center font-bold focus:outline-none focus:ring-1 focus:ring-teal-500"
-                                onBlur={e => setBulkCategoryPoints(group.key, Math.max(0, parseInt(e.target.value) || 0))}
-                                onKeyDown={e => { if (e.key === 'Enter') setBulkCategoryPoints(group.key, Math.max(0, parseInt((e.target as HTMLInputElement).value) || 0)) }}
-                                title={`Set points for all ${group.label} tasks`} />
-                            </div>
+                            {group.label !== 'Mall Hunt' && (
+                              <>
+                                <div className="flex items-center gap-1.5 flex-shrink-0 flex-wrap">
+                                  <span className="text-xs a-text-2">color for all:</span>
+                                  <input type="color" defaultValue={group.tasks[0]?.hex_code ?? '#3B82F6'}
+                                    key={section.id + group.key + '-color'}
+                                    className="w-7 h-7 rounded cursor-pointer border a-border"
+                                    onChange={e => setBulkCategoryColor(group.key, e.target.value)}
+                                    title={`Set color for all ${group.label} tasks`} />
+                                  <input type="text" defaultValue={group.tasks[0]?.hex_code ?? '#3B82F6'}
+                                    key={section.id + group.key + '-color-hex'}
+                                    className="w-20 px-1.5 py-0.5 text-xs border a-border a-surface-2 a-text rounded font-mono focus:outline-none focus:ring-1 focus:ring-teal-500"
+                                    onBlur={e => { const v = e.target.value.trim(); if (/^#[0-9a-fA-F]{6}$/.test(v)) setBulkCategoryColor(group.key, v) }}
+                                    onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
+                                    title={`Type an exact hex code for all ${group.label} tasks`} />
+                                </div>
+                                <div className="flex items-center gap-1.5 flex-shrink-0">
+                                  <span className="text-xs a-text-2">pts for all:</span>
+                                  <input type="number" min={0} defaultValue={group.tasks[0]?.points ?? 0}
+                                    key={section.id + group.key + '-pts'}
+                                    className="w-14 px-1.5 py-0.5 text-xs border a-border a-surface-2 a-text rounded text-center font-bold focus:outline-none focus:ring-1 focus:ring-teal-500"
+                                    onBlur={e => setBulkCategoryPoints(group.key, Math.max(0, parseInt(e.target.value) || 0))}
+                                    onKeyDown={e => { if (e.key === 'Enter') setBulkCategoryPoints(group.key, Math.max(0, parseInt((e.target as HTMLInputElement).value) || 0)) }}
+                                    title={`Set points for all ${group.label} tasks`} />
+                                </div>
+                              </>
+                            )}
+                            {group.label === 'Mall Hunt' && (
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <span className="text-xs a-text-2">act pts:</span>
+                                {ACT_COLORS.map((c, i) => (
+                                  <div key={c.hex} className="flex items-center gap-1 rounded px-1 py-0.5 border" style={{ borderColor: c.hex, backgroundColor: `${c.hex}22` }}>
+                                    <span className="w-4 h-4 rounded-full text-[9px] font-black text-white flex items-center justify-center flex-shrink-0" style={{ backgroundColor: c.hex }}>{i + 1}</span>
+                                    <input
+                                      type="number" min={0}
+                                      defaultValue={group.tasks.find(t => t.hex_code === c.hex)?.points ?? 0}
+                                      key={section.id + group.key + c.hex + '-actpts'}
+                                      className="w-10 bg-transparent a-text text-xs font-bold text-center focus:outline-none"
+                                      onBlur={e => setPointsForTasks(group.tasks.filter(t => t.hex_code === c.hex).map(t => t.id), Math.max(0, parseInt(e.target.value) || 0))}
+                                      onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
+                                      title={`Set points for all ${c.name} cards`}
+                                    />
+                                  </div>
+                                ))}
+                              </div>
+                            )}
                           </div>
 
                           {/* Cards grid */}
@@ -3378,13 +3525,28 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                                       {task.category ? `📂 ${task.category}` : '+ category'}
                                     </button>
                                   )}
-                                  <div className="flex items-center gap-2 mt-2">
+                                  <div className="flex items-center gap-2 mt-2 flex-wrap">
                                     <p className="text-xs" style={{ color: ink.faint }}>
                                       {scans.filter(s => s.task_id === task.id && s.completed).length} completed ·{' '}
                                       {scans.filter(s => s.task_id === task.id).length} scanned
                                     </p>
-                                    {(task.points ?? 0) > 0 && (
-                                      <span className="a-surface-2 a-text text-[10px] font-black rounded px-1.5 py-0.5">{task.points} pts</span>
+                                    {section.foreign && !isOwner ? (
+                                      (task.points ?? 0) > 0 && (
+                                        <span className="a-surface-2 a-text text-[10px] font-black rounded px-1.5 py-0.5">{task.points} pts</span>
+                                      )
+                                    ) : (
+                                      <div className="flex items-center gap-1 a-surface-2 rounded px-1.5 py-0.5">
+                                        <input
+                                          type="number" min={0}
+                                          defaultValue={task.points ?? 0}
+                                          key={task.id + '-pts'}
+                                          className="w-10 bg-transparent a-text text-[10px] font-black text-center focus:outline-none"
+                                          onBlur={e => setTaskPoints(task.id, Math.max(0, parseInt(e.target.value) || 0))}
+                                          onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
+                                          title="Edit points for this card"
+                                        />
+                                        <span className="a-text-3 text-[10px] font-black">pts</span>
+                                      </div>
                                     )}
                                   </div>
                                   <p className="a-text-3 text-xs mt-0.5">
@@ -4246,6 +4408,8 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                   saveCategoryInline={saveCategoryInline}
                   setBulkCategoryColor={setBulkCategoryColor}
                   setBulkCategoryPoints={setBulkCategoryPoints}
+                  setTaskPoints={setTaskPoints}
+                  setPointsForTasks={setPointsForTasks}
                   renameCategoryByLabel={renameCategoryByLabel}
                   setQrTask={setQrTask}
                   copyLink={copyLink}
@@ -4293,6 +4457,8 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                             saveCategoryInline={saveCategoryInline}
                             setBulkCategoryColor={setBulkCategoryColor}
                             setBulkCategoryPoints={setBulkCategoryPoints}
+                            setTaskPoints={setTaskPoints}
+                  setPointsForTasks={setPointsForTasks}
                             renameCategoryByLabel={renameCategoryByLabel}
                             setQrTask={setQrTask}
                             copyLink={copyLink}
@@ -4535,7 +4701,7 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                               <select
                                 value={team.section_id}
                                 onChange={e => moveTeamToSection(team.id, e.target.value)}
-                                className="px-2 py-1 rounded border a-border text-xs bg-gray-800 a-text-2 focus:outline-none focus:border-teal-500"
+                                className="px-2 py-1 rounded border a-border text-xs a-surface-2 a-text-2 focus:outline-none focus:border-teal-500"
                               >
                                 {myBoards.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
                               </select>
@@ -4824,7 +4990,7 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                             style={{ borderColor: isSel ? '#dc2626' : ring, background: 'var(--a-surface)' }}
                           >
                             <div className="a-surface-2 relative">
-                              <SubmissionThumb url={sub.photo_url} fill />
+                              <SubmissionThumb url={sub.photo_url} fill video={sub.media_type === 'video'} />
                               {isSel && (
                                 <span className="absolute top-1 right-1 text-[10px] font-black text-white bg-red-600 px-1.5 py-0.5 rounded">
                                   WRONG
@@ -4865,7 +5031,7 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                           click-through per submission, and at an event that is
                           a queue of people waiting while you open each one. */}
                       <div className="a-surface-2">
-                        <SubmissionThumb url={sub.photo_url} fill />
+                        <SubmissionThumb url={sub.photo_url} fill video={sub.media_type === 'video'} />
                       </div>
 
                       <div className="p-3">
