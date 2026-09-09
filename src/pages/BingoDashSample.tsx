@@ -985,13 +985,12 @@ const SampleTaskDetail = forwardRef<SampleTaskDetailHandle, {
       <main className={`${containerMaxW} mx-auto px-6 py-8 relative z-10`}>
         {/* Photo carousel */}
         {photos.length > 0 && (
-          <div className="rounded-2xl overflow-hidden mb-6 shadow-xl animate-slide-up">
+          <div className="rounded-2xl overflow-hidden mb-6 shadow-xl animate-slide-up bg-black/20">
             <div className="relative">
               <img
                 src={photos[carouselIdx]?.photo_url}
                 alt={`${task.title} ${carouselIdx + 1}`}
-                className="w-full max-h-72 object-cover"
-                style={{ objectPosition: `${photos[carouselIdx]?.position_x ?? 50}% ${photos[carouselIdx]?.position_y ?? 50}%` }}
+                className="w-full max-h-[min(46vh,520px)] object-contain"
               />
               {photos.length > 1 && (
                 <>
