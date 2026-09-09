@@ -2689,7 +2689,8 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                 Drag tiles to reorder · Drag from list to place · Hover to move ◀▶ or remove ✕
               </p>
             </div>
-            <a href={playerViewPath} target="_blank" rel="noopener noreferrer"
+            <a href={currentSectionId ? `/bingo-dash/sample?board=${currentSectionId}` : playerViewPath}
+              target="_blank" rel="noopener noreferrer"
               className="text-xs text-teal-500 hover:text-violet-700 transition-colors">
               Preview ↗
             </a>

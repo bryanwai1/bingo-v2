@@ -524,12 +524,14 @@ function TimerDisplay({ settings }: { settings: BingoSection | null }) {
 // ── Board Screen (sandbox) ────────────────────────────────────────────────────
 
 function BoardScreen({
-  teamName, gridTasks, scanState, section, glowSlots, glowMode,
+  teamName, gridTasks, scanState, quickWinSlots, section, glowSlots, glowMode,
   onToggleGlow, onClearGlow, onToggleGlowMode, onOpenTask, onSwitchTeam,
 }: {
   teamName: string
   gridTasks: BingoTask[]
   scanState: ScanState
+  /** Slots Quick BINGO lit directly — see handleQuickWin. */
+  quickWinSlots: Set<number>
   section: BingoSection | null
   /** Slots lit on THIS board. Held by the page so a board switch keeps them. */
   glowSlots: Set<number>
@@ -560,15 +562,20 @@ function BoardScreen({
     if (!st) return 'locked'
     return st === 'completed' ? 'completed' : 'scanned'
   }
+  // Per-slot status: quickWinSlots overrides scanState so Quick BINGO's box
+  // stays lit regardless of what its (possibly shared) task's real status is.
+  const getStatusAt = (taskId: string, slotIdx: number): TileStatus =>
+    quickWinSlots.has(slotIdx) ? 'completed' : getStatus(taskId)
 
-  const gridTaskIds = new Set(visibleTasks.map(t => t.id))
-  const completedCount = gridTasks.filter(t => scanState[t.id] === 'completed' && gridTaskIds.has(t.id)).length
   const slots = buildSlots(visibleTasks)
+  const completedCount = slots.reduce(
+    (n, t, i) => (t && getStatusAt(t.id, i) === 'completed' ? n + 1 : n), 0,
+  )
 
   const completedLineIndices = BINGO_LINES.reduce((acc, line, i) => {
     const allDone = line.every(slotIdx => {
       const task = slots[slotIdx]
-      return task && getStatus(task.id) === 'completed'
+      return task && getStatusAt(task.id, slotIdx) === 'completed'
     })
     if (allDone) acc.add(i)
     return acc
@@ -717,7 +724,7 @@ function BoardScreen({
                   <BingoTile
                     key={`${i}-${task.id}`}
                     task={task}
-                    status={getStatus(task.id)}
+                    status={getStatusAt(task.id, i)}
                     isInBingoLine={bingoSlots.has(i)}
                     display={tileDisplay}
                     glowing={glowSlots.has(i)}
@@ -1439,6 +1446,12 @@ function SampleProjector() {
   const [teamName, setTeamName] = useState<string | null>(null)
   const [scanState, setScanState] = useState<ScanState>({})
   const [openTask, setOpenTask] = useState<BingoTask | null>(null)
+  // Quick BINGO's own completion, tracked by SLOT rather than task id. A card
+  // can legitimately sit in several boxes (see boardCards.ts), and scanState
+  // is keyed by task id, so completing a repeated card there lights every box
+  // it occupies. Quick BINGO is a demo trick that must always light exactly
+  // the top row and nothing else, so it marks slots directly instead.
+  const [quickWinSlots, setQuickWinSlots] = useState<Set<number>>(new Set())
 
   // What the big screen is showing: the bingo board or the scoreboard.
   const [view, setView] = useState<SampleView>('board')
@@ -1517,6 +1530,7 @@ function SampleProjector() {
       setTasksLoading(false)
     })
     setScanState({})
+    setQuickWinSlots(new Set())
     setOpenTask(null)
     return () => { cancelled = true }
   }, [selectedId])
@@ -1525,6 +1539,7 @@ function SampleProjector() {
 
   const handleReset = () => {
     setScanState({})
+    setQuickWinSlots(new Set())
     setOpenTask(null)
     setTeamName(null)
     // Roulette-style modules (spin wheels) track their spin count in
@@ -1547,17 +1562,11 @@ function SampleProjector() {
   const markComplete = (taskId: string) => setScanState(prev => ({ ...prev, [taskId]: 'completed' }))
   const markUncomplete = (taskId: string) => setScanState(prev => ({ ...prev, [taskId]: 'scanned' }))
 
-  // Instantly complete the first fully-populated bingo line (demo helper).
-  const handleQuickWin = () => {
-    const slots = buildSlots(gridTasks)
-    const line = BINGO_LINES.find(l => l.every(i => slots[i] !== null))
-    const targets = line ? line.map(i => slots[i]!) : gridTasks
-    setScanState(prev => {
-      const next = { ...prev }
-      for (const t of targets) next[t.id] = 'completed'
-      return next
-    })
-  }
+  // Instantly complete the top row (demo helper) — always slots 0-4, on every
+  // board, so the demo is predictable regardless of how a board is laid out.
+  // Tracked by slot (quickWinSlots), not scanState, so a card that also sits
+  // in other boxes elsewhere on the board doesn't light those too.
+  const handleQuickWin = () => setQuickWinSlots(new Set(BINGO_LINES[0]))
 
   // ── Remote control wiring ──────────────────────────────────────────────────
   const snapshot = (): RemoteState => ({
@@ -1664,6 +1673,7 @@ function SampleProjector() {
           teamName={teamName}
           gridTasks={gridTasks}
           scanState={scanState}
+          quickWinSlots={quickWinSlots}
           section={selectedSection}
           glowSlots={new Set(selectedSection?.glow_slots ?? [])}
           glowMode={glowMode}
