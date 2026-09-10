@@ -561,6 +561,12 @@ function BoardScreen({
               value={`bingodash-team:${team.id}`}
               teamName={team.name}
             />
+            <button
+              onClick={() => navigate('/bingo-dash/projector')}
+              className="text-xs font-bold text-teal-300 hover:text-teal-200 transition-colors"
+            >
+              🏆 Scoreboard
+            </button>
             {!showLeaveConfirm ? (
               <button onClick={() => setShowLeaveConfirm(true)} className="text-xs text-gray-500 hover:text-gray-300 transition-colors">
                 Switch Team

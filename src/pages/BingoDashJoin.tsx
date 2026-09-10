@@ -486,7 +486,7 @@ function TimerDisplay({ settings }: { settings: BoardTimer | null }) {
 function BoardScreen({
   team,
   sectionName,
-  sectionSlug: _sectionSlug,
+  sectionSlug,
   memberRole,
   gridTasks,
   scans,
@@ -625,6 +625,12 @@ function BoardScreen({
           </div>
           <div className="flex flex-col items-end gap-2 flex-shrink-0 mt-1">
             <TimerDisplay settings={settings} />
+            <button
+              onClick={() => navigate(`/bingo-dash/projector/${sectionSlug}`)}
+              className="text-xs font-bold text-teal-300 hover:text-teal-200 transition-colors"
+            >
+              🏆 Scoreboard
+            </button>
             {!showLeaveConfirm ? (
               <button onClick={() => setShowLeaveConfirm(true)} className="text-xs text-gray-500 hover:text-gray-300 transition-colors">
                 Switch Team
