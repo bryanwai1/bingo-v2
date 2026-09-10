@@ -780,6 +780,22 @@ export function BingoDashJoin() {
             localStorage.removeItem(GLOBAL_MEMBER_ROLE_KEY)
           }
           setPageState('join')
+        } else if (isObserver && cachedRole === 'member' && cachedMemberId) {
+          // Observer URL means the user wants to spectate, not play. Drop this
+          // board's player session so they land on "Select Group to Watch"
+          // instead of silently resuming as their team with full write access
+          // — the mirror image of the block above, for the opposite direction.
+          localStorage.removeItem(MEMBER_ID_KEY(sectionSlug))
+          localStorage.removeItem(MEMBER_DATA_KEY(sectionSlug))
+          localStorage.removeItem(TEAM_ID_KEY(sectionSlug))
+          localStorage.removeItem(TEAM_DATA_KEY(sectionSlug))
+          localStorage.removeItem(MEMBER_ROLE_KEY(sectionSlug))
+          if (localStorage.getItem(GLOBAL_MEMBER_ROLE_KEY) === 'member') {
+            localStorage.removeItem(GLOBAL_TEAM_ID_KEY)
+            localStorage.removeItem(GLOBAL_TEAM_DATA_KEY)
+            localStorage.removeItem(GLOBAL_MEMBER_ROLE_KEY)
+          }
+          setPageState('join')
         } else if (cachedMemberId && cachedTeamId && cachedTeamData) {
           try {
             const parsed = JSON.parse(cachedTeamData)
