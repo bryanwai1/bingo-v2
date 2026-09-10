@@ -976,10 +976,13 @@ export function BingoDashParticipant() {
                       }
                       setCompleting(true)
                       try {
-                        // Leaders complete outright; everyone else submits and
-                        // waits. This is what keeps four phones from sending the
-                        // same completion to one marshal.
-                        if (isLeader) {
+                        // A marshal password is its own authorization — whoever
+                        // has it (marshal reads it out, anyone types it in)
+                        // completes outright. The leader-approval queue only
+                        // exists to stop four phones self-reporting completion
+                        // with nothing to check against; it doesn't apply once
+                        // a marshal is already the one confirming.
+                        if (isLeader || task.require_marshal) {
                           await toggleComplete(scanRecord.id, true)
                           setScanRecord({ ...scanRecord, completed: true })
                         } else if (team && memberId) {
@@ -996,7 +999,7 @@ export function BingoDashParticipant() {
                       boxShadow: `0 6px 0 ${task.hex_code}88, 0 8px 20px ${task.hex_code}44`,
                     }}
                   >
-                    {completing ? 'Sending...' : isLeader ? 'Complete Challenge ✅' : 'Submit to Team Leader 📤'}
+                    {completing ? 'Sending...' : (isLeader || task.require_marshal) ? 'Complete Challenge ✅' : 'Submit to Team Leader 📤'}
                   </button>
                 </>
               )}
