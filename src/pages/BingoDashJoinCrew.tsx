@@ -13,7 +13,7 @@ import { ParticleBackground } from '../components/ParticleBackground'
  *
  * No email, no password, no approval queue. The login is an anonymous Supabase
  * user attached to the host tenant via `facilitator_host`, expiring with the
- * pass (see supabase/migrations/20260729_facilitator_sessions.sql).
+ * pass (see supabase/accounts-tenancy/20260729_facilitator_sessions.sql).
  */
 
 interface SessionInfo {

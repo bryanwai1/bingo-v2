@@ -159,7 +159,7 @@ export interface BingoTask {
   led?: string | null
   // AI Team Building cards only: per-card override of the speed-bonus clock.
   // enabled=false hides the bonus bar; minutes=null keeps the activity's own
-  // duration. See supabase/020_aitb_card_timer.sql.
+  // duration. See supabase/aitb/020_aitb_card_timer.sql.
   aitb_timer_enabled?: boolean
   aitb_timer_minutes?: number | null
   // Sign Splice cards only: whether Screen 4 asks for the shop name / lot
@@ -173,7 +173,7 @@ export interface BingoTask {
   sign_splice_allow_numbers?: boolean
   sign_splice_min_confidence?: number
   // How many items this card deals to each team from its own bank.
-  // 0 = no draw. See supabase/025_card_draws.sql.
+  // 0 = no draw. See supabase/draws/superseded/025_card_draws.sql.
   /** Photo and video cards: let a team send more than one file. */
   photo_multiple?: boolean
   /** Which inputs the card collects, and whether each is compulsory.
@@ -271,7 +271,7 @@ export interface BingoScan {
    *  showing the card, matching the old (pre-fix) behavior. Lets a card
    *  placed in several boxes on one board be completed independently
    *  instead of one completion ticking all of them. See
-   *  supabase/migrations/20260910_scan_board_card_id.sql. */
+   *  supabase/scan-completion/20260910_scan_board_card_id.sql. */
   board_card_id: string | null
   scanned_at: string
   completed: boolean
@@ -330,7 +330,7 @@ export interface BingoPhotoSubmission {
   media_type?: 'image' | 'video'
   status: 'pending' | 'approved' | 'rejected'
   // Breakout Hunt sets only: what the photo should show, and which puzzle it
-  // answers. See supabase/023_breakout_review.sql.
+  // answers. See supabase/breakout-hunt/023_breakout_review.sql.
   label?: string | null
   puzzle_id?: string | null
   created_at: string

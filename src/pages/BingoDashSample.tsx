@@ -829,7 +829,7 @@ const SampleTaskDetail = forwardRef<SampleTaskDetailHandle, {
   const { config: drawConfig } = useCardDrawConfig(task.id)
   const aitbBase = aitbByName(task.title)
   // A card can rescale or switch off the AITB bonus clock — see
-  // supabase/020_aitb_card_timer.sql.
+  // supabase/aitb/020_aitb_card_timer.sql.
   const aitbActivity = aitbBase ? aitbWithTimer(aitbBase, task.aitb_timer_minutes) : undefined
   const aitbTimerOn = task.aitb_timer_enabled !== false
   const [aitbWords, setAitbWords] = useState<string[]>([])

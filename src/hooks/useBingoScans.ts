@@ -13,7 +13,7 @@ export function useBingoScans() {
     // same (team, task, box) — e.g. an effect firing twice — can both see
     // "nothing yet" and both insert, producing duplicate rows. bingo_scans
     // has a unique index on (team_id, task_id, board_card_key) — see
-    // supabase/migrations/20260910_scan_unique_constraint.sql — so upsert
+    // supabase/scan-completion/20260910_scan_unique_constraint.sql — so upsert
     // with ignoreDuplicates lets the DB be the single source of truth: at
     // most one row is ever created no matter how the calls interleave.
     const { error: upsertError } = await supabase

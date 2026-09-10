@@ -198,7 +198,7 @@ function AwardShow({ sectionSlug }: { sectionSlug: string }) {
       // A card placed in several boxes on this board completes per box
       // (scan.board_card_id); scans from before that column existed have
       // none and still count toward every box sharing their task_id — see
-      // supabase/migrations/20260910_scan_board_card_id.sql.
+      // supabase/scan-completion/20260910_scan_board_card_id.sql.
       const completedPlacementIds = new Set(
         teamScans.filter(sc => sc.completed && sc.board_card_id).map(sc => sc.board_card_id as string),
       )

@@ -122,7 +122,7 @@ export function BingoDashProjector() {
   // Grid membership lives in bingo_board_cards (cards are shared across boards).
   // placement_id (= bc.id) is what lets the same card placed in several boxes
   // on one board be scored and bingo-line-detected per box instead of once
-  // for the whole card — see supabase/migrations/20260910_scan_board_card_id.sql.
+  // for the whole card — see supabase/scan-completion/20260910_scan_board_card_id.sql.
   const gridTasks = (activeSectionId ? boardCards.filter(bc => bc.section_id === activeSectionId) : boardCards)
     .filter(bc => tasks.some(x => x.id === bc.task_id))
     .map(bc => ({ ...tasks.find(x => x.id === bc.task_id)!, sort_order: bc.slot, in_grid: true, placement_id: bc.id }))

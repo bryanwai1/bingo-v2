@@ -208,7 +208,7 @@ export function BingoDashParticipant() {
   // those names, whether it's played standalone or inside the bundle.
   const aitbBase = task ? aitbByName(task.title) : undefined
   // A card can rescale or switch off the AITB bonus clock — see
-  // supabase/020_aitb_card_timer.sql.
+  // supabase/aitb/020_aitb_card_timer.sql.
   const aitbActivity = aitbBase ? aitbWithTimer(aitbBase, task?.aitb_timer_minutes) : undefined
   const aitbTimerOn = task?.aitb_timer_enabled !== false
 
