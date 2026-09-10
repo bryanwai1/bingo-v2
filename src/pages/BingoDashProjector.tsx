@@ -124,11 +124,8 @@ export function BingoDashProjector() {
   // on one board be scored and bingo-line-detected per box instead of once
   // for the whole card — see supabase/migrations/20260910_scan_board_card_id.sql.
   const gridTasks = (activeSectionId ? boardCards.filter(bc => bc.section_id === activeSectionId) : boardCards)
-    .map(bc => {
-      const t = tasks.find(x => x.id === bc.task_id)
-      return t ? { ...t, sort_order: bc.slot, in_grid: true, placement_id: bc.id } : null
-    })
-    .filter((t): t is BingoTask => t !== null)
+    .filter(bc => tasks.some(x => x.id === bc.task_id))
+    .map(bc => ({ ...tasks.find(x => x.id === bc.task_id)!, sort_order: bc.slot, in_grid: true, placement_id: bc.id }))
     .sort((a, b) => a.sort_order - b.sort_order)
   const slots = buildBingoSlots(gridTasks)
   // completedBingoLines checks slot.id against completedIds; feed it the

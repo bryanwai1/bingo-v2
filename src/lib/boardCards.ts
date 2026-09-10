@@ -19,11 +19,8 @@ export async function fetchBoardTasks(sectionId: string): Promise<BingoTask[]> {
   if (!tasks) return []
   const byId = new Map<string, BingoTask>(tasks.map(t => [t.id, t]))
   return (placements as BingoBoardCard[])
-    .map(p => {
-      const t = byId.get(p.task_id)
-      return t ? { ...t, sort_order: p.slot, in_grid: true, placement_id: p.id } : null
-    })
-    .filter((t): t is BingoTask => t !== null)
+    .filter(p => byId.has(p.task_id))
+    .map(p => ({ ...byId.get(p.task_id)!, sort_order: p.slot, in_grid: true, placement_id: p.id }))
 }
 
 /**
