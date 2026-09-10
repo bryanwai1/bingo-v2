@@ -514,14 +514,23 @@ function BoardScreen({
   const [popupQueue, setPopupQueue] = useState<string[]>([])
   const celebratedLinesRef = useRef<Set<number> | null>(null)
 
-  const gridTaskIds = new Set(gridTasks.map(t => t.id))
-  const completedCount = scans.filter(s => s.completed && gridTaskIds.has(s.task_id)).length
-
-  const getStatus = (taskId: string): TileStatus => {
-    const scan = scans.find(s => s.task_id === taskId)
-    if (!scan) return 'locked'
-    return scan.completed ? 'completed' : 'scanned'
+  // A card can sit in several boxes on one board, so status is looked up by
+  // THIS box's placement first. Falls back to the card-wide scan (no
+  // board_card_id) so boards completed before this existed keep working.
+  // Uses .some() rather than picking one matching scan: recordScan's
+  // select-then-insert can race and leave two rows for the same box (one
+  // stale, one the real completion) — any completed match should count,
+  // not whichever happens to sort first.
+  const getStatus = (task: BingoTask): TileStatus => {
+    const matches = (s: BingoScan) =>
+      task.placement_id ? s.board_card_id === task.placement_id
+        : s.task_id === task.id
+    const legacyMatches = (s: BingoScan) => task.placement_id != null && s.board_card_id == null && s.task_id === task.id
+    if (scans.some(s => (matches(s) || legacyMatches(s)) && s.completed)) return 'completed'
+    if (scans.some(s => matches(s) || legacyMatches(s))) return 'scanned'
+    return 'locked'
   }
+  const completedCount = gridTasks.filter(t => getStatus(t) === 'completed').length
 
   const slots: (BingoTask | null)[] = (() => {
     const out: (BingoTask | null)[] = Array(GRID_SIZE).fill(null)
@@ -541,7 +550,7 @@ function BoardScreen({
   const completedLineIndices = BINGO_LINES.reduce((acc, line, i) => {
     const allDone = line.every(slotIdx => {
       const task = slots[slotIdx]
-      return task && getStatus(task.id) === 'completed'
+      return task && getStatus(task) === 'completed'
     })
     if (allDone) acc.add(i)
     return acc
@@ -658,12 +667,12 @@ function BoardScreen({
               {slots.map((task, i) =>
                 task ? (
                   <BingoTile
-                    key={task.id}
+                    key={task.placement_id ?? task.id}
                     task={task}
-                    status={getStatus(task.id)}
+                    status={getStatus(task)}
                     isInBingoLine={bingoSlots.has(i)}
                     display={tileDisplay}
-                    onClick={() => navigate(`/bingo-dash/task/${task.id}`)}
+                    onClick={() => navigate(`/bingo-dash/task/${task.id}${task.placement_id ? `?box=${task.placement_id}` : ''}`)}
                   />
                 ) : (
                   <EmptyTile key={`empty-${i}`} />

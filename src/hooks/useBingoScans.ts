@@ -3,26 +3,37 @@ import { supabase } from '../lib/supabase'
 import type { BingoScan } from '../types/database'
 
 export function useBingoScans() {
-  const recordScan = useCallback(async (teamId: string, taskId: string): Promise<BingoScan | null> => {
-    // .single() errors when it finds anything other than exactly one row, so a
-    // team that somehow ended up with two scans for a card would get null here
-    // and be given a third, and a fourth. Take the oldest and carry on: the
-    // duplicates then heal instead of multiplying.
-    const { data: existing } = await supabase
+  // boardCardId scopes the scan to one specific board box (bingo_board_cards
+  // row), so a card placed in several boxes on one board completes each box
+  // independently instead of one scan being shared by all of them. Omit it
+  // (bare task link, e.g. a QR code that only encodes the card) to fall back
+  // to the card-wide scan every box used to share.
+  const recordScan = useCallback(async (teamId: string, taskId: string, boardCardId?: string | null): Promise<BingoScan | null> => {
+    // A plain "select existing, else insert" isn't atomic: two calls for the
+    // same (team, task, box) — e.g. an effect firing twice — can both see
+    // "nothing yet" and both insert, producing duplicate rows. bingo_scans
+    // has a unique index on (team_id, task_id, board_card_key) — see
+    // supabase/migrations/20260910_scan_unique_constraint.sql — so upsert
+    // with ignoreDuplicates lets the DB be the single source of truth: at
+    // most one row is ever created no matter how the calls interleave.
+    const { error: upsertError } = await supabase
+      .from('bingo_scans')
+      .upsert(
+        { team_id: teamId, task_id: taskId, board_card_id: boardCardId ?? null },
+        { onConflict: 'team_id,task_id,board_card_key', ignoreDuplicates: true },
+      )
+    if (upsertError) throw upsertError
+
+    // DO NOTHING upserts don't return the row they collided with, so fetch
+    // it — by now it's guaranteed to exist, either just-inserted or already
+    // there, so this read carries no race of its own.
+    let query = supabase
       .from('bingo_scans')
       .select('*')
       .eq('team_id', teamId)
       .eq('task_id', taskId)
-      .order('scanned_at', { ascending: true })
-      .limit(1)
-      .maybeSingle()
-    if (existing) return existing
-
-    const { data, error } = await supabase
-      .from('bingo_scans')
-      .insert({ team_id: teamId, task_id: taskId })
-      .select()
-      .single()
+    query = boardCardId ? query.eq('board_card_id', boardCardId) : query.is('board_card_id', null)
+    const { data, error } = await query.limit(1).single()
     if (error) throw error
     return data
   }, [])

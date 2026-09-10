@@ -433,14 +433,24 @@ function BoardScreen({
   const [face, setFace] = useState(0)
   const faceCount = normaliseFaceCount(faceCountProp)
   const visibleTasks = faceCount > 1 ? tasksForFace(gridTasks, face) : gridTasks
-  const gridTaskIds = new Set(visibleTasks.map(t => t.id))
-  const completedCount = scans.filter(s => s.completed && gridTaskIds.has(s.task_id)).length
 
-  const getStatus = (taskId: string): TileStatus => {
-    const scan = scans.find(s => s.task_id === taskId)
-    if (!scan) return 'locked'
-    return scan.completed ? 'completed' : 'scanned'
+  // A card can sit in several boxes on one board, so status is looked up by
+  // THIS box's placement first. Falls back to the card-wide scan (no
+  // board_card_id) so boards completed before this existed keep working.
+  // Uses .some() rather than picking one matching scan: recordScan's
+  // select-then-insert can race and leave two rows for the same box (one
+  // stale, one the real completion) — any completed match should count,
+  // not whichever happens to sort first.
+  const getStatus = (task: BingoTask): TileStatus => {
+    const matches = (s: BingoScan) =>
+      task.placement_id ? s.board_card_id === task.placement_id
+        : s.task_id === task.id
+    const legacyMatches = (s: BingoScan) => task.placement_id != null && s.board_card_id == null && s.task_id === task.id
+    if (scans.some(s => (matches(s) || legacyMatches(s)) && s.completed)) return 'completed'
+    if (scans.some(s => matches(s) || legacyMatches(s))) return 'scanned'
+    return 'locked'
   }
+  const completedCount = visibleTasks.filter(t => getStatus(t) === 'completed').length
 
   // Build a sparse 25-slot array: each task lands at slot = sort_order (0-24).
   // Legacy rows whose sort_order is out of range or collides fall into the
@@ -464,7 +474,7 @@ function BoardScreen({
   const completedLineIndices = BINGO_LINES.reduce((acc, line, i) => {
     const allDone = line.every(slotIdx => {
       const task = slots[slotIdx]
-      return task && getStatus(task.id) === 'completed'
+      return task && getStatus(task) === 'completed'
     })
     if (allDone) acc.add(i)
     return acc
@@ -592,7 +602,7 @@ function BoardScreen({
               {activeFaces(faceCount).map(f => {
                 const on = face === f
                 const ft = tasksForFace(gridTasks, f)
-                const doneOnFace = ft.filter(t => getStatus(t.id) === 'completed').length
+                const doneOnFace = ft.filter(t => getStatus(t) === 'completed').length
                 return (
                   <button
                     key={f}
@@ -623,12 +633,12 @@ function BoardScreen({
               {slots.map((task, i) =>
                 task ? (
                   <BingoTile
-                    key={task.id}
+                    key={task.placement_id ?? task.id}
                     task={task}
-                    status={getStatus(task.id)}
+                    status={getStatus(task)}
                     isInBingoLine={bingoSlots.has(i)}
                     display={tileDisplay}
-                    onClick={() => navigate(`/bingo-dash/task/${task.id}`)}
+                    onClick={() => navigate(`/bingo-dash/task/${task.id}${task.placement_id ? `?box=${task.placement_id}` : ''}`)}
                   />
                 ) : (
                   <EmptyTile key={`empty-${i}`} />

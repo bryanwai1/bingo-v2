@@ -4570,17 +4570,30 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                         const teamScans = scans.filter(s => s.team_id === team.id)
                         const sectionGridTasks = boardTasksForSection(section.id)
                         const gridTaskIds = new Set(sectionGridTasks.map(t => t.id))
-                        const completedCount = teamScans.filter(s => s.completed && gridTaskIds.has(s.task_id)).length
-                        const completedIds = new Set(teamScans.filter(s => s.completed).map(s => s.task_id))
+                        // A card placed in several boxes on this board completes
+                        // per box (scan.board_card_id); scans from before that
+                        // column existed have none and still count toward every
+                        // box sharing their task_id — see
+                        // supabase/migrations/20260910_scan_board_card_id.sql.
+                        const completedPlacementIds = new Set(
+                          teamScans.filter(s => s.completed && s.board_card_id).map(s => s.board_card_id as string),
+                        )
+                        const legacyCompletedTaskIds = new Set(
+                          teamScans.filter(s => s.completed && !s.board_card_id && gridTaskIds.has(s.task_id)).map(s => s.task_id),
+                        )
+                        const completedPlacements = sectionGridTasks.filter(t =>
+                          completedPlacementIds.has(t.placementId) || legacyCompletedTaskIds.has(t.id),
+                        )
+                        const completedCount = completedPlacements.length
+                        const completedIds = new Set(completedPlacements.map(t => t.placementId))
                         // Tile points plus any contest bonuses this team won in
                         // duels — the latter is a defender's only scoring record.
-                        const pointsEarned = teamScans
-                          .filter(s => s.completed && gridTaskIds.has(s.task_id))
-                          .reduce((sum, s) => sum + (sectionGridTasks.find(t => t.id === s.task_id)?.points ?? 0), 0)
+                        const pointsEarned = completedPlacements.reduce((sum, t) => sum + (t.points ?? 0), 0)
                           + (duelBonuses.get(team.id) ?? 0)
                         const pct = sectionGridTasks.length > 0 ? Math.round((completedCount / sectionGridTasks.length) * 100) : 0
                         const teamSlots = buildBingoSlots(sectionGridTasks)
-                        const teamBingoLines = completedBingoLines(teamSlots, completedIds).length
+                        const teamLineSlots = teamSlots.map(t => t ? { ...t, id: t.placementId } : null)
+                        const teamBingoLines = completedBingoLines(teamLineSlots, completedIds).length
                         const teamMembers = members.filter(m => m.team_id === team.id)
                         const isFull = teamMembers.length >= 4
                         return (
@@ -5427,18 +5440,31 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
       {viewingTeam && (() => {
         const team = viewingTeam
         const teamScans = scans.filter(s => s.team_id === team.id)
-        const completedIds = new Set(teamScans.filter(s => s.completed).map(s => s.task_id))
-        const scannedIds = new Set(teamScans.map(s => s.task_id))
         const gridTasksForTeam = boardTasksForSection(team.section_id)
+        const gridTaskIdSet = new Set(gridTasksForTeam.map(t => t.id))
+        // A card placed in several boxes on this board completes per box
+        // (scan.board_card_id); scans from before that column existed have
+        // none and still count toward every box sharing their task_id — see
+        // supabase/migrations/20260910_scan_board_card_id.sql.
+        const completedPlacementIds = new Set(
+          teamScans.filter(s => s.completed && s.board_card_id).map(s => s.board_card_id as string),
+        )
+        const legacyCompletedTaskIds = new Set(
+          teamScans.filter(s => s.completed && !s.board_card_id && gridTaskIdSet.has(s.task_id)).map(s => s.task_id),
+        )
+        const scannedPlacementIds = new Set(teamScans.filter(s => s.board_card_id).map(s => s.board_card_id as string))
+        const legacyScannedTaskIds = new Set(teamScans.filter(s => !s.board_card_id).map(s => s.task_id))
+        const isPlacementCompleted = (t: PlacedCard) => completedPlacementIds.has(t.placementId) || legacyCompletedTaskIds.has(t.id)
+        const isPlacementScanned = (t: PlacedCard) => scannedPlacementIds.has(t.placementId) || legacyScannedTaskIds.has(t.id)
+        const completedPlacements = gridTasksForTeam.filter(isPlacementCompleted)
+        const completedIds = new Set(completedPlacements.map(t => t.placementId))
         const slots = buildBingoSlots(gridTasksForTeam)
-        const completedLineIdx = completedBingoLines(slots, completedIds)
+        const lineSlots = slots.map(t => t ? { ...t, id: t.placementId } : null)
+        const completedLineIdx = completedBingoLines(lineSlots, completedIds)
         const bingoSlotSet = new Set<number>()
         completedLineIdx.forEach(i => BINGO_LINES[i].forEach(idx => bingoSlotSet.add(idx)))
-        const gridTaskIdSet = new Set(gridTasksForTeam.map(t => t.id))
-        const tasksDone = teamScans.filter(s => s.completed && gridTaskIdSet.has(s.task_id)).length
-        const points = gridTasksForTeam.reduce(
-          (sum, t) => completedIds.has(t.id) ? sum + (t.points ?? 0) : sum, 0,
-        )
+        const tasksDone = completedPlacements.length
+        const points = completedPlacements.reduce((sum, t) => sum + (t.points ?? 0), 0)
         return (
           <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 px-4"
             onClick={() => setViewingTeam(null)}>
@@ -5478,12 +5504,12 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                       if (!t) {
                         return <div key={`e-${i}`} className="aspect-square rounded-lg a-surface-2 border border-dashed a-border" />
                       }
-                      const isCompleted = completedIds.has(t.id)
-                      const isScanned = !isCompleted && scannedIds.has(t.id)
+                      const isCompleted = isPlacementCompleted(t)
+                      const isScanned = !isCompleted && isPlacementScanned(t)
                       const inLine = bingoSlotSet.has(i)
                       return (
                         <div
-                          key={t.id}
+                          key={t.placementId}
                           title={t.title}
                           className="relative aspect-square rounded-lg flex items-center justify-center text-center px-1 overflow-hidden"
                           style={{

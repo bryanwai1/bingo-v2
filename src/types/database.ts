@@ -132,6 +132,12 @@ export interface BingoCategory {
 export interface BingoTask {
   /** One tile holding a set of activities — see bingo_bundle_items. */
   is_bundle?: boolean
+  /** Set only when this object represents one specific box on a board (via
+   *  fetchBoardTasks / an equivalent board-cards join), not the bare card
+   *  row — the bingo_board_cards.id of that placement. A card can sit in
+   *  several boxes on one board, so this is what lets each box track its
+   *  own completion instead of all of them sharing the card's status. */
+  placement_id?: string
   id: string
   section_id: string
   title: string
@@ -258,6 +264,15 @@ export interface BingoScan {
   id: string
   team_id: string
   task_id: string
+  /** Which board box this scan belongs to (bingo_board_cards.id), when the
+   *  card was opened from a specific board rather than a bare task link.
+   *  NULL on scans recorded before this column existed, and on any future
+   *  scan not tied to one placement — those still apply to every box
+   *  showing the card, matching the old (pre-fix) behavior. Lets a card
+   *  placed in several boxes on one board be completed independently
+   *  instead of one completion ticking all of them. See
+   *  supabase/migrations/20260910_scan_board_card_id.sql. */
+  board_card_id: string | null
   scanned_at: string
   completed: boolean
   completed_at: string | null

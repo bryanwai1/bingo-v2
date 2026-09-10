@@ -194,19 +194,33 @@ function AwardShow({ sectionSlug }: { sectionSlug: string }) {
     gridTasks.forEach(t => { if (t.sort_order >= 0 && t.sort_order < 25) slots[t.sort_order] = t })
     const gridTaskIds = new Set(gridTasks.map(t => t.id))
     const computed: RankedTeam[] = teams.map(team => {
-      const teamScans = scans.filter(sc => sc.team_id === team.id && sc.completed && gridTaskIds.has(sc.task_id))
-      const completedIds = new Set(teamScans.map(sc => sc.task_id))
+      const teamScans = scans.filter(sc => sc.team_id === team.id)
+      // A card placed in several boxes on this board completes per box
+      // (scan.board_card_id); scans from before that column existed have
+      // none and still count toward every box sharing their task_id — see
+      // supabase/migrations/20260910_scan_board_card_id.sql.
+      const completedPlacementIds = new Set(
+        teamScans.filter(sc => sc.completed && sc.board_card_id).map(sc => sc.board_card_id as string),
+      )
+      const legacyCompletedTaskIds = new Set(
+        teamScans.filter(sc => sc.completed && !sc.board_card_id && gridTaskIds.has(sc.task_id)).map(sc => sc.task_id),
+      )
+      const completedPlacements = gridTasks.filter(t =>
+        (t.placement_id && completedPlacementIds.has(t.placement_id)) || legacyCompletedTaskIds.has(t.id),
+      )
+      const completedIds = new Set(completedPlacements.map(t => t.placement_id ?? t.id))
       // Contest bonuses count as earned play, alongside tile points — a winning
       // defender has no tile, so this is the only record of their win.
-      const basePoints = gridTasks.reduce((sum, t) => completedIds.has(t.id) ? sum + (t.points ?? 0) : sum, 0)
+      const basePoints = completedPlacements.reduce((sum, t) => sum + (t.points ?? 0), 0)
         + (duelBonuses.get(team.id) ?? 0)
       const bonusPoints = team.bonus_points ?? 0
       const bingos = BINGO_LINES.filter(line => line.every(i => {
         const t = slots[i]
-        return t && completedIds.has(t.id)
+        return t && completedIds.has(t.placement_id ?? t.id)
       })).length
       const reachedAt = teamScans.reduce(
-        (latest, sc) => sc.completed_at ? Math.max(latest, Date.parse(sc.completed_at)) : latest,
+        (latest, sc) => (sc.completed && gridTaskIds.has(sc.task_id) && sc.completed_at)
+          ? Math.max(latest, Date.parse(sc.completed_at)) : latest,
         0,
       )
       return {

@@ -82,6 +82,11 @@ export function BingoDashParticipant() {
   const isSnakeLadder = searchParams.get('from') === 'snake-ladder'
   const snakeTileParam = searchParams.get('tile')
   const snakeTile = snakeTileParam ? parseInt(snakeTileParam, 10) : null
+  // Which board box this card was opened from, when opened from a board tap
+  // (a QR scan has no box context — it only encodes the card). Threading
+  // this through is what lets a card placed in several boxes on one board
+  // be completed independently instead of one completion ticking all of them.
+  const boardCardId = searchParams.get('box')
   const [backPath, setBackPath] = useState(isSnakeLadder ? '/snake-ladder' : '/bingo-dash')
   const { team, loading: teamLoading, isRegistered, leaveTeam } = useBingoDashTeam()
   const isObserver = !isSnakeLadder && localStorage.getItem('bingo-dash-member-role') === 'observer'
@@ -261,7 +266,7 @@ export function BingoDashParticipant() {
   useEffect(() => {
     if (isSnakeLadder) return
     if (team && taskId && !scanRecorded) {
-      recordScan(team.id, taskId).then((scan) => {
+      recordScan(team.id, taskId, boardCardId).then((scan) => {
         setScanRecorded(true)
         if (scan) setScanRecord({
           id: scan.id, completed: scan.completed, answerOk: scan.answer_ok ?? false,
@@ -269,7 +274,7 @@ export function BingoDashParticipant() {
         })
       })
     }
-  }, [isSnakeLadder, team, taskId, scanRecorded, recordScan])
+  }, [isSnakeLadder, team, taskId, boardCardId, scanRecorded, recordScan])
 
   // The AITB bonus ladder counts up live, same as the bundle mission.
   useEffect(() => {

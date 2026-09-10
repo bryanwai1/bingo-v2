@@ -120,14 +120,21 @@ export function BingoDashProjector() {
 
   const sectionTeams = activeSectionId ? teams.filter(t => t.section_id === activeSectionId) : teams
   // Grid membership lives in bingo_board_cards (cards are shared across boards).
+  // placement_id (= bc.id) is what lets the same card placed in several boxes
+  // on one board be scored and bingo-line-detected per box instead of once
+  // for the whole card — see supabase/migrations/20260910_scan_board_card_id.sql.
   const gridTasks = (activeSectionId ? boardCards.filter(bc => bc.section_id === activeSectionId) : boardCards)
     .map(bc => {
       const t = tasks.find(x => x.id === bc.task_id)
-      return t ? { ...t, sort_order: bc.slot, in_grid: true } : null
+      return t ? { ...t, sort_order: bc.slot, in_grid: true, placement_id: bc.id } : null
     })
     .filter((t): t is BingoTask => t !== null)
     .sort((a, b) => a.sort_order - b.sort_order)
   const slots = buildBingoSlots(gridTasks)
+  // completedBingoLines checks slot.id against completedIds; feed it the
+  // placement id (falling back to task id for pre-fix rows with none) so
+  // line detection is per box, matching completedIds below.
+  const lineSlots = slots.map(t => t ? { ...t, id: t.placement_id ?? t.id } : null)
 
 
 
@@ -138,12 +145,26 @@ export function BingoDashProjector() {
   const rows: Row[] = sectionTeams.map(team => {
     const teamScans = scans.filter(s => s.team_id === team.id)
     const gridTaskIds = new Set(gridTasks.map(t => t.id))
-    const completedIds = new Set(teamScans.filter(s => s.completed && gridTaskIds.has(s.task_id)).map(s => s.task_id))
+    // A completed scan counts toward the box it was recorded against
+    // (board_card_id); scans from before that column existed have none, and
+    // still count toward every box sharing their task_id (today's behavior
+    // for that legacy data only — see the migration note above).
+    const completedPlacementIds = new Set(
+      teamScans.filter(s => s.completed && s.board_card_id).map(s => s.board_card_id as string),
+    )
+    const legacyCompletedTaskIds = new Set(
+      teamScans.filter(s => s.completed && !s.board_card_id && gridTaskIds.has(s.task_id)).map(s => s.task_id),
+    )
+    const completedIds = new Set(
+      gridTasks
+        .filter(t => (t.placement_id && completedPlacementIds.has(t.placement_id)) || legacyCompletedTaskIds.has(t.id))
+        .map(t => t.placement_id ?? t.id),
+    )
     const tilePoints = gridTasks.reduce(
-      (sum, t) => completedIds.has(t.id) ? sum + (t.points ?? 0) : sum, 0,
+      (sum, t) => completedIds.has(t.placement_id ?? t.id) ? sum + (t.points ?? 0) : sum, 0,
     )
     const duelBonus = duelBonuses.get(team.id) ?? 0
-    const bingos = completedBingoLines(slots, completedIds).length
+    const bingos = completedBingoLines(lineSlots, completedIds).length
     const tasksDone = completedIds.size
     const bonus = team.bonus_points ?? 0
     const lastScan = teamScans.reduce((latest, s) => {
