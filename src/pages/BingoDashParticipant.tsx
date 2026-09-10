@@ -93,13 +93,10 @@ export function BingoDashParticipant() {
   const { pages, loading: pagesLoading } = useBingoTaskPages(taskId)
   const { photos, loading: photosLoading } = useBingoTaskPhotos(taskId)
   const { links } = useTaskLinks(taskId, 'bingo_task_links')
-  const { recordScan, toggleComplete, submitTile, saveWords, saveSteps } = useBingoScans()
+  const { recordScan, toggleComplete, saveWords, saveSteps } = useBingoScans()
   // A card can define its own draw slots; otherwise the module keeps its
   // hardcoded shape.
   const { config: drawConfig } = useCardDrawConfig(taskId)
-  const memberId = localStorage.getItem('bingo-dash-member-id')
-  const isLeader = localStorage.getItem('bingo-dash-member-role') === 'leader'
-  const [submittedForApproval, setSubmittedForApproval] = useState(false)
 
   const [task, setTask] = useState<BingoTask | null>(null)
   const [showSplash, setShowSplash] = useState(!isSnakeLadder)
@@ -963,15 +960,6 @@ export function BingoDashParticipant() {
                       </div>
                     </>
                   )}
-                  {submittedForApproval && (
-                    <div className="mb-3 p-4 rounded-2xl bg-amber-400/15 border-2 border-amber-400/50 text-center">
-                      <div className="text-3xl mb-1">📤</div>
-                      <p className="text-amber-200 font-black">Sent to your team leader</p>
-                      <p className="text-amber-200/70 text-xs mt-1">
-                        They approve it and the points land on the scoreboard.
-                      </p>
-                    </div>
-                  )}
                   <button
                     onClick={async () => {
                       if (!scanRecord) return
@@ -981,30 +969,18 @@ export function BingoDashParticipant() {
                       }
                       setCompleting(true)
                       try {
-                        // A marshal password is its own authorization — whoever
-                        // has it (marshal reads it out, anyone types it in)
-                        // completes outright. The leader-approval queue only
-                        // exists to stop four phones self-reporting completion
-                        // with nothing to check against; it doesn't apply once
-                        // a marshal is already the one confirming.
-                        if (isLeader || task.require_marshal) {
-                          await toggleComplete(scanRecord.id, true)
-                          setScanRecord({ ...scanRecord, completed: true })
-                        } else if (team && memberId) {
-                          const r = await submitTile(team.id, taskId!, memberId)
-                          if (r.error) { setMarshalError(r.error); return }
-                          setSubmittedForApproval(true)
-                        }
+                        await toggleComplete(scanRecord.id, true)
+                        setScanRecord({ ...scanRecord, completed: true })
                       } finally { setCompleting(false) }
                     }}
-                    disabled={completing || !scanRecord || submittedForApproval}
+                    disabled={completing || !scanRecord}
                     className="w-full py-4 rounded-2xl text-white text-xl font-black uppercase tracking-wider transition-all active:scale-95 disabled:opacity-50"
                     style={{
                       backgroundColor: task.hex_code,
                       boxShadow: `0 6px 0 ${task.hex_code}88, 0 8px 20px ${task.hex_code}44`,
                     }}
                   >
-                    {completing ? 'Sending...' : (isLeader || task.require_marshal) ? 'Complete Challenge ✅' : 'Submit to Team Leader 📤'}
+                    {completing ? 'Sending...' : 'Complete Challenge ✅'}
                   </button>
                 </>
               )}

@@ -63,32 +63,5 @@ export function useBingoScans() {
     if (error) throw error
   }, [])
 
-  /**
-   * A non-leader member submits a tile. It goes PENDING — no points, nothing
-   * on the host's screen — until the team leader approves. This is what stops
-   * four phones sending the same completion to one marshal.
-   */
-  const submitTile = useCallback(async (teamId: string, taskId: string, memberId: string) => {
-    const { error } = await supabase.rpc('submit_tile', {
-      p_team: teamId, p_task: taskId, p_member: memberId,
-    })
-    if (error) return { error: error.message }
-    return {}
-  }, [])
-
-  /** The team leader approves (completes + scores) or rejects a submission. */
-  const approveTile = useCallback(async (scanId: string, leaderId: string, approve = true) => {
-    const { error } = await supabase.rpc('approve_tile', {
-      p_scan: scanId, p_leader: leaderId, p_approve: approve,
-    })
-    if (error) {
-      const m = error.message || ''
-      if (m.includes('NOT_THE_LEADER')) return { error: 'Only the team leader can approve.' }
-      if (m.includes('NOT_YOUR_TEAM'))  return { error: 'That submission is not from your team.' }
-      return { error: m }
-    }
-    return {}
-  }, [])
-
-  return { recordScan, toggleComplete, submitTile, approveTile, saveWords, saveSteps }
+  return { recordScan, toggleComplete, saveWords, saveSteps }
 }

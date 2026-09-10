@@ -12,7 +12,6 @@ import { ForestWaitingScreen } from '../components/ForestWaitingScreen'
 import { WaitingTiger } from '../components/WaitingTiger'
 import { activeFaces, faceName, faceColor, normaliseFaceCount } from '../lib/cubeFaces'
 import { tasksForFace } from '../lib/boardCards'
-import { LeaderApprovalQueue } from '../components/LeaderApprovalQueue'
 import { normalizeTileDisplay, type TileDisplay } from '../lib/bingoTileDisplay'
 import type { BingoTask, BingoScan, BingoSection, BingoTeam, BoardTimer } from '../types/database'
 
@@ -902,7 +901,6 @@ export function BingoDashHome() {
       {/* Another team can challenge us at any moment — the banner has to reach
           players wherever they are on the board, not only inside a card. */}
       {team && sectionId && <IncomingDuelBanner team={team} sectionId={sectionId} />}
-      <LeaderApprovalQueue teamId={team?.id ?? null} />
       <TimeUpAlarm settings={section} />
     </>
   )
