@@ -124,15 +124,6 @@ const PRESET_COLORS = [
   { name: 'Rose', hex: '#F43F5E' },
 ]
 
-// Mall Hunt acts. Acts are colour tags on individual cards (not their own
-// category level) — see the "Mall Hunt" category in the Card Library.
-const ACT_COLORS = [
-  { name: 'Act 1 · Setup', hex: '#FF7F5C' },
-  { name: 'Act 2 · The Hunt', hex: '#14A79A' },
-  { name: 'Act 3 · The Mission', hex: '#6C63D9' },
-  { name: 'Act 4 · Action', hex: '#E4536B' },
-  { name: 'Act 5 · The Cut', hex: '#2E9E63' },
-]
 
 function formatTime(totalSeconds: number): string {
   const s = Math.max(0, Math.round(totalSeconds))
@@ -181,12 +172,11 @@ function parseImport(raw: string): ImportRow[] {
   })
 }
 
-// ── Color picker sub-form ──────────────────────────────────────────────────────
+
+// Colour for one existing card (edit-tile modal). New cards do not get this:
+// they take their category's colour, set once from the category header.
 function ColorPicker({
-  hex,
-  colorName,
-  onHexChange,
-  onNameChange,
+  hex, colorName, onHexChange, onNameChange,
 }: {
   hex: string
   colorName: string
@@ -217,21 +207,6 @@ function ColorPicker({
               style={{ backgroundColor: c.hex }}
               title={c.name}
             />
-          ))}
-        </div>
-        <p className="text-[10px] font-black a-text-3 uppercase tracking-widest mb-1.5">Mall Hunt acts</p>
-        <div className="flex gap-1.5 flex-wrap mb-2">
-          {ACT_COLORS.map(c => (
-            <button
-              key={c.hex}
-              type="button"
-              onClick={() => { onHexChange(c.hex); onNameChange(c.name) }}
-              className={`px-2 h-7 rounded-full border-2 text-[10px] font-black text-white transition-all ${hex === c.hex ? 'border-gray-900 scale-105' : 'border-transparent'}`}
-              style={{ backgroundColor: c.hex }}
-              title={c.name}
-            >
-              {c.name.split(' ')[1]}
-            </button>
           ))}
         </div>
         <div className="flex items-center gap-2">
@@ -652,8 +627,6 @@ export function BingoDashAdmin() {
 
   // Add challenge form
   const [formTitle, setFormTitle] = useState('')
-  const [formColor, setFormColor] = useState('')
-  const [formHex, setFormHex] = useState('#3B82F6')
   const [formCategory, setFormCategory] = useState('')
   const [formPoints, setFormPoints] = useState(0)
   const [formTaskType, setFormTaskType] = useState<'standard' | 'answer' | 'photo' | 'video' | 'media' | 'sign_splice' | 'breakout_hunt'>('standard')
@@ -1903,15 +1876,21 @@ export function BingoDashAdmin() {
 
   // ── Challenge actions ──────────────────────────────────────────────────────
   const createTask = async () => {
-    if (!formTitle.trim() || !formColor.trim() || !currentSectionId) return
+    if (!formTitle.trim() || !currentSectionId) return
     setFormSaving(true)
     try {
       // sort_order is kept high so new off-grid tasks don't collide with slot indices (0-24).
       const nextOrder = Math.max(25, scopedTasks.length + 25)
+      // A new card takes its category's colour: the category header's
+      // "color for all" is the one place colour is decided, so there is no
+      // picker here. A category with no cards yet gets the default blue.
+      const sibling = scopedTasks.find(t => t.section_id === currentSectionId && (t.category ?? '') === formCategory.trim() && t.hex_code)
+      const hex = sibling?.hex_code ?? '#3B82F6'
+      const colorName = sibling?.color?.trim() || formCategory.trim() || 'Blue'
       await supabase.from('bingo_tasks').insert({
         section_id: currentSectionId,
         owner_id: myOwnerValue,
-        title: formTitle.trim(), color: formColor.trim(), hex_code: formHex,
+        title: formTitle.trim(), color: colorName, hex_code: hex,
         category: formCategory.trim(), sort_order: nextOrder, points: formPoints,
         task_type: formTaskType,
         answer_question: formTaskType === 'answer' ? formAnswerQuestion.trim() || null : null,
@@ -1919,7 +1898,7 @@ export function BingoDashAdmin() {
           ? formAnswerText.split('\n').map(l => l.trim()).filter(Boolean).join('\n') || null
           : null,
       })
-      setFormTitle(''); setFormColor(''); setFormHex('#3B82F6'); setFormCategory(''); setFormPoints(0)
+      setFormTitle(''); setFormCategory(''); setFormPoints(0)
       setFormTaskType('standard'); setFormAnswerQuestion(''); setFormAnswerText('')
       setShowForm(false)
       await fetchAll()
@@ -3270,7 +3249,6 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                       className="w-full px-3 py-2 rounded-lg border a-border focus:outline-none focus:ring-2 focus:ring-teal-500 text-center font-bold" />
                   </div>
                 </div>
-                <ColorPicker hex={formHex} colorName={formColor} onHexChange={setFormHex} onNameChange={setFormColor} />
                 {/* Type toggle */}
                 <div>
                   <label className="block text-sm font-medium a-text-3 mb-2">Card Type</label>
@@ -3314,7 +3292,7 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                   </>
                 )}
                 <div className="flex gap-3">
-                  <button onClick={createTask} disabled={formSaving || !formTitle.trim() || !formColor.trim()}
+                  <button onClick={createTask} disabled={formSaving || !formTitle.trim()}
                     className="px-6 py-2 bg-teal-600 a-text rounded-lg hover:bg-violet-700 disabled:opacity-50 text-sm transition-colors">
                     {formSaving ? 'Creating...' : 'Create Challenge'}
                   </button>
@@ -4347,7 +4325,6 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                       className="w-full px-3 py-2 rounded-lg border a-border focus:outline-none focus:ring-2 focus:ring-teal-500 text-center font-bold" />
                   </div>
                 </div>
-                <ColorPicker hex={formHex} colorName={formColor} onHexChange={setFormHex} onNameChange={setFormColor} />
                 {/* Type toggle */}
                 <div>
                   <label className="block text-sm font-medium a-text-3 mb-2">Card Type</label>
@@ -4391,7 +4368,7 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                   </>
                 )}
                 <div className="flex gap-3">
-                  <button onClick={createTask} disabled={formSaving || !formTitle.trim() || !formColor.trim()}
+                  <button onClick={createTask} disabled={formSaving || !formTitle.trim()}
                     className="px-6 py-2 bg-teal-600 a-text rounded-lg hover:bg-violet-700 disabled:opacity-50 text-sm transition-colors">
                     {formSaving ? 'Creating...' : 'Create Challenge'}
                   </button>
