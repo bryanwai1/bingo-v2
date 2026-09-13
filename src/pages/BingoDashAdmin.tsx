@@ -362,8 +362,8 @@ function CategoryGroupBlock({
   boardCountByTask: Map<string, number>
   navigate: (path: string) => void
   saveCategoryInline: (taskId: string, cat: string) => void
-  setBulkCategoryColor: (key: string, hex: string) => void
-  setBulkCategoryPoints: (key: string, pts: number) => void
+  setBulkCategoryColor: (ids: string[], hex: string) => void
+  setBulkCategoryPoints: (ids: string[], pts: number) => void
   setTaskPoints: (id: string, pts: number) => void
   renameCategoryByLabel: (label: string, newName: string) => void
   setQrTask: (t: BingoTask) => void
@@ -411,7 +411,7 @@ function CategoryGroupBlock({
                 defaultValue={group.tasks[0]?.hex_code ?? '#3B82F6'}
                 key={group.key + '-color'}
                 className="w-7 h-7 rounded cursor-pointer border border-white/20"
-                onChange={e => setBulkCategoryColor(group.key, e.target.value)}
+                onChange={e => setBulkCategoryColor(group.tasks.map(t => t.id), e.target.value)}
                 title={`Set color for all ${group.label} tasks`}
               />
               <input
@@ -419,7 +419,7 @@ function CategoryGroupBlock({
                 defaultValue={group.tasks[0]?.hex_code ?? '#3B82F6'}
                 key={group.key + '-color-hex'}
                 className="w-20 px-1.5 py-0.5 text-xs border a-border a-surface-2 a-text rounded font-mono focus:outline-none focus:ring-1 focus:ring-teal-500"
-                onBlur={e => { const v = e.target.value.trim(); if (/^#[0-9a-fA-F]{6}$/.test(v)) setBulkCategoryColor(group.key, v) }}
+                onBlur={e => { const v = e.target.value.trim(); if (/^#[0-9a-fA-F]{6}$/.test(v)) setBulkCategoryColor(group.tasks.map(t => t.id), v) }}
                 onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
                 title={`Type an exact hex code for all ${group.label} tasks`}
               />
@@ -431,9 +431,9 @@ function CategoryGroupBlock({
                 defaultValue={group.tasks[0]?.points ?? 0}
                 key={group.key + '-pts'}
                 className="w-14 px-1.5 py-0.5 text-xs border a-border a-surface-2 a-text rounded text-center font-bold focus:outline-none focus:ring-1 focus:ring-teal-500"
-                onBlur={e => setBulkCategoryPoints(group.key, Math.max(0, parseInt(e.target.value) || 0))}
+                onBlur={e => setBulkCategoryPoints(group.tasks.map(t => t.id), Math.max(0, parseInt(e.target.value) || 0))}
                 onKeyDown={e => {
-                  if (e.key === 'Enter') setBulkCategoryPoints(group.key, Math.max(0, parseInt((e.target as HTMLInputElement).value) || 0))
+                  if (e.key === 'Enter') setBulkCategoryPoints(group.tasks.map(t => t.id), Math.max(0, parseInt((e.target as HTMLInputElement).value) || 0))
                 }}
                 title={`Set points for all ${group.label} tasks`}
               />
@@ -1861,15 +1861,16 @@ export function BingoDashAdmin() {
     setTasks(prev => prev.map(t => t.id === taskId ? { ...t, category: finalName } : t))
   }
 
-  const matchesBulkCategory = (t: BingoTask, categoryKey: string) => {
-    if (t.section_id !== currentSectionId) return false
-    return categoryKey === '__none__' ? !t.category : t.category === categoryKey
-  }
-
-  const setBulkCategoryPoints = async (categoryKey: string, points: number) => {
-    const affected = tasks.filter(t => matchesBulkCategory(t, categoryKey))
-    await Promise.all(affected.map(t => supabase.from('bingo_tasks').update({ points }).eq('id', t.id)))
-    setTasks(prev => prev.map(t => matchesBulkCategory(t, categoryKey) ? { ...t, points } : t))
+  // Bulk edits act on the exact cards in the group on screen, not on
+  // "category X in the active board": the Complete Library view lists every
+  // board, and matching against currentSectionId there silently touched
+  // nothing when the group belonged to another board.
+  const setBulkCategoryPoints = async (taskIds: string[], points: number) => {
+    if (taskIds.length === 0) return
+    const ids = new Set(taskIds)
+    setTasks(prev => prev.map(t => ids.has(t.id) ? { ...t, points } : t))
+    const { error } = await supabase.from('bingo_tasks').update({ points }).in('id', taskIds)
+    if (error) alert('Could not update points: ' + error.message)
   }
 
   const setTaskPoints = async (taskId: string, points: number) => {
@@ -1878,10 +1879,12 @@ export function BingoDashAdmin() {
   }
 
 
-  const setBulkCategoryColor = async (categoryKey: string, hex: string) => {
-    const affected = tasks.filter(t => matchesBulkCategory(t, categoryKey))
-    setTasks(prev => prev.map(t => matchesBulkCategory(t, categoryKey) ? { ...t, hex_code: hex } : t))
-    await Promise.all(affected.map(t => supabase.from('bingo_tasks').update({ hex_code: hex }).eq('id', t.id)))
+  const setBulkCategoryColor = async (taskIds: string[], hex: string) => {
+    if (taskIds.length === 0) return
+    const ids = new Set(taskIds)
+    setTasks(prev => prev.map(t => ids.has(t.id) ? { ...t, hex_code: hex } : t))
+    const { error } = await supabase.from('bingo_tasks').update({ hex_code: hex }).in('id', taskIds)
+    if (error) alert('Could not update colour: ' + error.message)
   }
 
   // ── Challenge actions ──────────────────────────────────────────────────────
@@ -3465,12 +3468,12 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                                   <input type="color" defaultValue={group.tasks[0]?.hex_code ?? '#3B82F6'}
                                     key={section.id + group.key + '-color'}
                                     className="w-7 h-7 rounded cursor-pointer border a-border"
-                                    onChange={e => setBulkCategoryColor(group.key, e.target.value)}
+                                    onChange={e => setBulkCategoryColor(group.tasks.map(t => t.id), e.target.value)}
                                     title={`Set color for all ${group.label} tasks`} />
                                   <input type="text" defaultValue={group.tasks[0]?.hex_code ?? '#3B82F6'}
                                     key={section.id + group.key + '-color-hex'}
                                     className="w-20 px-1.5 py-0.5 text-xs border a-border a-surface-2 a-text rounded font-mono focus:outline-none focus:ring-1 focus:ring-teal-500"
-                                    onBlur={e => { const v = e.target.value.trim(); if (/^#[0-9a-fA-F]{6}$/.test(v)) setBulkCategoryColor(group.key, v) }}
+                                    onBlur={e => { const v = e.target.value.trim(); if (/^#[0-9a-fA-F]{6}$/.test(v)) setBulkCategoryColor(group.tasks.map(t => t.id), v) }}
                                     onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
                                     title={`Type an exact hex code for all ${group.label} tasks`} />
                                 </div>
@@ -3479,8 +3482,8 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                                   <input type="number" min={0} defaultValue={group.tasks[0]?.points ?? 0}
                                     key={section.id + group.key + '-pts'}
                                     className="w-14 px-1.5 py-0.5 text-xs border a-border a-surface-2 a-text rounded text-center font-bold focus:outline-none focus:ring-1 focus:ring-teal-500"
-                                    onBlur={e => setBulkCategoryPoints(group.key, Math.max(0, parseInt(e.target.value) || 0))}
-                                    onKeyDown={e => { if (e.key === 'Enter') setBulkCategoryPoints(group.key, Math.max(0, parseInt((e.target as HTMLInputElement).value) || 0)) }}
+                                    onBlur={e => setBulkCategoryPoints(group.tasks.map(t => t.id), Math.max(0, parseInt(e.target.value) || 0))}
+                                    onKeyDown={e => { if (e.key === 'Enter') setBulkCategoryPoints(group.tasks.map(t => t.id), Math.max(0, parseInt((e.target as HTMLInputElement).value) || 0)) }}
                                     title={`Set points for all ${group.label} tasks`} />
                                 </div>
                               </>
