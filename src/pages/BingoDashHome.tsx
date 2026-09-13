@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
+import { useTeamReviews, type ReviewFlag } from '../hooks/useTeamReviews'
 import { fetchBoardTasks } from '../lib/boardCards'
 import { useBingoDashTeam } from '../hooks/useBingoDashTeam'
 import { ParticleBackground } from '../components/ParticleBackground'
@@ -228,12 +229,15 @@ function BingoTile({
   task,
   status,
   chained,
+  review,
   isInBingoLine,
   display,
   onClick,
 }: {
   task: BingoTask
   status: TileStatus
+  /** A submission waiting on the admin, or the newest one rejected. */
+  review?: ReviewFlag
   /** A chained card whose prerequisite this team has not finished. Still
    *  tappable — the card explains itself — but greyed with a padlock. */
   chained: boolean
@@ -265,6 +269,22 @@ function BingoTile({
         <div className="absolute inset-0 bg-black/35 flex items-center justify-center z-10 pointer-events-none">
           <div className="bg-white/85 rounded-full w-7 h-7 flex items-center justify-center shadow">
             <span className="text-sm leading-none">🔒</span>
+          </div>
+        </div>
+      )}
+      {/* Review state: sent and waiting, or sent back to redo. Sits where the
+          "scanned" dot would, and outranks it. */}
+      {review === 'pending' && status !== 'completed' && (
+        <div className="absolute inset-0 bg-black/25 flex items-center justify-center z-20" title="Waiting for review">
+          <div className="bg-amber-400 rounded-full w-7 h-7 flex items-center justify-center shadow">
+            <span className="text-sm leading-none">⏳</span>
+          </div>
+        </div>
+      )}
+      {review === 'rejected' && status !== 'completed' && (
+        <div className="absolute inset-0 bg-black/25 flex items-center justify-center z-20" title="Rejected - redo">
+          <div className="bg-red-500 rounded-full w-7 h-7 flex items-center justify-center shadow">
+            <span className="text-sm font-black text-white leading-none">✗</span>
           </div>
         </div>
       )}
@@ -416,6 +436,7 @@ function BoardScreen({
   team,
   gridTasks,
   scans,
+  reviews,
   settings,
   boardNote,
   boardNoteEvery,
@@ -426,6 +447,7 @@ function BoardScreen({
   team: { id: string; name: string }
   gridTasks: BingoTask[]
   scans: BingoScan[]
+  reviews: Record<string, ReviewFlag>
   settings: BoardTimer | null
   boardNote: string
   boardNoteEvery: number
@@ -659,6 +681,7 @@ function BoardScreen({
                     task={task}
                     status={getStatus(task)}
                     chained={isChainLocked(task)}
+                    review={reviews[task.id]}
                     isInBingoLine={bingoSlots.has(i)}
                     display={tileDisplay}
                     onClick={() => navigate(`/bingo-dash/task/${task.id}${task.placement_id ? `?box=${task.placement_id}` : ''}`)}
@@ -718,6 +741,7 @@ export function BingoDashHome() {
   const { team, loading: teamLoading, isRegistered, joinTeamById, leaveTeam } = useBingoDashTeam()
   const [gridTasks, setGridTasks] = useState<BingoTask[]>([])
   const [scans, setScans] = useState<BingoScan[]>([])
+  const reviews = useTeamReviews(team?.id)
   const [section, setSection] = useState<BingoSection | null>(null)
   const [sectionId, setSectionId] = useState<string | null>(null)
   const [boardNote, setBoardNote] = useState('')
@@ -909,6 +933,7 @@ export function BingoDashHome() {
         team={team!}
         gridTasks={gridTasks}
         scans={scans}
+        reviews={reviews}
         settings={section}
         boardNote={boardNote}
         boardNoteEvery={boardNoteEvery}

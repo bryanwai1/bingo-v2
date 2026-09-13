@@ -2150,7 +2150,11 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
   const settleBundle = async (subs: BingoPhotoSubmission[]) => {
     const bad = subs.filter(x => selectedSubmissionIds.has(x.id))
     const good = subs.filter(x => !selectedSubmissionIds.has(x.id))
-    if (bad.length > 0) await bulkSetStatus(bad, 'rejected')
+    if (bad.length > 0) {
+      const reason = askRejectReason(bad.length)
+      if (reason === undefined) return
+      await bulkSetStatus(bad, 'rejected', reason)
+    }
     if (good.length > 0) await bulkSetStatus(good, 'approved')
     setSelectedSubmissionIds(prev => {
       const next = new Set(prev)
@@ -2159,14 +2163,31 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
     })
   }
 
-  const bulkSetStatus = async (subs: BingoPhotoSubmission[], status: 'approved' | 'rejected') => {
+  // Rejecting asks why. The team reads the reason on their card, so a blank
+  // rejection is allowed but discouraged; Cancel aborts the rejection.
+  const askRejectReason = (count: number): string | null | undefined => {
+    const reply = window.prompt(
+      count > 1
+        ? `Reason for rejecting these ${count} submissions? The teams will see it.`
+        : 'Reason for rejecting? The team will see it so they can redo it right.',
+      '')
+    return reply === null ? undefined : reply.trim() || null
+  }
+
+  const bulkSetStatus = async (subs: BingoPhotoSubmission[], status: 'approved' | 'rejected', note?: string | null) => {
     if (subs.length === 0) return
+    let review_note: string | null = null
+    if (status === 'rejected') {
+      const reason = note !== undefined ? note : askRejectReason(subs.length)
+      if (reason === undefined) return // cancelled
+      review_note = reason
+    }
     setBulkActioning(true)
     try {
       // Optimistic UI
       const ids = subs.map(s => s.id)
-      setPhotoSubmissions(prev => prev.map(s => ids.includes(s.id) ? { ...s, status } : s))
-      await supabase.from('bingo_photo_submissions').update({ status }).in('id', ids)
+      setPhotoSubmissions(prev => prev.map(s => ids.includes(s.id) ? { ...s, status, review_note } : s))
+      await supabase.from('bingo_photo_submissions').update({ status, review_note }).in('id', ids)
       // Breakout Hunt rows point back at a puzzle: mirror the decision onto the
       // team's progress so the card can show "approved" or offer a retake.
       const breakout = subs.filter(s => s.puzzle_id)
@@ -5143,8 +5164,11 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                           </div>
                         ) : (
                           <div className="flex items-center justify-between">
-                            <span className="text-xs font-black" style={{ color: ring }}>
+                            <span className="text-xs font-black min-w-0" style={{ color: ring }}>
                               {sub.status === 'approved' ? '✓ Approved' : '✗ Rejected'}
+                              {sub.status === 'rejected' && sub.review_note && (
+                                <span className="block text-[11px] font-bold a-text-3 truncate" title={sub.review_note}>“{sub.review_note}”</span>
+                              )}
                             </span>
                             <button
                               onClick={() => bulkSetStatus([sub], sub.status === 'approved' ? 'rejected' : 'approved')}

@@ -1499,10 +1499,9 @@ const SampleTaskDetail = forwardRef<SampleTaskDetailHandle, {
                           value={opponent}
                           onChange={e => setOpponent(e.target.value)}
                           className="w-full px-4 py-3 rounded-2xl bg-white/10 border-2 border-white/25 text-white text-sm font-bold focus:outline-none focus:border-white/50"
-                          style={{ colorScheme: 'dark' }}
                         >
-                          <option value="">Select the team you battled…</option>
-                          {DEMO_GROUPS.filter(g => g !== teamName).map(g => <option key={g} value={g}>{g}</option>)}
+                          <option value="" className="text-gray-900 bg-white">Select the team you battled…</option>
+                          {DEMO_GROUPS.filter(g => g !== teamName).map(g => <option key={g} value={g} className="text-gray-900 bg-white">{g}</option>)}
                         </select>
                         <div className="grid grid-cols-2 gap-2">
                           {([true, false] as const).map(won => (

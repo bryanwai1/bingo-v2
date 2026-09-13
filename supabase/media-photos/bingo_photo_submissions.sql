@@ -33,6 +33,10 @@ create table public.bingo_photo_submissions (
   opponent_id uuid references public.bingo_teams(id) on delete set null,
   versus_won  boolean,
 
+  -- (tracked) media-photos/044_review_note.sql
+  -- The admin's reason when rejecting, shown to the team.
+  review_note text,
+
   -- (tracked) breakout-hunt/023_breakout_review.sql — see
   -- breakout-hunt/bingo_breakout_puzzles.sql for the FK, added there once
   -- that table exists.

@@ -339,6 +339,8 @@ export interface BingoPhotoSubmission {
   // Versus rows only: the team they battled and whether they won.
   opponent_id?: string | null
   versus_won?: boolean | null
+  /** Why the admin rejected it; null otherwise. */
+  review_note?: string | null
   // Breakout Hunt sets only: what the photo should show, and which puzzle it
   // answers. See supabase/breakout-hunt/023_breakout_review.sql.
   label?: string | null

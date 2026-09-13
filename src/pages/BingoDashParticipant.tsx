@@ -106,6 +106,10 @@ export function BingoDashParticipant() {
   const [approvedKinds, setApprovedKinds] = useState<{ photo: boolean; video: boolean; link: boolean; versus: boolean }>({ photo: false, video: false, link: false, versus: false })
   // Versus input: the teams on this board to pick an opponent from, what the
   // team chose, and whether a claim is already in with the admin.
+  // The newest submission per input, so the card can say "waiting" after a
+  // reload and show the admin's reason when one was rejected.
+  type Review = { status: 'pending' | 'approved' | 'rejected'; note: string | null }
+  const [reviews, setReviews] = useState<Partial<Record<'photo' | 'video' | 'link' | 'versus', Review>>>({})
   const [rivals, setRivals] = useState<{ id: string; name: string }[]>([])
   const [opponentId, setOpponentId] = useState('')
   const [versusWon, setVersusWon] = useState<boolean | null>(null)
@@ -397,16 +401,38 @@ export function BingoDashParticipant() {
     let live = true
     const read = () => {
       supabase.from('bingo_photo_submissions')
-        .select('media_type, status').eq('team_id', team.id).eq('task_id', taskId).eq('status', 'approved')
+        .select('media_type, status, review_note, created_at').eq('team_id', team.id).eq('task_id', taskId)
+        .order('created_at', { ascending: false })
         .then(({ data }) => {
           if (!live) return
           const rows = data ?? []
+          const kindOf = (m: string | null | undefined) =>
+            (m === 'video' || m === 'link' || m === 'versus') ? m : 'photo' as const
+          const approved = rows.filter(r => r.status === 'approved')
           setApprovedKinds({
-            photo: rows.some(r => (r.media_type ?? 'image') === 'image'),
-            video: rows.some(r => r.media_type === 'video'),
-            link: rows.some(r => r.media_type === 'link'),
-            versus: rows.some(r => r.media_type === 'versus'),
+            photo: approved.some(r => kindOf(r.media_type) === 'photo'),
+            video: approved.some(r => kindOf(r.media_type) === 'video'),
+            link: approved.some(r => kindOf(r.media_type) === 'link'),
+            versus: approved.some(r => kindOf(r.media_type) === 'versus'),
           })
+          // Newest row per kind decides what the card says. An approval
+          // anywhere in the history still counts (above); a pending row
+          // outranks an older rejection.
+          const latest: Partial<Record<'photo' | 'video' | 'link' | 'versus', Review>> = {}
+          for (const r of rows) {
+            const k = kindOf(r.media_type)
+            if (!latest[k]) latest[k] = { status: r.status as Review['status'], note: r.review_note ?? null }
+            else if (latest[k]!.status === 'rejected' && r.status === 'pending') latest[k] = { status: 'pending', note: null }
+          }
+          setReviews(latest)
+          // A reload after sending: keep showing "waiting" rather than an
+          // empty tray, and reopen the form once the admin has said no.
+          const fileLatest = latest.photo ?? latest.video
+          if (fileLatest?.status === 'pending') setPhotoSubmitted(true)
+          if (fileLatest?.status === 'rejected') setPhotoSubmitted(false)
+          if (latest.link?.status === 'pending') setLinkSent(true)
+          if (latest.link?.status === 'rejected') setLinkSent(false)
+          if (latest.versus?.status === 'rejected') setVersusSent(false)
         })
     }
     read()
@@ -1229,6 +1255,13 @@ export function BingoDashParticipant() {
                   <p className="text-white/50 text-sm text-center mb-4">
                     Pick the team and the result - the admin approves it.
                   </p>
+                  {reviews.versus?.status === 'rejected' && !versusSent && !approvedKinds.versus && (
+                    <div className="mb-4 p-4 rounded-2xl bg-red-500/15 border border-red-400/50 text-center">
+                      <div className="text-3xl mb-1">✗</div>
+                      <p className="text-red-300 font-black">Result not accepted - please redo</p>
+                      {reviews.versus.note && <p className="text-red-200/90 text-sm font-bold mt-1 leading-snug">“{reviews.versus.note}”</p>}
+                    </div>
+                  )}
                   {approvedKinds.versus ? (
                     <div className="p-4 rounded-2xl bg-green-400/15 border border-green-400/40 text-center">
                       <p className="text-green-300 font-black">✓ Result approved</p>
@@ -1245,10 +1278,9 @@ export function BingoDashParticipant() {
                         value={opponentId}
                         onChange={e => setOpponentId(e.target.value)}
                         className="w-full px-4 py-3 rounded-2xl bg-white/10 border-2 border-white/25 text-white text-sm font-bold focus:outline-none focus:border-white/50"
-                        style={{ colorScheme: 'dark' }}
                       >
-                        <option value="">Select the team you battled…</option>
-                        {rivals.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+                        <option value="" className="text-gray-900 bg-white">Select the team you battled…</option>
+                        {rivals.map(r => <option key={r.id} value={r.id} className="text-gray-900 bg-white">{r.name}</option>)}
                       </select>
                       <div className="grid grid-cols-2 gap-2">
                         {([true, false] as const).map(won => (
@@ -1335,6 +1367,19 @@ export function BingoDashParticipant() {
               {(inputs.photo || inputs.video) && photoSubmissionsEnabled && riddleSolved && (
                 <>
                   <p className="text-white font-black text-lg text-center mb-4">{fileHeading(inputs)}</p>
+                  {(() => {
+                    const r = reviews.photo?.status === 'rejected' ? reviews.photo
+                      : reviews.video?.status === 'rejected' ? reviews.video : null
+                    const done = approvedKinds.photo || approvedKinds.video
+                    return r && !done && !photoSubmitted ? (
+                      <div className="mb-4 p-4 rounded-2xl bg-red-500/15 border border-red-400/50 text-center">
+                        <div className="text-3xl mb-1">✗</div>
+                        <p className="text-red-300 font-black">Not accepted - please redo</p>
+                        {r.note && <p className="text-red-200/90 text-sm font-bold mt-1 leading-snug">“{r.note}”</p>}
+                        <p className="text-white/50 text-xs font-bold mt-2">Fix it and send again below.</p>
+                      </div>
+                    ) : null
+                  })()}
                   <p className="text-white/50 text-sm text-center mb-5">
                     {task.photo_multiple
                       ? `Send as many ${fileNoun(inputs, true)} as the challenge needs — a marshal reviews each one.`
@@ -1426,6 +1471,13 @@ export function BingoDashParticipant() {
                   <p className="text-white/50 text-sm text-center mb-5">
                     Paste the address of what you built — a marshal opens it and approves.
                   </p>
+                  {reviews.link?.status === 'rejected' && !linkSent && !approvedKinds.link && (
+                    <div className="mb-4 p-4 rounded-2xl bg-red-500/15 border border-red-400/50 text-center">
+                      <div className="text-3xl mb-1">✗</div>
+                      <p className="text-red-300 font-black">Link not accepted - please redo</p>
+                      {reviews.link.note && <p className="text-red-200/90 text-sm font-bold mt-1 leading-snug">“{reviews.link.note}”</p>}
+                    </div>
+                  )}
                   {linkSent ? (
                     <div className="p-4 rounded-2xl bg-green-400/15 border border-green-400/40 text-center">
                       <div className="text-3xl mb-2">⏳</div>
