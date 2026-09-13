@@ -361,7 +361,7 @@ function BoardTile({
 function CategoryGroupBlock({
   group,
   editingCategoryId, setEditingCategoryId,
-  categories, scans, copiedId,
+  categoryNamesFor, scans, copiedId,
   boardCountByTask,
   navigate,
   saveCategoryInline, setBulkCategoryColor, setBulkCategoryPoints, setTaskPoints, setPointsForTasks,
@@ -371,7 +371,7 @@ function CategoryGroupBlock({
   group: { label: string; key: string; tasks: BingoTask[] }
   editingCategoryId: string | null
   setEditingCategoryId: (id: string | null) => void
-  categories: BingoCategory[]
+  categoryNamesFor: (sectionId: string | null | undefined) => string[]
   scans: BingoScan[]
   copiedId: string | null
   boardCountByTask: Map<string, number>
@@ -494,8 +494,8 @@ function CategoryGroupBlock({
                   className="w-full bg-black/20 a-text text-xs px-2 py-1 rounded border border-white/30 focus:outline-none focus:border-white/60 mt-2"
                 >
                   <option value="">— Uncategorized —</option>
-                  {categories.filter(c => c.section_id === task.section_id).map(c => (
-                    <option key={c.id} value={c.name}>{c.name}</option>
+                  {categoryNamesFor(task.section_id).map(name => (
+                    <option key={name} value={name}>{name}</option>
                   ))}
                   <option value="__new__">+ New category…</option>
                 </select>
@@ -628,6 +628,15 @@ export function BingoDashAdmin() {
   const [scans, setScans] = useState<BingoScan[]>([])
   const [sections, setSections] = useState<BingoSection[]>([])
   const [categories, setCategories] = useState<BingoCategory[]>([])
+  // Every category name a board actually uses: its bingo_categories rows plus
+  // whatever text its cards carry. A card copied from another board arrives
+  // with a category that has no row here, and it still has to be pickable.
+  const categoryNamesFor = (sectionId: string | null | undefined): string[] => {
+    const names = new Set<string>()
+    categories.filter(c => c.section_id === sectionId).forEach(c => names.add(c.name))
+    tasks.filter(t => t.section_id === sectionId && t.category?.trim()).forEach(t => names.add(t.category.trim()))
+    return [...names].sort((a, b) => a.localeCompare(b))
+  }
   const [challengeSections, setChallengeSections] = useState<BingoChallengeSection[]>([])
   const [duels, setDuels] = useState<BingoDuel[]>([])
   
@@ -788,6 +797,8 @@ export function BingoDashAdmin() {
   const [searchParams, setSearchParams] = useSearchParams()
   const ADMIN_VIEWS: AdminView[] = ['run', 'board', 'library', 'teams', 'submissions', 'settings']
   const tabParam = searchParams.get('tab') as AdminView | null
+  // Phone only: whether the navigation drawer is open.
+  const [navOpen, setNavOpen] = useState(false)
   const [activeTab, setActiveTabState] = useState<AdminView>(
     tabParam && ADMIN_VIEWS.includes(tabParam) ? tabParam : 'run'
   )
@@ -2493,19 +2504,29 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
         isOwner={isOwner}
         onSignOut={signOut}
         pending={photoSubmissions.filter(x => x.status === 'pending').length}
+        open={navOpen}
+        onClose={() => setNavOpen(false)}
       />
       <div className="flex-1 min-w-0">
       {/* Header */}
       <header className="sticky top-0 z-40 border-b a-border a-surface shadow-sm">
-        <div className="max-w-6xl mx-auto px-6 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <button onClick={() => navigate('/')} className="a-text-3 hover:a-text-2 transition-colors">←</button>
-            <div>
-              <h1 className="text-xl font-black a-text tracking-tight">Bingo Dash <span className="text-teal-500">Admin</span></h1>
+        <div className="max-w-6xl mx-auto px-3 sm:px-6 py-3 sm:py-4 flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+            {/* Phone only: opens the navigation drawer. */}
+            <button
+              onClick={() => setNavOpen(true)}
+              className="lg:hidden w-9 h-9 flex items-center justify-center rounded-lg a-text-2 hover:a-surface-2 transition-colors flex-shrink-0"
+              aria-label="Open menu"
+            >
+              <span className="block w-4 space-y-1"><span className="block h-0.5 bg-current rounded" /><span className="block h-0.5 bg-current rounded" /><span className="block h-0.5 bg-current rounded" /></span>
+            </button>
+            <button onClick={() => navigate('/')} className="a-text-3 hover:a-text-2 transition-colors hidden sm:block">←</button>
+            <div className="min-w-0">
+              <h1 className="text-lg sm:text-xl font-black a-text tracking-tight truncate">Bingo Dash <span className="text-teal-500">Admin</span></h1>
               <p className="text-[10px] a-text-3 uppercase tracking-widest font-bold hidden sm:block">Control Hub</p>
             </div>
           </div>
-          <div className="flex items-center gap-1.5">
+          <div className="flex items-center gap-1 sm:gap-1.5 flex-shrink-0">
             {/* Counts stay visible — they are the quickest sanity check that
                 the right board is selected before you start a game. */}
             <div className="hidden md:flex items-center gap-2.5 px-3 py-1.5 rounded-xl a-surface-2 border a-border mr-2">
@@ -2575,7 +2596,7 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
         </div>
 
         {/* ── Board tab bar ─────────────────────────────────────────────────── */}
-        <div className="max-w-6xl mx-auto px-6 py-2.5 flex items-center gap-1.5 overflow-x-auto border-t a-border">
+        <div className="max-w-6xl mx-auto px-3 sm:px-6 py-2.5 flex items-center gap-1.5 overflow-x-auto border-t a-border">
           <span className="text-[9px] font-black a-text-3 uppercase tracking-widest mr-2 flex-shrink-0">Boards</span>
           {myBoards.map(s => {
             const isActive = currentSectionId === s.id
@@ -2644,7 +2665,7 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
         </div>
       </header>
 
-      <main className="max-w-6xl mx-auto px-6 py-8 flex flex-col gap-10">
+      <main className="max-w-6xl mx-auto px-3 sm:px-6 py-5 sm:py-8 flex flex-col gap-8 sm:gap-10">
 
         {activeTab === 'board' && <>
 
@@ -2658,7 +2679,7 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
             const currentSection = sections.find(s => s.id === currentSectionId)
             const isStarted = currentSection?.game_started ?? false
             return (
-              <div className={`flex items-center justify-between gap-4 rounded-2xl px-6 py-5 ${isStarted ? 'a-ok-panel border' : 'bg-gray-800/60 border a-border'}`}>
+              <div className={`flex flex-wrap items-center justify-between gap-4 rounded-2xl px-4 sm:px-6 py-4 sm:py-5 ${isStarted ? 'a-ok-panel border' : 'bg-gray-800/60 border a-border'}`}>
                 <div>
                   <p className={`text-lg font-black ${isStarted ? 'a-ok-text' : 'a-text-2'}`}>
                     {isStarted ? '● Game is LIVE' : '■ Game is Locked'}
@@ -2833,7 +2854,7 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
 
         {/* ── Board Editor ──────────────────────────────────────────────────── */}
         <section>
-          <div className="flex items-center justify-between mb-4">
+          <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
             <div>
               <h2 className="text-xl font-bold a-text">
                 Board Editor
@@ -3106,9 +3127,9 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
         {/* ── Library tab: Compartment > Category > Cards ───────────────────── */}
         {activeTab === 'library' && (
         <section>
-          <div className="flex items-center justify-between mb-4">
+          <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
             <h2 className="text-xl font-bold a-text">Card Library</h2>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <button onClick={() => { setShowLibNewCategory(!showLibNewCategory); setLibNewCategoryName('') }}
                 disabled={!currentSectionId}
                 title={currentSectionId ? 'Create a category in the current compartment' : 'Select a compartment first'}
@@ -3250,8 +3271,8 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                     }}
                       className="w-full px-3 py-2 rounded-lg border a-border focus:outline-none focus:ring-2 focus:ring-teal-500 a-surface">
                       <option value="">— Uncategorized —</option>
-                      {categories.filter(c => c.section_id === currentSectionId).map(c => (
-                        <option key={c.id} value={c.name}>{c.name}</option>
+                      {categoryNamesFor(currentSectionId).map(name => (
+                        <option key={name} value={name}>{name}</option>
                       ))}
                       <option value="__new__">+ New category…</option>
                     </select>
@@ -3853,7 +3874,7 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
           const btn = 'px-4 py-2 rounded-xl text-sm font-black transition-all active:scale-95'
           return (
             <RunEventPanel>
-              <div className="flex items-center justify-between gap-3 mb-6 px-4 py-3 rounded-xl border"
+              <div className="flex flex-wrap items-center justify-between gap-3 mb-6 px-4 py-3 rounded-xl border"
                    style={{ background: 'var(--a-surface-2)', borderColor: 'var(--a-border)' }}>
                 <div>
                   <p className="text-sm font-black a-text">🎬 Try a live demo</p>
@@ -4039,7 +4060,7 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
           </div>
 
           {/* Photo submissions global toggle */}
-          <div className="mt-5 flex items-center justify-between gap-4 p-4 rounded-lg border a-border a-surface/50">
+          <div className="mt-5 flex flex-wrap items-center justify-between gap-4 p-4 rounded-lg border a-border a-surface/50">
             <div>
               <p className="text-sm font-bold a-text">Photo submissions</p>
               <p className="text-xs a-text-3 mt-0.5">When ON, every task tile shows a photo upload — primary on photo-type cards, optional/evidence on marshal & answer cards. Turn OFF during marshal-led rounds where photos are not collected.</p>
@@ -4175,7 +4196,7 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
         )}
 
         {activeTab === 'board' && <section>
-          <div className="flex items-center justify-between mb-4">
+          <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
             <h2 className="text-xl font-bold a-text">Challenges</h2>
             <button onClick={() => setShowForm(!showForm)}
               className="px-4 py-2 bg-teal-600 a-text rounded-lg hover:bg-violet-700 text-sm font-medium transition-colors">
@@ -4436,7 +4457,7 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                   group={group}
                   editingCategoryId={editingCategoryId}
                   setEditingCategoryId={setEditingCategoryId}
-                  categories={categories}
+                  categoryNamesFor={categoryNamesFor}
                   scans={scans}
                   copiedId={copiedId}
                   boardCountByTask={boardCountByTask}
@@ -4485,7 +4506,7 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                             group={group}
                             editingCategoryId={editingCategoryId}
                             setEditingCategoryId={setEditingCategoryId}
-                            categories={categories}
+                            categoryNamesFor={categoryNamesFor}
                             scans={scans}
                             copiedId={copiedId}
                             boardCountByTask={boardCountByTask}
@@ -4523,7 +4544,7 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
             return (
               <div key={section.id} className="mb-10">
                 {/* Board header */}
-                <div className="flex items-center gap-3 mb-4">
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-2 mb-4">
                   <h2 className="text-base font-black a-text uppercase tracking-wider">{section.name}</h2>
                   {activeBoardPointer === section.id && (
                     <span className="text-[10px] font-black text-green-400 bg-green-950/60 border border-green-800 px-1.5 py-0.5 rounded uppercase">Live</span>
@@ -4587,8 +4608,8 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                     </button>
                   )}
                 </div>
-                {sectionTeams.length > 0 && (<div className="rounded-xl border a-border overflow-hidden">
-                  <table className="w-full text-sm">
+                {sectionTeams.length > 0 && (<div className="rounded-xl border a-border overflow-x-auto">
+                  <table className="w-full min-w-[760px] text-sm">
                     <thead>
                       <tr className="border-b a-border a-surface-2">
                         <th className="text-left px-3 py-2.5 font-bold a-text-3 uppercase tracking-wide text-[11px] w-14">Photo</th>
@@ -5338,14 +5359,14 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
       {showImport && (
         <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 px-4" onClick={() => { if (!importing) setShowImport(false) }}>
           <div className="a-surface rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col animate-bounce-in" onClick={e => e.stopPropagation()}>
-            <div className="px-6 py-5 border-b a-border flex items-center justify-between">
+            <div className="px-4 sm:px-6 py-5 border-b a-border flex items-center justify-between">
               <div>
                 <h2 className="text-xl font-bold a-text">Import Challenges</h2>
                 <p className="text-sm a-text-2 mt-0.5">Bulk-create tiles from JSON</p>
               </div>
               <button onClick={() => setShowImport(false)} className="a-text-2 hover:a-text-3 text-2xl font-light">&times;</button>
             </div>
-            <div className="px-6 py-5 flex-1 overflow-y-auto flex flex-col gap-4">
+            <div className="px-4 sm:px-6 py-5 flex-1 overflow-y-auto flex flex-col gap-4">
               <details className="a-surface-2 rounded-xl overflow-hidden">
                 <summary className="px-4 py-3 text-sm font-medium a-text-3 cursor-pointer hover:a-surface-2">JSON format reference ▾</summary>
                 <pre className="px-4 pb-4 text-xs a-text-3 leading-relaxed overflow-x-auto">{`[
@@ -5383,7 +5404,7 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                 </div>
               )}
             </div>
-            <div className="px-6 py-4 border-t a-border flex gap-3 justify-end">
+            <div className="px-4 sm:px-6 py-4 border-t a-border flex gap-3 justify-end">
               <button onClick={() => setShowImport(false)} disabled={importing}
                 className="px-5 py-2 rounded-lg a-surface-2 a-text-3 text-sm font-medium hover:a-surface-2 transition-colors disabled:opacity-50">Cancel</button>
               {!importPreview ? (
@@ -5406,7 +5427,7 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
           onClick={() => setShowSectionManager(false)}>
           <div className="a-surface rounded-2xl shadow-2xl w-full max-w-md overflow-y-auto max-h-[90vh] animate-bounce-in"
             onClick={e => e.stopPropagation()}>
-            <div className="px-6 py-4 border-b a-border flex items-center justify-between">
+            <div className="px-4 sm:px-6 py-4 border-b a-border flex items-center justify-between">
               <div>
                 <h3 className="text-lg font-bold a-text">Sections</h3>
                 <p className="text-xs a-text-2 mt-0.5">Each section is an independent game at a different location.</p>
@@ -5628,7 +5649,7 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
             onClick={() => setShowAllTeamsLink(false)}>
             <div className="a-surface rounded-2xl shadow-2xl w-full max-w-md animate-bounce-in"
               onClick={e => e.stopPropagation()}>
-              <div className="px-6 py-5 border-b a-border flex items-center justify-between">
+              <div className="px-4 sm:px-6 py-5 border-b a-border flex items-center justify-between">
                 <div>
                   <h3 className="text-lg font-bold a-text">Live Teams Link</h3>
                   <p className="text-xs a-text-2 mt-0.5">
@@ -5704,7 +5725,7 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
             onClick={() => { if (!bonusSaving) setBonusTeam(null) }}>
             <div className="a-surface rounded-2xl shadow-2xl w-full max-w-lg animate-bounce-in flex flex-col max-h-[90vh]"
               onClick={e => e.stopPropagation()}>
-              <div className="px-6 py-5 border-b a-border flex items-center justify-between flex-shrink-0">
+              <div className="px-4 sm:px-6 py-5 border-b a-border flex items-center justify-between flex-shrink-0">
                 <div>
                   <h3 className="text-lg font-bold a-text">Bonus Points</h3>
                   <p className="text-xs a-text-2 mt-0.5">
@@ -5715,7 +5736,7 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                   className="a-text-2 hover:a-text-3 text-2xl font-light">&times;</button>
               </div>
 
-              <div className="px-6 py-4 overflow-y-auto">
+              <div className="px-4 sm:px-6 py-4 overflow-y-auto">
                 {bonusDraft.length === 0 && (
                   <p className="text-sm a-text-2 text-center py-6">
                     No activities yet. Add one below to start giving points.
@@ -5757,7 +5778,7 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                 </button>
               </div>
 
-              <div className="px-6 py-4 border-t a-border flex items-center justify-between flex-shrink-0">
+              <div className="px-4 sm:px-6 py-4 border-t a-border flex items-center justify-between flex-shrink-0">
                 <div className="text-sm a-text-3">
                   Total bonus <span className="ml-1 font-mono font-black text-lg text-amber-600">{total > 0 ? `+${total}` : total}</span>
                 </div>
@@ -5815,7 +5836,7 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
             onClick={() => setMembersLinkTeam(null)}>
             <div className="a-surface rounded-2xl shadow-2xl w-full max-w-md animate-bounce-in"
               onClick={e => e.stopPropagation()}>
-              <div className="px-6 py-5 border-b a-border flex items-center justify-between">
+              <div className="px-4 sm:px-6 py-5 border-b a-border flex items-center justify-between">
                 <div>
                   <h3 className="text-lg font-bold a-text">Live Members Link</h3>
                   <p className="text-xs a-text-2 mt-0.5">
@@ -5911,7 +5932,7 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
             onClick={() => setShowJoinLink(false)}>
             <div className="a-surface rounded-2xl shadow-2xl w-full max-w-md animate-bounce-in"
               onClick={e => e.stopPropagation()}>
-              <div className="px-6 py-5 border-b a-border flex items-center justify-between">
+              <div className="px-4 sm:px-6 py-5 border-b a-border flex items-center justify-between">
                 <div>
                   <h3 className="text-lg font-bold a-text">Join Links</h3>
                   <p className="text-xs a-text-2 mt-0.5">

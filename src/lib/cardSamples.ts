@@ -349,5 +349,8 @@ export const CARD_SAMPLES: CardSample[] = [
 
 export function sampleFor(cardTitle: string | null | undefined): CardSample | null {
   if (!cardTitle) return null
-  return CARD_SAMPLES.find(s => s.card === cardTitle) ?? null
+  // A board's own copy is titled "Match Cut (Mall Hunt)"; the sample is the
+  // same, so the bracketed board tag is ignored.
+  const base = cardTitle.replace(/\s*\([^)]*\)\s*$/, '').trim()
+  return CARD_SAMPLES.find(s => s.card === base) ?? null
 }

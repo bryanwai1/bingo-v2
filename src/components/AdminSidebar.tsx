@@ -21,7 +21,7 @@ const NAV: { id: AdminView; icon: string; label: string; hint: string }[] = [
   { id: 'settings',    icon: '⚙️',  label: 'Settings',    hint: 'Board options' },
 ]
 
-export function AdminSidebar({ view, onView, email, isOwner, onSignOut, pending = 0 }: {
+export function AdminSidebar({ view, onView, email, isOwner, onSignOut, pending = 0, open = false, onClose }: {
   view: AdminView
   onView: (v: AdminView) => void
   email?: string | null
@@ -29,6 +29,10 @@ export function AdminSidebar({ view, onView, email, isOwner, onSignOut, pending 
   onSignOut: () => void
   /** Unreviewed photo submissions — surfaced as a badge so they are not missed. */
   pending?: number
+  /** Phone only: the sidebar is a drawer, opened from the header's ☰ button.
+   *  On a wide screen it is always shown and these two are ignored. */
+  open?: boolean
+  onClose?: () => void
 }) {
   const [mode, setMode] = useState<ThemeMode>('light')
   useEffect(() => { setMode(getStoredTheme()) }, [])
@@ -37,9 +41,28 @@ export function AdminSidebar({ view, onView, email, isOwner, onSignOut, pending 
     setMode(next); setStoredTheme(next)
   }
 
+  // Picking a destination on a phone closes the drawer — the content is what
+  // they came for, and the drawer covers it.
+  const pick = (v: AdminView) => { onView(v); onClose?.() }
+
   return (
-    <aside className="w-[236px] flex-shrink-0 h-screen sticky top-0 flex flex-col border-r a-border a-surface">
-      <div className="px-5 py-5 border-b a-border">
+    <>
+      {/* Backdrop, phone only, while the drawer is open. */}
+      {open && (
+        <div
+          className="fixed inset-0 z-40 bg-black/50 lg:hidden"
+          onClick={onClose}
+          aria-hidden="true"
+        />
+      )}
+    <aside
+      className={`w-[236px] flex-shrink-0 h-screen flex flex-col border-r a-border a-surface
+        fixed top-0 left-0 z-50 transition-transform duration-200
+        ${open ? 'translate-x-0 shadow-2xl' : '-translate-x-full'}
+        lg:sticky lg:translate-x-0 lg:shadow-none lg:z-auto`}
+      aria-label="Admin navigation"
+    >
+      <div className="px-5 py-5 border-b a-border flex items-center justify-between gap-2">
         <Link to="/" className="flex items-center gap-2.5 group">
           <span className="text-2xl">🎯</span>
           <span>
@@ -47,6 +70,13 @@ export function AdminSidebar({ view, onView, email, isOwner, onSignOut, pending 
             <span className="block text-[10px] uppercase tracking-[0.14em] a-text-3">Admin</span>
           </span>
         </Link>
+        <button
+          onClick={onClose}
+          className="lg:hidden w-8 h-8 rounded-lg a-text-2 hover:a-surface-2 text-lg leading-none"
+          aria-label="Close menu"
+        >
+          ✕
+        </button>
       </div>
 
       <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
@@ -55,7 +85,7 @@ export function AdminSidebar({ view, onView, email, isOwner, onSignOut, pending 
           return (
             <button
               key={n.id}
-              onClick={() => onView(n.id)}
+              onClick={() => pick(n.id)}
               className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-left transition-all
                 ${active
                   ? 'a-brand-bg a-text shadow-sm'
@@ -103,5 +133,6 @@ export function AdminSidebar({ view, onView, email, isOwner, onSignOut, pending 
         </div>
       </div>
     </aside>
+    </>
   )
 }

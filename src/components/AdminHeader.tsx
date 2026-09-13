@@ -33,20 +33,23 @@ function Menu({ label, icon, children }: { label: string; icon: string; children
     <div ref={ref} className="relative">
       <button
         onClick={() => setOpen(o => !o)}
-        className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold transition-all
+        className={`flex items-center gap-2 px-2.5 sm:px-4 py-2.5 rounded-xl text-sm font-bold transition-all
           ${open
             ? 'a-surface-2 a-text ring-1 ring-white/25'
             : 'a-text-2 hover:a-text hover:a-surface-2'}`}
+        title={label}
       >
         <span className="text-base leading-none">{icon}</span>
-        {label}
+        {/* Icon only on a phone — three labelled menus plus the join button
+            do not fit beside the title. */}
+        <span className="hidden sm:inline">{label}</span>
         <span className={`text-[10px] transition-transform ${open ? 'rotate-180' : ''}`}>▾</span>
       </button>
 
       {open && (
         <div
           onClick={() => setOpen(false)}
-          className="absolute right-0 top-full mt-2 z-50 min-w-[230px] rounded-2xl border a-border
+          className="absolute right-0 top-full mt-2 z-50 min-w-[230px] max-w-[calc(100vw-1.5rem)] rounded-2xl border a-border
                      a-bg/98 backdrop-blur-xl shadow-2xl shadow-black/60 overflow-hidden animate-menu"
         >
           {children}
