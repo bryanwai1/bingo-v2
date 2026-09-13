@@ -150,8 +150,14 @@ export interface BingoTask {
   task_type: 'standard' | 'answer' | 'photo' | 'video' | 'media' | 'sign_splice' | 'breakout_hunt'
   answer_question: string | null
   answer_text: string | null
+  // Number answer with a floor: set, the answer input is one number that
+  // passes when >= this (server-checked). Null = letter-box exact answer.
+  answer_min?: number | null
   completion_warning: string | null
   require_marshal: boolean
+  // Chained cards: id of the card a team must finish before this one opens.
+  // Null for a normal card. completion_warning doubles as the lock message.
+  prerequisite_task_id?: string | null
   // Contest ("contending") mode: played as a duel between two teams rather than
   // solo. contest_game keys come from lib/contestGames.ts; contest_bonus is the
   // extra the winner banks on top of the challenger's normal tile points.
@@ -326,9 +332,13 @@ export interface BingoPhotoSubmission {
   task_id: string
   scan_id: string | null
   photo_url: string
-  /** Whether photo_url points at a picture or a video clip. */
-  media_type?: 'image' | 'video'
+  /** What photo_url points at: an uploaded picture or clip, or — for a link
+   *  submission — the address itself. */
+  media_type?: 'image' | 'video' | 'link' | 'versus'
   status: 'pending' | 'approved' | 'rejected'
+  // Versus rows only: the team they battled and whether they won.
+  opponent_id?: string | null
+  versus_won?: boolean | null
   // Breakout Hunt sets only: what the photo should show, and which puzzle it
   // answers. See supabase/breakout-hunt/023_breakout_review.sql.
   label?: string | null

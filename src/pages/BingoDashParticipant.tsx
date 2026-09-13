@@ -10,7 +10,7 @@ import {
 import { useBingoTaskPhotos } from '../hooks/useBingoTaskPhotos'
 import { useBingoScans } from '../hooks/useBingoScans'
 import { useTaskLinks } from '../hooks/useTaskLinks'
-import { TaskLinkButtons } from '../components/TaskLinkButtons'
+import { TaskLinkButtons, type LinkItem } from '../components/TaskLinkButtons'
 import { InstructionPage } from '../components/InstructionPage'
 import { PageNavigator } from '../components/PageNavigator'
 import { SwipeablePages } from '../components/SwipeablePages'
@@ -19,11 +19,10 @@ import { TimeUpAlarm } from '../components/TimeUpAlarm'
 import { ContestCard } from '../components/ContestCard'
 import { SignSpliceCard } from '../components/SignSpliceCard'
 import { BreakoutHuntCard } from '../components/BreakoutHuntCard'
-import { CardDrawPanel } from '../components/CardDrawPanel'
 import { useCardDrawConfig } from '../hooks/useCardDrawConfig'
-import { drawHeading } from '../lib/cardDraw'
 import { SpeedEditTargets } from '../components/SpeedEditTargets'
 import { SampleTreeApp } from '../components/SampleTreeApp'
+import { CardSample } from '../components/CardSample'
 import { RetroGamesSample } from '../components/RetroGamesSample'
 import { BundleCard } from '../components/BundleCard'
 import { AitbMissionModule } from '../components/AitbMissionModule'
@@ -104,7 +103,36 @@ export function BingoDashParticipant() {
   // Which of this card's inputs the team has already satisfied. Files count
   // once a marshal has approved them, which is why this is read back from the
   // submissions rather than from what was sent.
-  const [approvedKinds, setApprovedKinds] = useState<{ photo: boolean; video: boolean }>({ photo: false, video: false })
+  const [approvedKinds, setApprovedKinds] = useState<{ photo: boolean; video: boolean; link: boolean; versus: boolean }>({ photo: false, video: false, link: false, versus: false })
+  // Versus input: the teams on this board to pick an opponent from, what the
+  // team chose, and whether a claim is already in with the admin.
+  const [rivals, setRivals] = useState<{ id: string; name: string }[]>([])
+  const [opponentId, setOpponentId] = useState('')
+  const [versusWon, setVersusWon] = useState<boolean | null>(null)
+  const [versusSent, setVersusSent] = useState(false)
+  const [versusBusy, setVersusBusy] = useState(false)
+  // Chained cards. `prev` is the card this one unlocks after (null for a
+  // normal card) and `prevDone` whether this team has finished it; `next` is
+  // the card that unlocks after this one, for the hand-off button. prevDone
+  // starts true so an unchained card is never momentarily shown locked.
+  const [chain, setChain] = useState<{
+    prev: { id: string; title: string; hex_code: string } | null
+    prevDone: boolean
+    next: { id: string; title: string } | null
+  }>({ prev: null, prevDone: true, next: null })
+  // A card whose answer belongs to the item the team drew (Escape the Mall's
+  // riddle) rather than to the card as a whole.
+  const [guess, setGuess] = useState('')
+  const [guessBusy, setGuessBusy] = useState(false)
+  const [guessWrong, setGuessWrong] = useState(0)
+  // Number answer with a floor (answer_min): what the team typed, whether
+  // the server accepted it, and the last rejected value so the hint can say so.
+  const [numberValue, setNumberValue] = useState('')
+  const [numberBusy, setNumberBusy] = useState(false)
+  const [numberRejected, setNumberRejected] = useState<string | null>(null)
+  const [linkValue, setLinkValue] = useState('')
+  const [linkSent, setLinkSent] = useState(false)
+  const [linkBusy, setLinkBusy] = useState(false)
   const [now, setNow] = useState(Date.now())
   const [scanRecorded, setScanRecorded] = useState(false)
   const [currentPage, setCurrentPage] = useState(0)
@@ -176,6 +204,49 @@ export function BingoDashParticipant() {
       }
     })
   }, [taskId])
+
+  // Resolve the chain around this card, and watch the previous card's
+  // completion so this one opens the moment the marshal approves it.
+  const prereqId = task?.prerequisite_task_id ?? null
+  useEffect(() => {
+    if (!task || !team) return
+    let cancelled = false
+    ;(async () => {
+      const [prevRes, doneRes, nextRes] = await Promise.all([
+        prereqId
+          ? supabase.from('bingo_tasks').select('id, title, hex_code').eq('id', prereqId).maybeSingle()
+          : Promise.resolve({ data: null }),
+        prereqId
+          ? supabase.from('bingo_scans').select('id').eq('team_id', team.id).eq('task_id', prereqId).eq('completed', true).limit(1).maybeSingle()
+          : Promise.resolve({ data: null }),
+        supabase.from('bingo_tasks').select('id, title').eq('prerequisite_task_id', task.id).eq('section_id', task.section_id).limit(1).maybeSingle(),
+      ])
+      if (cancelled) return
+      setChain({
+        prev: (prevRes.data as { id: string; title: string; hex_code: string } | null) ?? null,
+        prevDone: !prereqId || !!doneRes.data,
+        next: (nextRes.data as { id: string; title: string } | null) ?? null,
+      })
+    })()
+    // One subscription on the team's scans covers both ends of the chain:
+    // the previous card finishing (unlocks this one) and this card finishing
+    // from the admin's approval (lights the Next button without a reload).
+    const channel = supabase
+      .channel(`bingo-chain-${team.id}-${task.id}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'bingo_scans', filter: `team_id=eq.${team.id}` },
+        ({ new: updated }) => {
+          const row = updated as Partial<BingoScan>
+          if (!row.completed) return
+          if (prereqId && row.task_id === prereqId) setChain(c => ({ ...c, prevDone: true }))
+          if (row.task_id === task.id) setScanRecord(prev => (prev && prev.id === row.id ? { ...prev, completed: true } : prev))
+        }
+      )
+      .subscribe()
+    return () => { cancelled = true; supabase.removeChannel(channel) }
+  }, [task, team, prereqId])
+  const chainLocked = !!chain.prev && !chain.prevDone
 
   // Load the board's marshal password + photo-submissions toggle, subscribe to live changes
   const sectionId = team?.section_id ?? null
@@ -259,6 +330,28 @@ export function BingoDashParticipant() {
   const answerMatches = answerRows.length > 0 && answerRows.every(
     (row, i) => normalize(answerInputs[i] ?? '') === normalize(row)
   )
+  const numberMode = !!inputs.answer && task?.answer_min != null
+
+  /** Send the number to Postgres; only it knows whether the floor is met,
+   *  and it marks the scan's answer_ok itself. */
+  const checkNumber = async () => {
+    if (!scanRecord || numberBusy) return
+    const value = Number(numberValue.replace(/[,\s]/g, ''))
+    if (!Number.isFinite(value)) return
+    setNumberBusy(true)
+    try {
+      const { data, error } = await supabase.rpc('check_answer_min', { p_scan: scanRecord.id, p_value: value })
+      if (error) { alert('Could not check your number: ' + error.message); return }
+      if (data === true) {
+        setNumberRejected(null)
+        setScanRecord(prev => (prev ? { ...prev, answerOk: true } : prev))
+      } else {
+        setNumberRejected(numberValue)
+      }
+    } finally {
+      setNumberBusy(false)
+    }
+  }
 
   useEffect(() => {
     if (isSnakeLadder) return
@@ -292,6 +385,8 @@ export function BingoDashParticipant() {
   const progress = useMemo(() => ({
     photo: approvedKinds.photo,
     video: approvedKinds.video,
+    link: approvedKinds.link,
+    versus: approvedKinds.versus,
     answer: scanRecord?.answerOk ?? false,
   }), [approvedKinds, scanRecord?.answerOk])
   const outstanding = missingLabels(inputs, progress)
@@ -309,6 +404,8 @@ export function BingoDashParticipant() {
           setApprovedKinds({
             photo: rows.some(r => (r.media_type ?? 'image') === 'image'),
             video: rows.some(r => r.media_type === 'video'),
+            link: rows.some(r => r.media_type === 'link'),
+            versus: rows.some(r => r.media_type === 'versus'),
           })
         })
     }
@@ -320,6 +417,105 @@ export function BingoDashParticipant() {
     return () => { live = false; supabase.removeChannel(channel) }
   }, [team, taskId, inputs])
 
+  // Versus: the other teams on this board, and whether a claim is already
+  // pending, so a reload does not offer the form twice.
+  useEffect(() => {
+    if (!team || !taskId || !inputs.versus) return
+    let live = true
+    Promise.all([
+      supabase.from('bingo_teams').select('id, name').eq('section_id', team.section_id).neq('id', team.id).order('name'),
+      supabase.from('bingo_photo_submissions').select('id').eq('team_id', team.id).eq('task_id', taskId)
+        .eq('media_type', 'versus').neq('status', 'rejected').limit(1),
+    ]).then(([teamsRes, subsRes]) => {
+      if (!live) return
+      setRivals((teamsRes.data ?? []) as { id: string; name: string }[])
+      if ((subsRes.data ?? []).length > 0) setVersusSent(true)
+    })
+    return () => { live = false }
+  }, [team, taskId, inputs.versus])
+
+  /** The battle claim: who we fought and whether we won. One row for the
+   *  admin, like a link — and only the challenging team ever sends one. */
+  const submitVersus = async () => {
+    if (!team || !taskId || !scanRecord || !opponentId || versusWon === null || versusBusy) return
+    setVersusBusy(true)
+    try {
+      // No rematch on this card, whichever team started the first one.
+      const { data: prior } = await supabase.from('bingo_photo_submissions').select('id')
+        .eq('task_id', taskId).eq('media_type', 'versus').neq('status', 'rejected')
+        .or(`and(team_id.eq.${team.id},opponent_id.eq.${opponentId}),and(team_id.eq.${opponentId},opponent_id.eq.${team.id})`)
+        .limit(1)
+      if ((prior ?? []).length > 0) {
+        alert(`You have already battled ${rivals.find(r => r.id === opponentId)?.name ?? 'that team'} on this card. Pick another team.`)
+        return
+      }
+      const { error } = await supabase.from('bingo_photo_submissions').insert({
+        team_id: team.id, task_id: taskId, scan_id: scanRecord.id,
+        photo_url: '', media_type: 'versus', status: 'pending',
+        opponent_id: opponentId, versus_won: versusWon,
+      })
+      if (error) { alert('Could not send your result: ' + error.message); return }
+      setVersusSent(true)
+    } finally {
+      setVersusBusy(false)
+    }
+  }
+
+  /** A link is evidence like any other: one row, pending, marshal approves. */
+  const submitLink = async () => {
+    const url = linkValue.trim()
+    if (!team || !taskId || !scanRecord || !url) return
+    if (!/^https?:\/\/\S+\.\S+/i.test(url)) {
+      alert('That does not look like a link. It should start with https:// and point somewhere.')
+      return
+    }
+    setLinkBusy(true)
+    try {
+      const { error } = await supabase.from('bingo_photo_submissions').insert({
+        team_id: team.id, task_id: taskId, scan_id: scanRecord.id,
+        photo_url: url, media_type: 'link', status: 'pending',
+      })
+      if (error) { alert('Could not save your link: ' + error.message); return }
+      setLinkSent(true)
+      setLinkValue('')
+    } finally {
+      setLinkBusy(false)
+    }
+  }
+
+  /**
+   * The prompt this team drew, when the card's answer comes from the draw.
+   *
+   * Inferred rather than flagged: a card that collects a typed answer, carries
+   * a draw, and has no answer of its own can only mean the drawn item holds it.
+   */
+  const needsDrawnAnswer = !!(inputs.answer && !task?.answer_text && task?.answer_min == null && drawConfig)
+  const drawnPrompt = needsDrawnAnswer ? (scanRecord?.words?.[0] || '') : ''
+  const riddleSolved = !needsDrawnAnswer || !!scanRecord?.answerOk
+
+  /** The guess goes to Postgres; only a yes/no comes back. */
+  const checkDrawnAnswer = async () => {
+    const typed = guess.trim()
+    if (!typed || !taskId || !scanRecord || !drawnPrompt) return
+    setGuessBusy(true)
+    try {
+      const { data, error } = await supabase.rpc('check_draw_answer', {
+        p_task: taskId, p_prompt: drawnPrompt, p_guess: typed,
+      })
+      if (error) { alert('Could not check that answer: ' + error.message); return }
+      if (data === true) {
+        await markAnswerOk(scanRecord.id)
+        setScanRecord(prev => (prev ? { ...prev, answerOk: true } : prev))
+        setGuess('')
+        setGuessWrong(0)
+      } else {
+        setGuessWrong(n => n + 1)
+      }
+    } finally {
+      setGuessBusy(false)
+    }
+  }
+
   const markAnswerOk = async (scanId: string) => {
     await supabase.from('bingo_scans').update({ answer_ok: true }).eq('id', scanId)
   }
@@ -327,13 +523,17 @@ export function BingoDashParticipant() {
   // A card can ask for several things at once, so a correct answer no longer
   // finishes the card on its own — it satisfies one input, and the tile turns
   // green when every compulsory one is in.
+  const answerSatisfied = answerMatches || (numberMode && !!scanRecord?.answerOk)
   useEffect(() => {
     if (isSnakeLadder) return
-    if (!answerMatches || !scanRecord || scanRecord.completed || completing) return
+    if (!answerSatisfied || !scanRecord || scanRecord.completed || completing) return
     setCompleting(true)
     ;(async () => {
-      await markAnswerOk(scanRecord.id)
-      setScanRecord(prev => (prev ? { ...prev, answerOk: true } : prev))
+      // A number answer is already marked by check_answer_min.
+      if (!numberMode) {
+        await markAnswerOk(scanRecord.id)
+        setScanRecord(prev => (prev ? { ...prev, answerOk: true } : prev))
+      }
       const done = { ...progress, answer: true }
       if (isComplete(inputs, done) || !usesInputs(inputs)) {
         await toggleComplete(scanRecord.id, true)
@@ -341,7 +541,7 @@ export function BingoDashParticipant() {
       }
       setCompleting(false)
     })()
-  }, [answerMatches]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [answerSatisfied]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleLeave = async () => {
     setLeaving(true)
@@ -741,6 +941,11 @@ export function BingoDashParticipant() {
           </div>
         )}
 
+
+        {/* A worked sample for the cards that are really camera tricks. */}
+        <CardSample title={task.title} color={task.hex_code} />
+
+
         {aitbActivity && scanRecord && (
           <div className="mb-8 mt-8 animate-slide-up">
             {/* Speed Edit Showdown works from a fixed set of target pictures. */}
@@ -805,23 +1010,23 @@ export function BingoDashParticipant() {
         {/* Whatever this card deals the team — colours, a riddle,
             checkpoints. Sits after the instructions and before the AI
             tool links, so it reads in the order the team acts. */}
-            {/* Cards that promise the team something in-app — their colours,
-                their riddle, their checkpoints — deal it here. */}
-            {(task.draw_count ?? 0) > 0 && (task.draw_style === 'list' || !task.draw_style) && team && taskId && (
-              <CardDrawPanel
-                teamId={team.id}
-                taskId={taskId}
-                count={task.draw_count!}
-                heading={drawHeading(task.title, task.draw_count!)}
-              />
-            )}
-
-        {/* Helpful links */}
-        {links.length > 0 && (
-          <div className="mt-8 animate-slide-up">
-            <TaskLinkButtons links={links} hexCode={task.hex_code} heading="Use these links to complete your tasks" />
-          </div>
-        )}
+        {/* Helpful links — the admin's tool links, plus the chain's
+            neighbours: the card that has to be finished first while this one
+            is locked, and the card this one unlocks once something has been
+            sent (it opens on its own when the marshal approves). */}
+        {(() => {
+          const submitted = !!scanRecord?.completed || photoSubmitted || photosSent > 0 || linkSent
+          const items: LinkItem[] = [...links]
+          if (chain.next && !chainLocked && submitted) {
+            items.push({ id: 'chain-next', label: chain.next.title, url: '', to: `/bingo-dash/task/${chain.next.id}`,
+              icon: '🎬', sub: scanRecord?.completed ? 'Unlocked - your next card' : 'Next card - opens once approved' })
+          }
+          return items.length > 0 && (
+            <div className="mt-8 animate-slide-up">
+              <TaskLinkButtons links={items} hexCode={task.hex_code} heading="Use these links to complete your tasks" />
+            </div>
+          )
+        })()}
 
         {/* Observer notice */}
         {isObserver && (
@@ -834,7 +1039,31 @@ export function BingoDashParticipant() {
         {!isObserver && <div className="mt-8 animate-slide-up">
           {/* A bundle tile is a whole activity set, so it replaces the normal
               completion flow the same way a contest card does. */}
-          {task.is_bundle && team ? (
+          {chainLocked && chain.prev ? (
+            /* ── Chained card the team has not earned yet: no submit UI, just
+               the lock message and the way to the card that opens it. ── */
+            <>
+              <div className="p-5 rounded-3xl border-2 border-amber-400/50 bg-amber-400/10 text-center">
+                <div className="text-4xl mb-2">🔒</div>
+                <p className="text-amber-200 font-black text-base leading-snug">
+                  {task.completion_warning || `Only teams that have completed ${chain.prev.title} can unlock ${task.title}.`}
+                </p>
+                <p className="text-white/50 text-xs font-bold mt-2">This card opens on its own once that one is approved.</p>
+              </div>
+              {/* The way to the card that opens this one, right under the reason it is shut. */}
+              <div className="mt-4">
+                <TaskLinkButtons hexCode={task.hex_code} heading="Do this card first"
+                  links={[{ id: 'chain-prev', label: chain.prev.title, url: '', to: `/bingo-dash/task/${chain.prev.id}`,
+                    icon: '🔒', sub: 'Complete this card first' }]} />
+              </div>
+              <button
+                onClick={() => navigate(backPath)}
+                className="mt-3 w-full py-3 rounded-2xl text-white/70 font-bold border border-white/15 hover:bg-white/5 transition-colors"
+              >
+                ← Back to Board
+              </button>
+            </>
+          ) : task.is_bundle && team ? (
             <>
               <BundleCard task={task} teamId={team.id} marshalPassword={marshalPassword} />
               <button
@@ -993,7 +1222,117 @@ export function BingoDashParticipant() {
                 </div>
               )}
 
-              {(inputs.photo || inputs.video) && photoSubmissionsEnabled && (
+              {/* Versus comes before the photo: name the battle, then prove it. */}
+              {inputs.versus && (
+                <div className="mb-6">
+                  <p className="text-white font-black text-lg text-center mb-1">⚔️ Who did you battle?</p>
+                  <p className="text-white/50 text-sm text-center mb-4">
+                    Pick the team and the result - the admin approves it.
+                  </p>
+                  {approvedKinds.versus ? (
+                    <div className="p-4 rounded-2xl bg-green-400/15 border border-green-400/40 text-center">
+                      <p className="text-green-300 font-black">✓ Result approved</p>
+                    </div>
+                  ) : versusSent ? (
+                    <div className="p-4 rounded-2xl bg-green-400/15 border border-green-400/40 text-center">
+                      <div className="text-3xl mb-2">⏳</div>
+                      <p className="text-green-300 font-black">Result submitted!</p>
+                      <p className="text-green-300/60 text-sm mt-1">Waiting for admin review</p>
+                    </div>
+                  ) : (
+                    <div className="flex flex-col gap-3">
+                      <select
+                        value={opponentId}
+                        onChange={e => setOpponentId(e.target.value)}
+                        className="w-full px-4 py-3 rounded-2xl bg-white/10 border-2 border-white/25 text-white text-sm font-bold focus:outline-none focus:border-white/50"
+                        style={{ colorScheme: 'dark' }}
+                      >
+                        <option value="">Select the team you battled…</option>
+                        {rivals.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+                      </select>
+                      <div className="grid grid-cols-2 gap-2">
+                        {([true, false] as const).map(won => (
+                          <button key={String(won)} type="button" onClick={() => setVersusWon(won)}
+                            className="py-3 rounded-2xl font-black uppercase tracking-wider text-sm border-2 transition-all active:scale-95"
+                            style={versusWon === won
+                              ? { background: won ? '#4ade80' : '#f87171', borderColor: 'transparent', color: '#000' }
+                              : { background: 'rgba(255,255,255,0.06)', borderColor: 'rgba(255,255,255,0.2)', color: 'rgba(255,255,255,0.7)' }}>
+                            {won ? '🏆 We won' : '😅 We lost'}
+                          </button>
+                        ))}
+                      </div>
+                      <button
+                        onClick={() => void submitVersus()}
+                        disabled={versusBusy || !opponentId || versusWon === null}
+                        className="w-full py-3.5 rounded-2xl font-black uppercase tracking-wider transition-all active:scale-95 disabled:opacity-40"
+                        style={{ backgroundColor: task.hex_code, color: '#000' }}
+                      >
+                        {versusBusy ? 'Sending…' : 'Submit result for approval'}
+                      </button>
+                      <p className="text-white/40 text-xs font-bold text-center">
+                        Only the team that started the challenge sends this. One battle per team on this card.
+                      </p>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* A number with a floor comes before the evidence: the team
+                  proves the count first, then sends the screenshots. */}
+              {numberMode && !needsDrawnAnswer && (
+                <div className="mb-6">
+                  {task.answer_question && (
+                    <p className="text-white font-black text-lg mb-4 text-center leading-snug">
+                      {task.answer_question}
+                    </p>
+                  )}
+                  {scanRecord?.answerOk ? (
+                    <div className="p-4 rounded-2xl bg-green-400/15 border border-green-400/40 text-center">
+                      <p className="text-green-300 font-black">✓ Number accepted</p>
+                      <p className="text-green-300/60 text-xs font-bold mt-1">
+                        {inputs.photo ? 'Now send your screenshots as evidence.' : 'That is over the line.'}
+                      </p>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="flex gap-2">
+                        <input
+                          type="text" inputMode="numeric" value={numberValue}
+                          onChange={e => { setNumberValue(e.target.value); setNumberRejected(null) }}
+                          onKeyDown={e => { if (e.key === 'Enter') void checkNumber() }}
+                          placeholder="Enter the total"
+                          className="flex-1 min-w-0 px-4 py-3 rounded-2xl border-2 text-center text-xl font-black focus:outline-none bg-white/10 text-white placeholder-white/30"
+                          style={{ borderColor: numberRejected ? '#ef4444' : numberValue ? task.hex_code : 'rgba(255,255,255,0.2)' }}
+                        />
+                        <button
+                          onClick={() => void checkNumber()}
+                          disabled={numberBusy || !numberValue.trim()}
+                          className="px-5 rounded-2xl font-black uppercase tracking-wider text-sm transition-all active:scale-95 disabled:opacity-40"
+                          style={{ background: task.hex_code, color: '#000' }}
+                        >
+                          {numberBusy ? '…' : 'Check'}
+                        </button>
+                      </div>
+                      {numberRejected && (
+                        <p className="text-red-400 text-xs font-bold text-center mt-2">
+                          {numberRejected} is not enough yet - keep going and try again.
+                        </p>
+                      )}
+                    </>
+                  )}
+                </div>
+              )}
+
+              {(inputs.photo || inputs.video) && photoSubmissionsEnabled && !riddleSolved && drawnPrompt && (
+                <div className="p-4 rounded-2xl bg-white/5 border border-white/15 text-center mt-4">
+                  <div className="text-2xl mb-1">🔒</div>
+                  <p className="text-white/60 text-sm font-bold">
+                    Answer the riddle first — then you can send your clip.
+                  </p>
+                </div>
+              )}
+
+              {(inputs.photo || inputs.video) && photoSubmissionsEnabled && riddleSolved && (
                 <>
                   <p className="text-white font-black text-lg text-center mb-4">{fileHeading(inputs)}</p>
                   <p className="text-white/50 text-sm text-center mb-5">
@@ -1080,7 +1419,102 @@ export function BingoDashParticipant() {
               )}
 
               {/* ── Answer: Letter-box input ── */}
-              {inputs.answer && (
+              {/* ── Link: paste where the thing you built lives ── */}
+              {inputs.link && (
+                <>
+                  <p className="text-white font-black text-lg text-center mb-4">🔗 Submit Your Link</p>
+                  <p className="text-white/50 text-sm text-center mb-5">
+                    Paste the address of what you built — a marshal opens it and approves.
+                  </p>
+                  {linkSent ? (
+                    <div className="p-4 rounded-2xl bg-green-400/15 border border-green-400/40 text-center">
+                      <div className="text-3xl mb-2">⏳</div>
+                      <p className="text-green-300 font-black">Link submitted!</p>
+                      <p className="text-green-300/60 text-sm mt-1">Waiting for marshal review</p>
+                      <button onClick={() => setLinkSent(false)}
+                        className="mt-3 text-white/40 hover:text-white/70 text-xs font-bold underline">
+                        Send a different link
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="flex flex-col gap-3">
+                      <input
+                        type="url"
+                        inputMode="url"
+                        value={linkValue}
+                        onChange={e => setLinkValue(e.target.value)}
+                        onKeyDown={e => { if (e.key === 'Enter') void submitLink() }}
+                        placeholder="https://…"
+                        className="w-full px-4 py-3 rounded-2xl bg-white/10 border-2 border-white/25 text-white placeholder-white/30 text-sm font-bold focus:outline-none focus:border-white/50"
+                      />
+                      <button
+                        onClick={() => void submitLink()}
+                        disabled={linkBusy || !linkValue.trim()}
+                        className="w-full py-3.5 rounded-2xl font-black uppercase tracking-wider transition-all active:scale-95 disabled:opacity-40"
+                        style={{ backgroundColor: task.hex_code, color: '#000' }}
+                      >
+                        {linkBusy ? 'Sending…' : 'Submit link for approval'}
+                      </button>
+                      <p className="text-white/40 text-xs font-bold text-center">
+                        Make sure the link opens for anyone — not just your own account.
+                      </p>
+                    </div>
+                  )}
+                </>
+              )}
+
+              {needsDrawnAnswer && !drawnPrompt && (
+                <div className="p-4 rounded-2xl bg-white/5 border border-white/15 text-center">
+                  <div className="text-2xl mb-1">🎲</div>
+                  <p className="text-white/60 text-sm font-bold">Draw your riddle above to begin.</p>
+                </div>
+              )}
+
+              {drawnPrompt && (
+                <>
+                  <p className="text-white font-black text-lg text-center mb-1">🔑 What is it?</p>
+                  <p className="text-white/50 text-sm text-center mb-4">
+                    Solve your riddle, then type the place. Wrong guesses cost nothing — keep going.
+                  </p>
+
+                  {scanRecord?.answerOk ? (
+                    <div className="p-4 rounded-2xl bg-green-400/15 border border-green-400/40 text-center">
+                      <div className="text-3xl mb-2">✅</div>
+                      <p className="text-green-300 font-black">Cracked it!</p>
+                      <p className="text-green-300/60 text-sm mt-1">
+                        Now film your reaction at the place — doing what the riddle describes.
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="flex flex-col gap-3">
+                      <input
+                        type="text"
+                        value={guess}
+                        onChange={e => setGuess(e.target.value)}
+                        onKeyDown={e => { if (e.key === 'Enter') void checkDrawnAnswer() }}
+                        placeholder="Type the place…"
+                        autoComplete="off"
+                        className="w-full px-4 py-3 rounded-2xl bg-white/10 border-2 border-white/25 text-white placeholder-white/30 text-center text-base font-bold focus:outline-none focus:border-white/50"
+                      />
+                      <button
+                        onClick={() => void checkDrawnAnswer()}
+                        disabled={guessBusy || !guess.trim()}
+                        className="w-full py-3.5 rounded-2xl font-black uppercase tracking-wider transition-all active:scale-95 disabled:opacity-40"
+                        style={{ backgroundColor: task.hex_code, color: '#000' }}
+                      >
+                        {guessBusy ? 'Checking…' : 'Check my answer'}
+                      </button>
+                      {guessWrong > 0 && (
+                        <p className="text-center text-sm font-bold text-amber-300">
+                          Not that one — try again{guessWrong > 2 ? '. Tap the hint above if you are stuck.' : '.'}
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </>
+              )}
+
+              {inputs.answer && !numberMode && !needsDrawnAnswer && (
                 <>
                   {task.answer_question && (
                     <p className="text-white font-black text-lg mb-4 text-center leading-snug">
@@ -1195,7 +1629,7 @@ export function BingoDashParticipant() {
             </div>
 
             {/* ── Supplementary photo upload (any non-photo task, when toggle ON) ── */}
-            {!inputs.photo && !inputs.video && photoSubmissionsEnabled && (
+            {!inputs.photo && !inputs.video && !inputs.link && !inputs.versus && photoSubmissionsEnabled && (
               <div className="mt-4 rounded-3xl p-5 border-2 border-white/15 bg-black/30">
                 <p className="text-white font-black text-base text-center mb-1">📸 Optional Photo</p>
                 <p className="text-white/50 text-xs text-center mb-4">Attach an image as evidence — your marshal will review it.</p>
@@ -1229,6 +1663,7 @@ export function BingoDashParticipant() {
             </>
           )}
         </div>}
+
       </main>
     </div>
     {timeUpOverlay}

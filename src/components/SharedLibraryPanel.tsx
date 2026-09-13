@@ -1,40 +1,33 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useState } from 'react'
 import { supabase } from '../lib/supabase'
+import { LIBRARY_PACKS } from '../lib/libraryPacks'
 
 // Shared content packs, available to every tenant.
 //
-// Importing copies the pack's cards into THIS board as the caller's own
-// editable rows (import_library_pack is SECURITY DEFINER and checks
-// bingo_can_write). Nothing is shared after the copy — a renter editing an
-// imported card never touches the source or another renter's version.
+// What each pack contains is authored in src/lib/libraryPacks.ts rather than
+// read from a table — nothing in the app ever wrote those rows, so they were a
+// catalogue kept in the database for no reason.
+//
+// Importing still goes through import_library_pack, which is SECURITY DEFINER
+// and checks bingo_can_write: the copy into the caller's board has to be
+// authorised server-side, so that stays where it is. Nothing is shared after
+// the copy — a renter editing an imported card never touches the source.
 // Idempotent: pressing Import twice does not double the library.
-
-type Pack = { id: string; name: string; description: string; emoji: string }
-type Card = { id: string; title: string; category: string; points: number; is_contest: boolean }
 
 export function SharedLibraryPanel({ sectionId, onImported }: {
   sectionId: string | null
   onImported?: () => void
 }) {
-  const [packs, setPacks] = useState<Pack[]>([])
+  const packs = LIBRARY_PACKS
   const [open, setOpen] = useState<string | null>(null)
-  const [cards, setCards] = useState<Card[]>([])
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState('')
 
-  useEffect(() => {
-    supabase.from('bingo_library_packs').select('*').order('sort_order')
-      .then(({ data }) => setPacks((data as Pack[]) ?? []))
+  const openPack = useCallback((id: string) => {
+    setOpen(prev => (prev === id ? null : id))
   }, [])
 
-  const openPack = useCallback(async (id: string) => {
-    if (open === id) { setOpen(null); return }
-    setOpen(id)
-    const { data } = await supabase.from('bingo_library_cards')
-      .select('id, title, category, points, is_contest')
-      .eq('pack_id', id).order('sort_order')
-    setCards((data as Card[]) ?? [])
-  }, [open])
+  const cards = packs.find(p => p.id === open)?.cards ?? []
 
   const importPack = async (packId: string) => {
     if (!sectionId) { setMsg('Pick a board first.'); return }
@@ -68,7 +61,7 @@ export function SharedLibraryPanel({ sectionId, onImported }: {
           <div key={p.id} className="rounded-xl border a-border bg-black/20 overflow-hidden">
             <div className="flex items-center gap-3 px-3 py-2.5">
               <span className="text-xl">{p.emoji}</span>
-              <button onClick={() => void openPack(p.id)} className="flex-1 text-left">
+              <button onClick={() => openPack(p.id)} className="flex-1 text-left">
                 <p className="a-text font-bold text-sm">{p.name}</p>
                 <p className="a-text-3 text-[11px] leading-snug">{p.description}</p>
               </button>
@@ -82,9 +75,9 @@ export function SharedLibraryPanel({ sectionId, onImported }: {
             {open === p.id && (
               <div className="border-t a-border divide-y divide-transparent">
                 {cards.map(c => (
-                  <div key={c.id} className="px-3 py-2 flex items-center gap-2">
+                  <div key={c.title} className="px-3 py-2 flex items-center gap-2">
                     <span className="flex-1 a-text-2 text-xs">{c.title}</span>
-                    {c.is_contest && (
+                    {c.isContest && (
                       <span className="text-[9px] font-black uppercase text-red-300 border border-red-400/40 rounded px-1.5 py-0.5">
                         Contest
                       </span>

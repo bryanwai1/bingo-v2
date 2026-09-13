@@ -1,5 +1,5 @@
 import { lazy, Suspense } from 'react'
-import { BrowserRouter, Routes, Route, Outlet, Navigate } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Outlet, Navigate, useParams } from 'react-router-dom'
 import { BingoAuthProvider } from './hooks/useBingoAuth'
 import { RequireBingoAdmin } from './components/RequireBingoAdmin'
 
@@ -10,6 +10,13 @@ const GroupingSlide         = lazy(() => import('./pages/GroupingSlide').then(m 
 const BingoDashHub          = lazy(() => import('./pages/BingoDashHub').then(m => ({ default: m.BingoDashHub })))
 const BingoDashHome         = lazy(() => import('./pages/BingoDashHome').then(m => ({ default: m.BingoDashHome })))
 const BingoDashParticipant  = lazy(() => import('./pages/BingoDashParticipant').then(m => ({ default: m.BingoDashParticipant })))
+// Keyed on the card id so a chained card's "Go to / Next" button, which
+// navigates card -> card inside the app, gets a fresh page rather than the
+// previous card's scan record, staged files and answers.
+function ParticipantRoute() {
+  const { taskId } = useParams<{ taskId: string }>()
+  return <BingoDashParticipant key={taskId} />
+}
 const BingoDashAdmin        = lazy(() => import('./pages/BingoDashAdmin').then(m => ({ default: m.BingoDashAdmin })))
 const BingoDashTaskEdit     = lazy(() => import('./pages/BingoDashTaskEdit').then(m => ({ default: m.BingoDashTaskEdit })))
 const BingoDashCube         = lazy(() => import('./pages/BingoDashCube').then(m => ({ default: m.BingoDashCube })))
@@ -41,7 +48,7 @@ export default function App() {
           <Route path="/event/grouping" element={<GroupingSlide />} />
 
           <Route path="/bingo-dash" element={<BingoDashHome />} />
-          <Route path="/bingo-dash/task/:taskId" element={<BingoDashParticipant />} />
+          <Route path="/bingo-dash/task/:taskId" element={<ParticipantRoute />} />
 
           {/* Admin subtree — gated behind an approved Bingo Dash account */}
           <Route element={<BingoAuthProvider><Outlet /></BingoAuthProvider>}>

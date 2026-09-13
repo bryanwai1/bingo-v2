@@ -1,9 +1,20 @@
+import { Link } from 'react-router-dom'
 import type { TaskLink } from '../types/database'
 import { normalizeUrl } from '../lib/normalizeUrl'
 import { T } from './T'
 
+/** A row in the list. Admin-entered links open in a new tab; a chained
+ *  card's neighbour (`to`) is an in-app route and stays in the same tab. */
+export type LinkItem = Pick<TaskLink, 'id' | 'label' | 'url'> & {
+  to?: string
+  /** Handled in-page instead of navigating (the demo swaps cards in place). */
+  onSelect?: () => void
+  icon?: string
+  sub?: string
+}
+
 interface Props {
-  links: TaskLink[]
+  links: LinkItem[]
   hexCode: string
   heading?: string
 }
@@ -17,18 +28,13 @@ export function TaskLinkButtons({ links, hexCode, heading = 'Links for this task
         🔗 <T>{heading}</T>
       </p>
       <div className="flex flex-col gap-2.5">
-        {links.map((link) => (
-          <a
-            key={link.id}
-            href={normalizeUrl(link.url)}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="group relative rounded-2xl p-[2px] overflow-hidden transition-transform active:scale-[0.98]"
-            style={{
-              background: `linear-gradient(145deg, ${hexCode}, ${hexCode}99)`,
-              boxShadow: `0 4px 0 ${hexCode}77, 0 6px 16px ${hexCode}44`,
-            }}
-          >
+        {links.map((link) => {
+          const className = 'group relative rounded-2xl p-[2px] overflow-hidden transition-transform active:scale-[0.98]'
+          const style = {
+            background: `linear-gradient(145deg, ${hexCode}, ${hexCode}99)`,
+            boxShadow: `0 4px 0 ${hexCode}77, 0 6px 16px ${hexCode}44`,
+          }
+          const inner = (
             <div
               className="relative rounded-[14px] px-4 py-3 flex items-center justify-between gap-3"
               style={{
@@ -43,12 +49,12 @@ export function TaskLinkButtons({ links, hexCode, heading = 'Links for this task
                     boxShadow: `0 2px 6px ${hexCode}55`,
                   }}
                 >
-                  🔗
+                  {link.icon ?? '🔗'}
                 </div>
                 <div className="flex flex-col min-w-0">
                   <span className="text-gray-900 font-black text-base leading-tight truncate"><T>{link.label}</T></span>
                   <span className="text-[11px] font-bold uppercase tracking-wider" style={{ color: hexCode }}>
-                    <T>Click here to open link ↗</T>
+                    <T>{link.sub ?? 'Click here to open link ↗'}</T>
                   </span>
                 </div>
               </div>
@@ -61,12 +67,18 @@ export function TaskLinkButtons({ links, hexCode, heading = 'Links for this task
                 strokeLinecap="round"
                 strokeLinejoin="round"
               >
-                <path d="M7 17L17 7" />
-                <path d="M7 7h10v10" />
+                {link.to || link.onSelect ? <path d="M5 12h14M13 6l6 6-6 6" /> : <><path d="M7 17L17 7" /><path d="M7 7h10v10" /></>}
               </svg>
             </div>
-          </a>
-        ))}
+          )
+          return link.onSelect ? (
+            <button key={link.id} type="button" onClick={link.onSelect} className={`${className} w-full text-left`} style={style}>{inner}</button>
+          ) : link.to ? (
+            <Link key={link.id} to={link.to} className={className} style={style}>{inner}</Link>
+          ) : (
+            <a key={link.id} href={normalizeUrl(link.url)} target="_blank" rel="noopener noreferrer" className={className} style={style}>{inner}</a>
+          )
+        })}
       </div>
     </div>
   )

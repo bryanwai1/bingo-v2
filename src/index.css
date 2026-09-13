@@ -93,6 +93,41 @@ body {
   .bingo-glow { transition: none; }
 }
 
+/* Storyboard marks. Each loops for as long as its frame is on screen, so the
+   move reads even if a team only glances at it. */
+.sb-rise      { animation: sbRise 2.6s ease-in-out infinite; }
+.sb-fall      { animation: sbFall 2.6s ease-in-out infinite; }
+.sb-driftRight{ animation: sbDrift 1.6s linear infinite; }
+.sb-zoomIn    { animation: sbZoom 2.6s ease-in-out infinite; }
+.sb-pulse     { animation: sbPulse 1.4s ease-in-out infinite; }
+
+@keyframes sbRise {
+  0%   { transform: translate(-50%, 10%) scale(0.9); opacity: 0.9; }
+  70%  { transform: translate(-50%, -260%) scale(1.05); opacity: 1; }
+  100% { transform: translate(-50%, -400%) scale(1); opacity: 0; }
+}
+@keyframes sbFall {
+  0%   { transform: translate(-50%, -320%) scale(1); opacity: 0; }
+  30%  { transform: translate(-50%, -120%) scale(1.05); opacity: 1; }
+  100% { transform: translate(-50%, 60%) scale(0.95); opacity: 0.9; }
+}
+@keyframes sbDrift {
+  0%   { transform: translate(-50%, -50%) translateX(0); opacity: 0; }
+  40%  { opacity: 0.9; }
+  100% { transform: translate(-50%, -50%) translateX(38px); opacity: 0; }
+}
+@keyframes sbZoom {
+  0%, 100% { transform: translate(-50%, -50%) scale(1); }
+  50%      { transform: translate(-50%, -50%) scale(1.22); }
+}
+@keyframes sbPulse {
+  0%, 100% { transform: translate(-50%, -50%) scale(1); opacity: 0.85; }
+  50%      { transform: translate(-50%, -50%) scale(1.18); opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sb-rise, .sb-fall, .sb-driftRight, .sb-zoomIn, .sb-pulse { animation: none; }
+}
+
 /* A tile the presenter has lit up on the demo board. Pulses in the tile's own
    colour (--tc) so it reads from the back of a room, and uses filter rather
    than box-shadow because the tile sets its shadow inline. */

@@ -10,7 +10,7 @@ import { useSampleRemote, makeRemoteCode, type RemoteCommand, type RemoteState, 
 import { useBingoTaskPages } from '../hooks/useBingoTaskPages'
 import { useBingoTaskPhotos } from '../hooks/useBingoTaskPhotos'
 import { useTaskLinks } from '../hooks/useTaskLinks'
-import { TaskLinkButtons } from '../components/TaskLinkButtons'
+import { TaskLinkButtons, type LinkItem } from '../components/TaskLinkButtons'
 import { DemoBundleCard } from '../components/DemoBundleCard'
 import { AitbMissionModule } from '../components/AitbMissionModule'
 import { BonusBar } from '../components/AitbBonusBar'
@@ -22,11 +22,10 @@ import { ParticleBackground } from '../components/ParticleBackground'
 import { TileFace } from '../components/BingoTileFace'
 import { SpeedEditTargets } from '../components/SpeedEditTargets'
 import { SampleTreeApp } from '../components/SampleTreeApp'
+import { CardSample } from '../components/CardSample'
 import { SignSpliceCard } from '../components/SignSpliceCard'
 import { BreakoutHuntCard } from '../components/BreakoutHuntCard'
-import { CardDrawPanel } from '../components/CardDrawPanel'
 import { useCardDrawConfig } from '../hooks/useCardDrawConfig'
-import { drawHeading } from '../lib/cardDraw'
 import { RetroGamesSample } from '../components/RetroGamesSample'
 import { normalizeTileDisplay, type TileDisplay } from '../lib/bingoTileDisplay'
 import { normalizeUrl } from '../lib/normalizeUrl'
@@ -349,10 +348,13 @@ function JoinScreen({ onJoin }: { onJoin: (groupName: string) => void }) {
 // ── Bingo Tile ────────────────────────────────────────────────────────────────
 
 function BingoTile({
-  task, status, isInBingoLine, display, glowing, onClick,
+  task, status, chained, isInBingoLine, display, glowing, onClick,
 }: {
   task: BingoTask
   status: TileStatus
+  /** A chained card whose prerequisite this demo team has not finished —
+   *  greyed with a padlock, but still tappable. Mirrors the player board. */
+  chained: boolean
   isInBingoLine: boolean
   display: TileDisplay
   /** Demo only — a tile the presenter has lit up to draw the room's eye. */
@@ -362,8 +364,8 @@ function BingoTile({
   return (
     <button
       onClick={onClick}
-      title={task.title}
-      aria-label={task.title}
+      title={chained ? `${task.title} (locked)` : task.title}
+      aria-label={chained ? `${task.title} (locked)` : task.title}
       className={`bingo-glow relative rounded-xl overflow-hidden flex items-center justify-center aspect-square transition-all duration-200 hover:scale-105 active:scale-95 focus:outline-none${glowing ? ' bingo-glow-on' : ''}`}
       style={{
         backgroundColor: task.hex_code,
@@ -375,8 +377,16 @@ function BingoTile({
             : `0 0 0 3px white, 0 0 0 5px ${task.hex_code}, 0 6px 20px ${task.hex_code}88`
           : `0 3px 10px ${task.hex_code}55`,
         opacity: status === 'locked' ? 0.72 : 1,
+        filter: chained ? 'grayscale(0.85) brightness(0.8)' : undefined,
       }}
     >
+      {chained && (
+        <div className="absolute inset-0 bg-black/35 flex items-center justify-center z-10 pointer-events-none">
+          <div className="bg-white/85 rounded-full w-7 h-7 flex items-center justify-center shadow">
+            <span className="text-sm leading-none">🔒</span>
+          </div>
+        </div>
+      )}
       {/* The lit ring. Drawn as an overlay rather than a border so it sits
           inside the tile's rounded corners and never shifts the layout. */}
       {glowing && (
@@ -567,6 +577,10 @@ function BoardScreen({
   // stays lit regardless of what its (possibly shared) task's real status is.
   const getStatusAt = (taskId: string, slotIdx: number): TileStatus =>
     quickWinSlots.has(slotIdx) ? 'completed' : getStatus(taskId)
+  // Chained cards grey out until the demo team has completed the card they
+  // follow — same rule as the player board, read from the demo's own state.
+  const isChainLocked = (task: BingoTask) =>
+    !!task.prerequisite_task_id && scanState[task.prerequisite_task_id] !== 'completed'
 
   const slots = buildSlots(visibleTasks)
   const completedCount = slots.reduce(
@@ -726,6 +740,7 @@ function BoardScreen({
                     key={`${i}-${task.id}`}
                     task={task}
                     status={getStatusAt(task.id, i)}
+                    chained={isChainLocked(task)}
                     isInBingoLine={bingoSlots.has(i)}
                     display={tileDisplay}
                     glowing={glowSlots.has(i)}
@@ -798,12 +813,17 @@ const SampleTaskDetail = forwardRef<SampleTaskDetailHandle, {
   teamName: string
   marshalPassword: string
   completed: boolean
+  /** The chain around this card, resolved by the page from the demo's own
+   *  state: the card it unlocks after (and whether that is done), and the
+   *  card it unlocks. */
+  chain: { prev: BingoTask | null; locked: boolean; next: BingoTask | null }
+  onJump: (task: BingoTask) => void
   onComplete: () => void
   onUncomplete: () => void
   onClose: () => void
   onStep?: (s: DetailStep) => void
 }>(function SampleTaskDetail({
-  task, teamName, marshalPassword, completed, onComplete, onUncomplete, onClose, onStep,
+  task, teamName, marshalPassword, completed, chain, onJump, onComplete, onUncomplete, onClose, onStep,
 }, ref) {
   const { pages } = useBingoTaskPages(task.id)
   const { photos } = useBingoTaskPhotos(task.id)
@@ -815,6 +835,19 @@ const SampleTaskDetail = forwardRef<SampleTaskDetailHandle, {
   const [marshalInput, setMarshalInput] = useState('')
   const [marshalError, setMarshalError] = useState('')
   const [photoPreview, setPhotoPreview] = useState<string | null>(null)
+  // The demo keeps a submitted link on screen rather than sending it anywhere.
+  // Escape the Mall: the answer belongs to the riddle the team drew, so it is
+  // checked in the database rather than against anything held here.
+  const [guess, setGuess] = useState('')
+  const [guessBusy, setGuessBusy] = useState(false)
+  const [guessWrong, setGuessWrong] = useState(0)
+  const [riddleOk, setRiddleOk] = useState(false)
+  const [linkValue, setLinkValue] = useState('')
+  const [linkSent, setLinkSent] = useState('')
+  // Versus (demo): opponent picked from the sample groups, and the result.
+  const [opponent, setOpponent] = useState('')
+  const [versusWon, setVersusWon] = useState<boolean | null>(null)
+  const [versusSent, setVersusSent] = useState(false)
   const [photoSubmitted, setPhotoSubmitted] = useState(false)
   const [staged, setStaged] = useState<{ id: string; file: File; preview: string }[]>([])
   const inputs = effectiveInputs(task.task_type, task.completion_inputs)
@@ -833,6 +866,27 @@ const SampleTaskDetail = forwardRef<SampleTaskDetailHandle, {
   const aitbActivity = aitbBase ? aitbWithTimer(aitbBase, task.aitb_timer_minutes) : undefined
   const aitbTimerOn = task.aitb_timer_enabled !== false
   const [aitbWords, setAitbWords] = useState<string[]>([])
+
+  const needsDrawnAnswer = !!(inputs.answer && !task.answer_text && drawConfig)
+  const drawnPrompt = needsDrawnAnswer ? (aitbWords[0] || '') : ''
+  const riddleSolved = !needsDrawnAnswer || riddleOk
+
+  const checkDrawnAnswer = async () => {
+    const typed = guess.trim()
+    if (!typed || !drawnPrompt) return
+    setGuessBusy(true)
+    try {
+      const { data, error } = await supabase.rpc('check_draw_answer', {
+        p_task: task.id, p_prompt: drawnPrompt, p_guess: typed,
+      })
+      if (error) { alert('Could not check that answer: ' + error.message); return }
+      if (data === true) { setRiddleOk(true); setGuess(''); setGuessWrong(0) }
+      else setGuessWrong(n => n + 1)
+    } finally {
+      setGuessBusy(false)
+    }
+  }
+
   const [aitbStepsDone, setAitbStepsDone] = useState<number[]>([])
   // The demo has no check-in row to read a start time from, so the timer
   // just starts whenever this card is first opened.
@@ -1104,6 +1158,11 @@ const SampleTaskDetail = forwardRef<SampleTaskDetailHandle, {
           </div>
         )}
 
+
+        {/* A worked sample for the cards that are really camera tricks. */}
+        <CardSample title={task.title} color={task.hex_code} />
+
+
         {aitbActivity && (
           <div className="mb-8 mt-8 animate-slide-up">
             {/* Speed Edit Showdown works from a fixed set of target pictures. */}
@@ -1167,26 +1226,49 @@ const SampleTaskDetail = forwardRef<SampleTaskDetailHandle, {
         {/* Whatever this card deals the team — colours, a riddle,
             checkpoints. Sits after the instructions and before the AI
             tool links, so it reads in the order the team acts. */}
-              {(task.draw_count ?? 0) > 0 && (task.draw_style === 'list' || !task.draw_style) && (
-                <CardDrawPanel
-                  demo
-                  teamId="demo"
-                  taskId={task.id}
-                  count={task.draw_count!}
-                  heading={drawHeading(task.title, task.draw_count!)}
-                />
-              )}
-
-        {/* Helpful links */}
-        {links.length > 0 && (
-          <div className="mt-8 animate-slide-up">
-            <TaskLinkButtons links={links} hexCode={task.hex_code} heading="Use these links to complete your tasks" />
-          </div>
-        )}
+        {/* Helpful links — plus the chain's neighbours, as on the player
+            view. In-app hops go through onJump so the demo swaps cards
+            without leaving the page. */}
+        {(() => {
+          const submitted = completed || photoSubmitted || sentCount > 0 || !!linkSent || versusSent
+          const items: LinkItem[] = [...links]
+          const next = chain.next
+          if (next && !chain.locked && submitted) {
+            items.push({ id: 'chain-next', label: next.title, url: '', onSelect: () => onJump(next),
+              icon: '🎬', sub: completed ? 'Unlocked - your next card' : 'Next card - opens once approved' })
+          }
+          return items.length > 0 && (
+            <div className="mt-8 animate-slide-up">
+              <TaskLinkButtons links={items} hexCode={task.hex_code} heading="Use these links to complete your tasks" />
+            </div>
+          )
+        })()}
 
         {/* Complete Activity */}
         <div className="mt-8 animate-slide-up">
-          {task.is_bundle ? (
+          {chain.locked && chain.prev ? (
+            <>
+              <div className="p-5 rounded-3xl border-2 border-amber-400/50 bg-amber-400/10 text-center">
+                <div className="text-4xl mb-2">🔒</div>
+                <p className="text-amber-200 font-black text-base leading-snug">
+                  {task.completion_warning || `Only teams that have completed ${chain.prev.title} can unlock ${task.title}.`}
+                </p>
+                <p className="text-white/50 text-xs font-bold mt-2">This card opens on its own once that one is approved.</p>
+              </div>
+              {/* The way to the card that opens this one, right under the reason it is shut. */}
+              <div className="mt-4">
+                <TaskLinkButtons hexCode={task.hex_code} heading="Do this card first"
+                  links={[{ id: 'chain-prev', label: chain.prev.title, url: '', onSelect: () => onJump(chain.prev!),
+                    icon: '🔒', sub: 'Complete this card first' }]} />
+              </div>
+              <button
+                onClick={onClose}
+                className="mt-3 w-full py-3 rounded-2xl text-white/70 font-bold border border-white/15 hover:bg-white/5 transition-colors"
+              >
+                ← Back to Board
+              </button>
+            </>
+          ) : task.is_bundle ? (
             <>
               <DemoBundleCard task={task} marshalPassword={marshalPassword} />
               <button
@@ -1296,7 +1378,16 @@ const SampleTaskDetail = forwardRef<SampleTaskDetailHandle, {
                 )}
 
                 {/* Photo: submit → marshal approve (demo) */}
-                {(inputs.photo || inputs.video) && (
+                {(inputs.photo || inputs.video) && !riddleSolved && drawnPrompt && (
+                  <div className="p-4 rounded-2xl bg-white/5 border border-white/15 text-center">
+                    <div className="text-2xl mb-1">🔒</div>
+                    <p className="text-white/60 text-sm font-bold">
+                      Answer the riddle first — then you can send your clip.
+                    </p>
+                  </div>
+                )}
+
+                {(inputs.photo || inputs.video) && riddleSolved && (
                   <>
                     <p className="text-white font-black text-lg text-center mb-4">{fileHeading(inputs)}</p>
                     <p className="text-white/50 text-sm text-center mb-5">
@@ -1383,7 +1474,167 @@ const SampleTaskDetail = forwardRef<SampleTaskDetailHandle, {
                   </>
                 )}
 
+                {/* Versus: who they battled and how it went — same fields as
+                    the player view, approved with the demo marshal button. */}
+                {inputs.versus && (
+                  <div className="mb-6">
+                    <p className="text-white font-black text-lg text-center mb-1">⚔️ Who did you battle?</p>
+                    <p className="text-white/50 text-sm text-center mb-4">Pick the team and the result - the admin approves it.</p>
+                    {versusSent ? (
+                      <div className="p-4 rounded-2xl bg-green-400/15 border border-green-400/40 text-center">
+                        <div className="text-3xl mb-2">⏳</div>
+                        <p className="text-green-300 font-black">Result submitted!</p>
+                        <p className="text-green-300/60 text-xs mt-1 mb-3">vs {opponent} · {versusWon ? 'won' : 'lost'} · waiting for admin review</p>
+                        <button
+                          onClick={onComplete}
+                          className="w-full py-3 rounded-2xl text-white font-black uppercase tracking-wider transition-all active:scale-95"
+                          style={{ backgroundColor: task.hex_code, boxShadow: `0 4px 0 ${task.hex_code}88` }}
+                        >
+                          👮 Approve as marshal (demo)
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="flex flex-col gap-3">
+                        <select
+                          value={opponent}
+                          onChange={e => setOpponent(e.target.value)}
+                          className="w-full px-4 py-3 rounded-2xl bg-white/10 border-2 border-white/25 text-white text-sm font-bold focus:outline-none focus:border-white/50"
+                          style={{ colorScheme: 'dark' }}
+                        >
+                          <option value="">Select the team you battled…</option>
+                          {DEMO_GROUPS.filter(g => g !== teamName).map(g => <option key={g} value={g}>{g}</option>)}
+                        </select>
+                        <div className="grid grid-cols-2 gap-2">
+                          {([true, false] as const).map(won => (
+                            <button key={String(won)} type="button" onClick={() => setVersusWon(won)}
+                              className="py-3 rounded-2xl font-black uppercase tracking-wider text-sm border-2 transition-all active:scale-95"
+                              style={versusWon === won
+                                ? { background: won ? '#4ade80' : '#f87171', borderColor: 'transparent', color: '#000' }
+                                : { background: 'rgba(255,255,255,0.06)', borderColor: 'rgba(255,255,255,0.2)', color: 'rgba(255,255,255,0.7)' }}>
+                              {won ? '🏆 We won' : '😅 We lost'}
+                            </button>
+                          ))}
+                        </div>
+                        <button
+                          onClick={() => setVersusSent(true)}
+                          disabled={!opponent || versusWon === null}
+                          className="w-full py-3.5 rounded-2xl font-black uppercase tracking-wider transition-all active:scale-95 disabled:opacity-40"
+                          style={{ backgroundColor: task.hex_code, color: '#000' }}
+                        >
+                          Submit result for approval
+                        </button>
+                        <p className="text-white/40 text-xs font-bold text-center">
+                          Only the team that started the challenge sends this. One battle per team on this card.
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 {/* Answer: letter boxes */}
+                {/* Link: paste where the thing you built lives */}
+                {inputs.link && (
+                  <>
+                    <p className="text-white font-black text-lg text-center mb-4">🔗 Submit Your Link</p>
+                    <p className="text-white/50 text-sm text-center mb-5">
+                      Paste the address of what you built — a marshal opens it and approves.
+                    </p>
+                    {linkSent ? (
+                      <div className="p-4 rounded-2xl bg-green-400/15 border border-green-400/40 text-center">
+                        <div className="text-3xl mb-2">⏳</div>
+                        <p className="text-green-300 font-black">Link submitted!</p>
+                        <p className="text-green-300/60 text-xs mt-1 mb-3 break-all">{linkSent}</p>
+                        <button
+                          onClick={onComplete}
+                          className="w-full py-3 rounded-2xl text-white font-black uppercase tracking-wider transition-all active:scale-95"
+                          style={{ backgroundColor: task.hex_code, boxShadow: `0 4px 0 ${task.hex_code}88` }}
+                        >
+                          👮 Approve as marshal (demo)
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="flex flex-col gap-3">
+                        <input
+                          type="url"
+                          inputMode="url"
+                          value={linkValue}
+                          onChange={e => setLinkValue(e.target.value)}
+                          placeholder="https://…"
+                          className="w-full px-4 py-3 rounded-2xl bg-white/10 border-2 border-white/25 text-white placeholder-white/30 text-sm font-bold focus:outline-none focus:border-white/50"
+                        />
+                        <button
+                          onClick={() => {
+                            const url = linkValue.trim()
+                            if (!/^https?:\/\/\S+\.\S+/i.test(url)) {
+                              alert('That does not look like a link. It should start with https:// and point somewhere.')
+                              return
+                            }
+                            setLinkSent(url)
+                          }}
+                          disabled={!linkValue.trim()}
+                          className="w-full py-3.5 rounded-2xl font-black uppercase tracking-wider transition-all active:scale-95 disabled:opacity-40"
+                          style={{ backgroundColor: task.hex_code, color: '#000' }}
+                        >
+                          Submit link for approval
+                        </button>
+                        <p className="text-white/40 text-xs font-bold text-center">
+                          Make sure the link opens for anyone — not just your own account.
+                        </p>
+                      </div>
+                    )}
+                  </>
+                )}
+
+                {needsDrawnAnswer && !drawnPrompt && (
+                  <div className="p-4 rounded-2xl bg-white/5 border border-white/15 text-center">
+                    <div className="text-2xl mb-1">🎲</div>
+                    <p className="text-white/60 text-sm font-bold">Draw your riddle above to begin.</p>
+                  </div>
+                )}
+
+                {drawnPrompt && (
+                  <>
+                    <p className="text-white font-black text-lg text-center mb-1">🔑 What is it?</p>
+                    <p className="text-white/50 text-sm text-center mb-4">
+                      Solve your riddle, then type the place. Wrong guesses cost nothing — keep going.
+                    </p>
+                    {riddleOk ? (
+                      <div className="p-4 rounded-2xl bg-green-400/15 border border-green-400/40 text-center mb-4">
+                        <div className="text-3xl mb-2">✅</div>
+                        <p className="text-green-300 font-black">Cracked it!</p>
+                        <p className="text-green-300/60 text-sm mt-1">
+                          Now film your reaction at the place — doing what the riddle describes.
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="flex flex-col gap-3 mb-4">
+                        <input
+                          type="text"
+                          value={guess}
+                          onChange={e => setGuess(e.target.value)}
+                          onKeyDown={e => { if (e.key === 'Enter') void checkDrawnAnswer() }}
+                          placeholder="Type the place…"
+                          autoComplete="off"
+                          className="w-full px-4 py-3 rounded-2xl bg-white/10 border-2 border-white/25 text-white placeholder-white/30 text-center text-base font-bold focus:outline-none focus:border-white/50"
+                        />
+                        <button
+                          onClick={() => void checkDrawnAnswer()}
+                          disabled={guessBusy || !guess.trim()}
+                          className="w-full py-3.5 rounded-2xl font-black uppercase tracking-wider transition-all active:scale-95 disabled:opacity-40"
+                          style={{ backgroundColor: task.hex_code, color: '#000' }}
+                        >
+                          {guessBusy ? 'Checking…' : 'Check my answer'}
+                        </button>
+                        {guessWrong > 0 && (
+                          <p className="text-center text-sm font-bold text-amber-300">
+                            Not that one — try again{guessWrong > 2 ? '. Tap the hint above if you are stuck.' : '.'}
+                          </p>
+                        )}
+                      </div>
+                    )}
+                  </>
+                )}
+
                 {inputs.answer && (
                   <>
                     {task.answer_question && (
@@ -1487,7 +1738,7 @@ const SampleTaskDetail = forwardRef<SampleTaskDetailHandle, {
               </div>
 
               {/* Optional evidence photo for tasks that don't already collect media */}
-              {!inputs.photo && !inputs.video && (
+              {!inputs.photo && !inputs.video && !inputs.link && !inputs.versus && (
                 <div className="mt-4 rounded-3xl p-5 border-2 border-white/15 bg-black/30">
                   <p className="text-white font-black text-base text-center mb-1">📸 Optional Photo</p>
                   <p className="text-white/50 text-xs text-center mb-4">Attach an image as evidence — your marshal will review it.</p>
@@ -1790,6 +2041,12 @@ function SampleProjector() {
           teamName={teamName ?? 'Sample Team'}
           marshalPassword={marshalPassword}
           completed={scanState[openTask.id] === 'completed'}
+          chain={{
+            prev: gridTasks.find(t => t.id === openTask.prerequisite_task_id) ?? null,
+            locked: !!openTask.prerequisite_task_id && scanState[openTask.prerequisite_task_id] !== 'completed',
+            next: gridTasks.find(t => t.prerequisite_task_id === openTask.id) ?? null,
+          }}
+          onJump={handleOpenTask}
           onComplete={() => markComplete(openTask.id)}
           onUncomplete={() => markUncomplete(openTask.id)}
           onClose={() => setOpenTask(null)}

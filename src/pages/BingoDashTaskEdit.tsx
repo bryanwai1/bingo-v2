@@ -7,7 +7,6 @@ import { useTaskLinks } from '../hooks/useTaskLinks'
 import { BingoAdminPhotoUpload } from '../components/BingoAdminPhotoUpload'
 import { SignSpliceAdminPanel } from '../components/SignSpliceAdminPanel'
 import { BreakoutHuntAdminPanel } from '../components/BreakoutHuntAdminPanel'
-import { CardDrawAdminPanel } from '../components/CardDrawAdminPanel'
 import { PageForm } from '../components/PageForm'
 import { InstructionPage } from '../components/InstructionPage'
 import { TaskLinksEditor } from '../components/TaskLinksEditor'
@@ -71,14 +70,19 @@ export function BingoDashTaskEdit() {
     setTask(prev => (prev ? { ...prev, task_type: type as typeof prev.task_type, completion_inputs: next } : prev))
     const patch: Record<string, unknown> = { task_type: type, completion_inputs: next }
     // Dropping the typed answer clears the question with it.
-    if (!next.answer) { patch.answer_question = null; patch.answer_text = null }
+    if (!next.answer) { patch.answer_question = null; patch.answer_text = null; patch.answer_min = null }
     const { error } = await supabase.from('bingo_tasks').update(patch).eq('id', task.id)
     if (error) alert('Failed to save: ' + error.message)
   }
   const [answerQuestion, setAnswerQuestion] = useState('')
   const [answerText, setAnswerText] = useState('')
+  // Number answer with a floor; '' = normal letter-box answer.
+  const [answerMin, setAnswerMin] = useState('')
   const [answerSaving, setAnswerSaving] = useState(false)
   const [completionWarning, setCompletionWarning] = useState('')
+  // Chained cards: which card on this board has to be completed first.
+  const [prereqId, setPrereqId] = useState<string>('')
+  const [boardCards, setBoardCards] = useState<{ id: string; title: string }[]>([])
   const [warningSaving, setWarningSaving] = useState(false)
   const [mapsUrl, setMapsUrl] = useState('')
   const [mapsLabel, setMapsLabel] = useState('')
@@ -103,8 +107,12 @@ export function BingoDashTaskEdit() {
         setInputs(effectiveInputs(data.task_type, data.completion_inputs))
         setAnswerQuestion(data.answer_question ?? '')
         setAnswerText(data.answer_text ?? '')
+        setAnswerMin(data.answer_min != null ? String(data.answer_min) : '')
         setCompletionWarning(data.completion_warning ?? '')
+        setPrereqId(data.prerequisite_task_id ?? '')
         setMapsUrl(data.maps_url ?? '')
+        supabase.from('bingo_tasks').select('id, title').eq('section_id', data.section_id).neq('id', data.id).order('title')
+          .then(({ data: rows }) => setBoardCards((rows ?? []) as { id: string; title: string }[]))
         setMapsLabel(data.maps_label ?? '')
       }
     })
@@ -136,10 +144,14 @@ export function BingoDashTaskEdit() {
     if (!task) return
     setAnswerSaving(true)
     const cleanedAnswerText = answerText.split('\n').map(l => l.trim()).filter(Boolean).join('\n')
+    // Gated on the answer INPUT, not the legacy task_type: a photo + answer
+    // card is typed 'photo' and still has a question to keep.
+    const min = answerMin.trim() === '' ? null : Math.max(0, Math.round(Number(answerMin)))
     const payload = {
       task_type: taskType,
-      answer_question: taskType === 'answer' ? answerQuestion.trim() || null : null,
-      answer_text: taskType === 'answer' ? cleanedAnswerText || null : null,
+      answer_question: inputs.answer ? answerQuestion.trim() || null : null,
+      answer_min: inputs.answer && min != null && Number.isFinite(min) ? min : null,
+      answer_text: inputs.answer && min == null ? cleanedAnswerText || null : null,
     }
     const { error } = await supabase.from('bingo_tasks').update(payload).eq('id', task.id)
     setAnswerSaving(false)
@@ -563,6 +575,7 @@ export function BingoDashTaskEdit() {
                         />
                         <span className="text-sm font-bold text-gray-700">
                           {INPUT_LABELS[kind].emoji} {INPUT_LABELS[kind].label}
+                          {kind === 'versus' && <span className="ml-2 text-xs font-medium text-gray-400">team picks who they battled + won/lost</span>}
                         </span>
                       </label>
                       {rule && (
@@ -641,6 +654,19 @@ export function BingoDashTaskEdit() {
                 </div>
 
                 <div className="mb-5">
+                  <label className="block text-sm font-semibold text-gray-700 mb-1.5">Minimum number (auto-pass)</label>
+                  <input
+                    type="number" min={0} value={answerMin}
+                    onChange={e => setAnswerMin(e.target.value)}
+                    placeholder="e.g. 18000 - leave empty for a text answer"
+                    className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-violet-500"
+                  />
+                  <p className="text-xs text-gray-400 mt-1">
+                    Set this and the participant types one number; the server passes it when it is at least this value. The answers below are then ignored.
+                  </p>
+                </div>
+
+                <div className={`mb-5${answerMin.trim() ? ' opacity-40 pointer-events-none' : ''}`}>
                   <label className="block text-sm font-semibold text-gray-700 mb-1.5">Answers (one per line)</label>
                   <textarea
                     value={answerText}
@@ -692,20 +718,26 @@ export function BingoDashTaskEdit() {
 
         {task.task_type === 'breakout_hunt' && <BreakoutHuntAdminPanel taskId={task.id} />}
 
-        {/* The older stand-alone per-team draw. A card that uses one of the
-            draw designs deals through its slots instead, so this shows only
-            for a card that has no design chosen. */}
-        {(task.draw_style === 'list' || (!task.draw_style && (task.draw_count ?? 0) > 0)) && (
-        <CardDrawAdminPanel
-          task={task}
-          onChange={patch => setTask(prev => (prev ? { ...prev, ...patch } : prev))}
-        />
-        )}
-
-        {/* Completion Warning (for Standard/Marshal mode) */}
+        {/* Completion Warning / lock message, and the chain it belongs to */}
         <div className="bg-white rounded-xl border border-gray-200 p-6 mt-6">
+          <h2 className="text-lg font-bold text-gray-900 mb-1">Unlocks after</h2>
+          <p className="text-xs text-gray-400 mb-3">
+            Pick a card a team must complete before this one opens. Locked teams see the warning below and a button to that card.
+            Leave as “none” for a normal card.
+          </p>
+          <select
+            value={prereqId}
+            onChange={e => setPrereqId(e.target.value)}
+            className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-violet-500 mb-6"
+          >
+            <option value="">— none (always open) —</option>
+            {boardCards.map(c => <option key={c.id} value={c.id}>{c.title}</option>)}
+          </select>
+
           <h2 className="text-lg font-bold text-gray-900 mb-1">Completion Warning</h2>
-          <p className="text-xs text-gray-400 mb-4">Shown above the "Complete Challenge" button in Standard (Marshal) mode.</p>
+          <p className="text-xs text-gray-400 mb-4">
+            Shown above the "Complete Challenge" button in Standard (Marshal) mode, and as the lock message on a chained card.
+          </p>
           <textarea
             value={completionWarning}
             onChange={e => setCompletionWarning(e.target.value)}
@@ -719,10 +751,11 @@ export function BingoDashTaskEdit() {
               setWarningSaving(true)
               const { error } = await supabase.from('bingo_tasks').update({
                 completion_warning: completionWarning.trim() || null,
+                prerequisite_task_id: prereqId || null,
               }).eq('id', task.id)
               setWarningSaving(false)
               if (error) { alert('Failed to save: ' + error.message); return }
-              setTask({ ...task, completion_warning: completionWarning.trim() || null })
+              setTask({ ...task, completion_warning: completionWarning.trim() || null, prerequisite_task_id: prereqId || null })
             }}
             disabled={warningSaving}
             className="mt-3 px-6 py-2.5 bg-violet-600 text-white rounded-lg hover:bg-violet-700 text-sm font-bold transition-colors disabled:opacity-50"

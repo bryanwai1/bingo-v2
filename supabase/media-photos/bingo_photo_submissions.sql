@@ -1,13 +1,19 @@
--- bingo_photo_submissions: team-uploaded evidence for photo/video/media
+-- bingo_photo_submissions: team-submitted evidence for photo/video/media/link
 -- cards, reviewed (approved/rejected) from the admin Photos tab; approval
 -- completes the team's tile. Source: media-photos/20260421_bingo_features.sql,
--- widened by 024_photo_submission_cascade.sql, 034_video_submissions.sql.
+-- widened by 024_photo_submission_cascade.sql, 034_video_submissions.sql,
+-- 039_link_submissions.sql.
 
+-- The three foreign keys below were declared here from the start but were
+-- never actually present in the live database; 040_submission_fks.sql adds
+-- them for real, after clearing the orphans the gap allowed in.
 create table public.bingo_photo_submissions (
   id          uuid primary key default gen_random_uuid(),
   team_id     uuid not null references public.bingo_teams(id) on delete cascade,
   task_id     uuid not null references public.bingo_tasks(id) on delete cascade,
   scan_id     uuid references public.bingo_scans(id) on delete set null,
+  -- The uploaded file, or — when media_type is 'link' — the URL the team
+  -- submitted. Nothing is stored for a link beyond the address itself.
   photo_url   text not null,
   status      text not null default 'pending' check (status in ('pending', 'approved', 'rejected')),
   created_at  timestamptz not null default now(),
@@ -15,8 +21,17 @@ create table public.bingo_photo_submissions (
   -- (tracked) media-photos/034_video_submissions.sql
   -- What kind of file this holds, so the admin knows to render a player
   -- rather than an <img>. Existing rows before this column are all photos.
+  -- (tracked) media-photos/039_link_submissions.sql — 'link' added, for cards
+  -- whose deliverable lives somewhere else (a built tool, a shared doc).
   media_type  text not null default 'image'
-    constraint bingo_photo_submissions_media_type_check check (media_type in ('image', 'video')),
+    constraint bingo_photo_submissions_media_type_check
+      -- (tracked) media-photos/043_versus_submissions.sql — 'versus' added.
+      check (media_type in ('image', 'video', 'link', 'versus')),
+
+  -- (tracked) media-photos/043_versus_submissions.sql
+  -- Versus rows only: the team they battled and whether they won.
+  opponent_id uuid references public.bingo_teams(id) on delete set null,
+  versus_won  boolean,
 
   -- (tracked) breakout-hunt/023_breakout_review.sql — see
   -- breakout-hunt/bingo_breakout_puzzles.sql for the FK, added there once

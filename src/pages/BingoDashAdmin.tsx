@@ -36,8 +36,38 @@ function extFromUrl(url: string): string {
   return match ? match[1].toLowerCase() : 'jpg'
 }
 
-function SubmissionThumb({ url, fill = false, video = false }: { url: string; fill?: boolean; video?: boolean }) {
+function SubmissionThumb({ url, fill = false, video = false, link = false, versus }: {
+  url: string; fill?: boolean; video?: boolean; link?: boolean
+  /** A battle claim: nothing to look at but who they fought and how it went. */
+  versus?: { opponent: string; won: boolean | null }
+}) {
   const [broken, setBroken] = useState(false)
+  if (versus) {
+    return (
+      <div className={`${fill ? 'w-full aspect-square' : 'w-28 h-28'} flex flex-col items-center justify-center gap-1 rounded-lg border a-border bg-white/5 px-2 text-center flex-shrink-0`}>
+        <span className="text-2xl">⚔️</span>
+        <span className="a-text-3 text-[9px] font-bold uppercase tracking-wider">battled</span>
+        <span className="a-text text-[12px] font-black leading-tight line-clamp-2">{versus.opponent}</span>
+        <span className={`text-[11px] font-black ${versus.won ? 'text-green-500' : 'text-red-400'}`}>
+          {versus.won == null ? 'result unknown' : versus.won ? '🏆 says they won' : '😅 says they lost'}
+        </span>
+      </div>
+    )
+  }
+  if (link) {
+    // Nothing to render but the address — show it, and let the reviewer open it.
+    let host = url
+    try { host = new URL(url).hostname.replace(/^www\./, '') } catch { /* keep the raw string */ }
+    return (
+      <a href={url} target="_blank" rel="noopener noreferrer"
+        className={`${fill ? 'w-full aspect-square' : 'w-28 h-28'} flex flex-col items-center justify-center gap-1 rounded-lg border a-border bg-white/5 hover:bg-white/10 transition-colors px-2 text-center flex-shrink-0`}
+        title={url}>
+        <span className="text-2xl">🔗</span>
+        <span className="a-text text-[11px] font-bold break-all leading-tight line-clamp-2">{host}</span>
+        <span className="a-text-3 text-[9px] font-bold uppercase tracking-wider">Open link ↗</span>
+      </a>
+    )
+  }
   if (video && !broken) {
     // Inline so a reviewer can watch without leaving the queue; the link still
     // opens the file full size.
@@ -1689,6 +1719,10 @@ export function BingoDashAdmin() {
       // silently reverted to a solo task would be a nasty surprise mid-event.
       is_contest: task.is_contest, contest_game: task.contest_game,
       contest_bonus: task.contest_bonus,
+      // Newer per-card settings travel too — a copy that quietly dropped its
+      // inputs would show no submit UI at all.
+      completion_inputs: task.completion_inputs, photo_multiple: task.photo_multiple,
+      prerequisite_task_id: task.prerequisite_task_id ?? null,
       sort_order: Math.max(25, tasks.filter(t => t.section_id === opts.sectionId).length + 25),
     }).select().single()
     if (error || !created) throw new Error(error?.message ?? 'Failed to copy card')
@@ -2149,6 +2183,8 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
           const done = {
             photo: approved.some(x => (x.media_type ?? 'image') === 'image'),
             video: approved.some(x => x.media_type === 'video'),
+            link: approved.some(x => x.media_type === 'link'),
+            versus: approved.some(x => x.media_type === 'versus'),
             answer: scan?.answer_ok ?? false,
           }
           if (isComplete(inputs, done)) scansToComplete.push(sub.scan_id)
@@ -5003,7 +5039,8 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                             style={{ borderColor: isSel ? '#dc2626' : ring, background: 'var(--a-surface)' }}
                           >
                             <div className="a-surface-2 relative">
-                              <SubmissionThumb url={sub.photo_url} fill video={sub.media_type === 'video'} />
+                              <SubmissionThumb url={sub.photo_url} fill video={sub.media_type === 'video'} link={sub.media_type === 'link'}
+                          versus={sub.media_type === 'versus' ? { opponent: teams.find(t => t.id === sub.opponent_id)?.name ?? 'Unknown team', won: sub.versus_won ?? null } : undefined} />
                               {isSel && (
                                 <span className="absolute top-1 right-1 text-[10px] font-black text-white bg-red-600 px-1.5 py-0.5 rounded">
                                   WRONG
@@ -5044,7 +5081,8 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                           click-through per submission, and at an event that is
                           a queue of people waiting while you open each one. */}
                       <div className="a-surface-2">
-                        <SubmissionThumb url={sub.photo_url} fill video={sub.media_type === 'video'} />
+                        <SubmissionThumb url={sub.photo_url} fill video={sub.media_type === 'video'} link={sub.media_type === 'link'}
+                          versus={sub.media_type === 'versus' ? { opponent: teams.find(t => t.id === sub.opponent_id)?.name ?? 'Unknown team', won: sub.versus_won ?? null } : undefined} />
                       </div>
 
                       <div className="p-3">

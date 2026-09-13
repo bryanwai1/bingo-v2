@@ -343,15 +343,17 @@ function JoinScreen({
 /* ── Bingo Tile ──────────────────────────────────────────────────────────────── */
 
 function BingoTile({
-  task, status, isInBingoLine, display, onClick,
+  task, status, chained, isInBingoLine, display, onClick,
 }: {
-  task: BingoTask; status: TileStatus; isInBingoLine: boolean; display: TileDisplay; onClick: () => void
+  // chained: a card whose prerequisite this team has not finished — still
+  // tappable, but greyed with a padlock.
+  task: BingoTask; status: TileStatus; chained: boolean; isInBingoLine: boolean; display: TileDisplay; onClick: () => void
 }) {
   return (
     <button
       onClick={onClick}
-      title={task.title}
-      aria-label={task.title}
+      title={chained ? `${task.title} (locked)` : task.title}
+      aria-label={chained ? `${task.title} (locked)` : task.title}
       className="relative rounded-lg overflow-hidden flex items-center justify-center aspect-square transition-all duration-200 active:scale-95 focus:outline-none"
       style={{
         backgroundColor: task.hex_code,
@@ -361,8 +363,16 @@ function BingoTile({
             : `0 0 0 2px white, 0 0 0 3px ${task.hex_code}`
           : 'none',
         opacity: status === 'locked' ? 0.65 : 1,
+        filter: chained ? 'grayscale(0.85) brightness(0.8)' : undefined,
       }}
     >
+      {chained && (
+        <div className="absolute inset-0 bg-black/35 flex items-center justify-center z-10 pointer-events-none">
+          <div className="bg-white/85 rounded-full w-5 h-5 flex items-center justify-center">
+            <span className="text-[11px] leading-none">🔒</span>
+          </div>
+        </div>
+      )}
       {isInBingoLine && status === 'completed' && (
         <div className="absolute inset-0 bg-yellow-300/10 z-0 pointer-events-none" />
       )}
@@ -530,6 +540,10 @@ function BoardScreen({
     if (scans.some(s => matches(s) || legacyMatches(s))) return 'scanned'
     return 'locked'
   }
+  // Chained cards grey out until the team has finished the card they follow.
+  const isChainLocked = (task: BingoTask) =>
+    !!task.prerequisite_task_id &&
+    !scans.some(s => s.task_id === task.prerequisite_task_id && s.completed)
   const completedCount = gridTasks.filter(t => getStatus(t) === 'completed').length
 
   const slots: (BingoTask | null)[] = (() => {
@@ -676,6 +690,7 @@ function BoardScreen({
                     key={task.placement_id ?? task.id}
                     task={task}
                     status={getStatus(task)}
+                    chained={isChainLocked(task)}
                     isInBingoLine={bingoSlots.has(i)}
                     display={tileDisplay}
                     onClick={() => navigate(`/bingo-dash/task/${task.id}${task.placement_id ? `?box=${task.placement_id}` : ''}`)}

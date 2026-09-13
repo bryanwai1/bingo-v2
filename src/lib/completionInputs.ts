@@ -5,7 +5,7 @@
 // is a person vouching for the whole card, not one input among several — and
 // nor are the cards with their own flow (sign_splice, breakout_hunt).
 
-export const INPUT_KINDS = ['photo', 'video', 'answer'] as const
+export const INPUT_KINDS = ['photo', 'video', 'link', 'answer', 'versus'] as const
 export type InputKind = (typeof INPUT_KINDS)[number]
 
 export type InputRule = 'required' | 'optional'
@@ -14,7 +14,11 @@ export type CompletionInputs = Partial<Record<InputKind, InputRule>>
 export const INPUT_LABELS: Record<InputKind, { label: string; emoji: string }> = {
   photo: { label: 'Photo', emoji: '📸' },
   video: { label: 'Video', emoji: '🎬' },
+  link: { label: 'Link', emoji: '🔗' },
   answer: { label: 'Text', emoji: '✏️' },
+  // Battle cards: the team names who it fought and whether it won; the admin
+  // approves that claim like any other submission.
+  versus: { label: 'Versus', emoji: '⚔️' },
 }
 
 /** Read the column, ignoring anything that isn't a kind the app knows. */
@@ -91,8 +95,12 @@ export type InputProgress = {
   photo?: boolean
   /** An approved video submission exists. */
   video?: boolean
+  /** An approved link submission exists. */
+  link?: boolean
   /** The typed answer has been accepted. */
   answer?: boolean
+  /** An approved versus (opponent + result) submission exists. */
+  versus?: boolean
 }
 
 /**

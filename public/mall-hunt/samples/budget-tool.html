@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Mission Control Budget — sample tool</title>
+<style>
+  :root {
+    --bg: #17132a;
+    --panel: rgba(255,255,255,0.06);
+    --line: rgba(255,255,255,0.14);
+    --ink: #f4f2ff;
+    --dim: rgba(244,242,255,0.55);
+    --accent: #6C63D9;
+    --over: #f87171;
+    --under: #4ade80;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 18px;
+    background: var(--bg); color: var(--ink);
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  h1 { font-size: 17px; margin: 0 0 2px; letter-spacing: -0.01em; }
+  .sub { color: var(--dim); font-size: 12px; margin: 0 0 16px; }
+
+  .row {
+    display: grid; grid-template-columns: 1fr auto; gap: 4px 12px;
+    align-items: center;
+    padding: 10px 0; border-bottom: 1px solid var(--line);
+  }
+  .name { font-weight: 700; font-size: 14px; }
+  .hint { grid-column: 1 / -1; color: var(--dim); font-size: 11px; margin-top: -2px; }
+  input[type=range] { grid-column: 1 / -1; width: 100%; accent-color: var(--accent); margin: 6px 0 0; }
+  .amount {
+    font-variant-numeric: tabular-nums; font-weight: 800; font-size: 14px;
+    min-width: 82px; text-align: right;
+  }
+
+  .total {
+    display: flex; align-items: baseline; justify-content: space-between;
+    margin-top: 16px; padding-top: 14px; border-top: 2px solid var(--accent);
+  }
+  .total .label { font-weight: 800; font-size: 15px; }
+  .total .value { font-weight: 800; font-size: 20px; font-variant-numeric: tabular-nums; }
+  .left { font-size: 12px; font-weight: 700; margin-top: 6px; }
+  .ok { color: var(--under); }
+  .bad { color: var(--over); }
+
+  .bar { height: 8px; border-radius: 99px; background: var(--panel); overflow: hidden; margin-top: 10px; }
+  .bar > span { display: block; height: 100%; background: var(--accent); transition: width .2s ease, background .2s ease; }
+  .bar.over > span { background: var(--over); }
+
+  button {
+    margin-top: 16px; width: 100%; padding: 10px;
+    border: 1px solid var(--line); border-radius: 12px;
+    background: var(--panel); color: var(--ink);
+    font-weight: 700; font-size: 13px; cursor: pointer;
+  }
+  button:hover { border-color: var(--accent); }
+  footer { color: var(--dim); font-size: 11px; margin-top: 14px; line-height: 1.5; }
+</style>
+</head>
+<body>
+  <h1>🎬 Production Budget</h1>
+  <p class="sub">Drag a slider — the total works itself out. Pretend money, RM500 to spend.</p>
+
+  <div id="rows"></div>
+
+  <div class="bar" id="bar"><span id="fill"></span></div>
+
+  <div class="total">
+    <span class="label">Total</span>
+    <span class="value" id="total">RM 0</span>
+  </div>
+  <p class="left" id="left"></p>
+
+  <button id="reset">Reset to an even split</button>
+
+  <footer>
+    A sample of what this card asks you to build. Yours can look completely
+    different — it just has to split the budget across categories and total it
+    on its own.
+  </footer>
+
+<script>
+  var BUDGET = 500;
+  var CATEGORIES = [
+    { name: 'Props',     hint: 'Umbrella sword, cushion shield', value: 150 },
+    { name: 'Cast',      hint: 'Four crew, snacks and water',    value: 120 },
+    { name: 'Effects',   hint: 'AI generation credits',          value: 130 },
+    { name: 'Marketing', hint: 'Poster prints, captions',        value: 100 }
+  ];
+
+  var rowsEl  = document.getElementById('rows');
+  var totalEl = document.getElementById('total');
+  var leftEl  = document.getElementById('left');
+  var fillEl  = document.getElementById('fill');
+  var barEl   = document.getElementById('bar');
+
+  CATEGORIES.forEach(function (cat, i) {
+    var row = document.createElement('div');
+    row.className = 'row';
+    row.innerHTML =
+      '<span class="name">' + cat.name + '</span>' +
+      '<span class="amount" id="amt' + i + '">RM ' + cat.value + '</span>' +
+      '<span class="hint">' + cat.hint + '</span>' +
+      '<input type="range" min="0" max="' + BUDGET + '" step="10" value="' + cat.value + '" id="sld' + i + '" aria-label="' + cat.name + '">';
+    rowsEl.appendChild(row);
+
+    document.getElementById('sld' + i).addEventListener('input', function (e) {
+      CATEGORIES[i].value = Number(e.target.value);
+      render();
+    });
+  });
+
+  function render() {
+    var total = CATEGORIES.reduce(function (sum, c) { return sum + c.value; }, 0);
+    CATEGORIES.forEach(function (c, i) {
+      document.getElementById('amt' + i).textContent = 'RM ' + c.value;
+      document.getElementById('sld' + i).value = c.value;
+    });
+    totalEl.textContent = 'RM ' + total;
+
+    var diff = BUDGET - total;
+    if (diff === 0) {
+      leftEl.textContent = 'Exactly on budget.';
+      leftEl.className = 'left ok';
+    } else if (diff > 0) {
+      leftEl.textContent = 'RM ' + diff + ' still unspent.';
+      leftEl.className = 'left ok';
+    } else {
+      leftEl.textContent = 'RM ' + Math.abs(diff) + ' over budget.';
+      leftEl.className = 'left bad';
+    }
+
+    var pct = Math.min(100, (total / BUDGET) * 100);
+    fillEl.style.width = pct + '%';
+    barEl.className = total > BUDGET ? 'bar over' : 'bar';
+  }
+
+  document.getElementById('reset').addEventListener('click', function () {
+    var even = Math.floor(BUDGET / CATEGORIES.length / 10) * 10;
+    CATEGORIES.forEach(function (c) { c.value = even; });
+    render();
+  });
+
+  render();
+</script>
+</body>
+</html>

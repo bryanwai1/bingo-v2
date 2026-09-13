@@ -15,6 +15,8 @@ create table public.bingo_tasks (
   in_grid             boolean not null default false,
   category            text,
   points              int not null default 0,
+  -- (tracked) core-tables/041_task_prerequisite.sql — was listed here but
+  -- only actually created by 041.
   completion_warning  text,
   require_marshal     boolean not null default false,
   led                 text,
@@ -34,6 +36,9 @@ create table public.bingo_tasks (
     check (task_type in ('standard', 'answer', 'photo', 'video', 'media', 'sign_splice', 'breakout_hunt')),
   answer_question     text,
   answer_text         text,
+  -- (tracked) core-tables/042_answer_min.sql — number answer that passes
+  -- when value >= answer_min (checked by check_answer_min).
+  answer_min          integer,
 
   -- (tracked) media-photos/20260421_bingo_features.sql, misc-small-tweaks/20260428_bingo_tasks_maps_label.sql
   maps_url            text,
@@ -55,6 +60,11 @@ create table public.bingo_tasks (
 
   -- (tracked) bundle-cards/013_bundle_cards.sql
   is_bundle           boolean not null default false,
+
+  -- (tracked) core-tables/041_task_prerequisite.sql
+  -- Chained cards: the card a team must complete before this one unlocks.
+  -- The lock banner reuses completion_warning for its text.
+  prerequisite_task_id uuid references public.bingo_tasks(id) on delete set null,
 
   -- (tracked) aitb/020_aitb_card_timer.sql
   -- Per-card timer override for the standalone AITB speed-bonus ladder.
