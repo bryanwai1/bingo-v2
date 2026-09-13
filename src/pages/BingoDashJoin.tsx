@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, useMemo } from 'react'
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useTeamReviews, type ReviewFlag } from '../hooks/useTeamReviews'
@@ -7,7 +7,7 @@ import { ParticleBackground } from '../components/ParticleBackground'
 import { TimeUpAlarm } from '../components/TimeUpAlarm'
 import { TileFace } from '../components/BingoTileFace'
 import { IncomingDuelBanner } from '../components/ContestCard'
-import { normalizeTileDisplay, type TileDisplay } from '../lib/bingoTileDisplay'
+import { normalizeTileDisplay, withCategoryColors, type TileDisplay } from '../lib/bingoTileDisplay'
 import type { BingoTask, BingoScan, BingoSection, BingoTeam, BingoMember, BoardTimer } from '../types/database'
 
 /* ── helpers ─────────────────────────────────────────────────────────────────── */
@@ -516,7 +516,7 @@ function BoardScreen({
   sectionName,
   sectionSlug,
   memberRole,
-  gridTasks,
+  gridTasks: gridTasksProp,
   scans,
   reviews,
   settings,
@@ -538,6 +538,8 @@ function BoardScreen({
   tileDisplay: TileDisplay
   onLeave: () => void
 }) {
+  // One colour per category on the board, whatever each card row carries.
+  const gridTasks = useMemo(() => withCategoryColors(gridTasksProp), [gridTasksProp])
   const navigate = useNavigate()
   const [showLeaveConfirm, setShowLeaveConfirm] = useState(false)
   const [popupLetters, setPopupLetters] = useState<string | null>(null)

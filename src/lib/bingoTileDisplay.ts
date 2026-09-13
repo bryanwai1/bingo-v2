@@ -19,6 +19,8 @@ const ICON_RULES: ReadonlyArray<readonly [RegExp, string]> = [
   [/strength|power|\blift\b|\bgym\b|muscle|endurance/, 'activity'],
   [/team|group|squad|crew|together|collab|unity|partner/, 'users'],
   [/compet|versus|battle|tournament|champion|\brace\b|rival|relay/, 'trophy'],
+  // Before the hunt rule: "Mall Hunt" is its own thing, not a scavenger hunt.
+  [/\bmall\b|shop|store|retail|arcade|plaza/, 'bag'],
   [/hunt|search|scavenger|\bfind\b|seek|\bspot\b|locate|detect/, 'search'],
   [/puzzle|brain|logic|riddle|solve|mystery|enigma|sequence/, 'lightbulb'],
   [/quiz|trivia|knowledge|learn|study|memory|\bmind\b|\bword/, 'book'],
@@ -53,4 +55,41 @@ export function shortenTitle(title: string, maxChars = 20): string {
   const cut = clean.slice(0, maxChars)
   const lastSpace = cut.lastIndexOf(' ')
   return `${(lastSpace > maxChars * 0.5 ? cut.slice(0, lastSpace) : cut).trimEnd()}…`
+}
+
+// ── Category → colour ─────────────────────────────────────────────────────────
+// Cards in one category share a colour on the board, whatever each row's
+// hex_code says: a card copied in from another board arrives with that board's
+// colour, and the admin's "color for all" only fixes it once someone notices.
+// The category's colour is the one most of its cards already carry (ties go
+// to the earliest card), so nothing changes on a board that is already tidy.
+
+export function categoryColors(tasks: ReadonlyArray<{ category?: string | null; hex_code: string; sort_order?: number }>): Record<string, string> {
+  const tally: Record<string, Map<string, { n: number; first: number }>> = {}
+  const sorted = [...tasks].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
+  sorted.forEach((t, i) => {
+    const cat = (t.category ?? '').trim()
+    if (!cat || !t.hex_code) return
+    const m = (tally[cat] ??= new Map())
+    const e = m.get(t.hex_code)
+    if (e) e.n += 1; else m.set(t.hex_code, { n: 1, first: i })
+  })
+  const out: Record<string, string> = {}
+  for (const [cat, m] of Object.entries(tally)) {
+    let best: { hex: string; n: number; first: number } | null = null
+    for (const [hex, e] of m) {
+      if (!best || e.n > best.n || (e.n === best.n && e.first < best.first)) best = { hex, ...e }
+    }
+    if (best) out[cat] = best.hex
+  }
+  return out
+}
+
+/** The same cards, each painted with its category's colour. */
+export function withCategoryColors<T extends { category?: string | null; hex_code: string; sort_order?: number }>(tasks: T[]): T[] {
+  const colors = categoryColors(tasks)
+  return tasks.map(t => {
+    const hex = colors[(t.category ?? '').trim()]
+    return hex && hex !== t.hex_code ? { ...t, hex_code: hex } : t
+  })
 }

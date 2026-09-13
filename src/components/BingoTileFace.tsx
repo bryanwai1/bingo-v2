@@ -99,6 +99,13 @@ const ICONS: Record<string, ReactNode> = {
     </>
   ),
   star: <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />,
+  bag: (
+    <>
+      <path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4Z" />
+      <path d="M3 6h18" />
+      <path d="M16 10a4 4 0 0 1-8 0" />
+    </>
+  ),
 }
 
 export function CategoryIcon({ category, className }: { category: string; className?: string }) {
@@ -124,22 +131,27 @@ export function CategoryIcon({ category, className }: { category: string; classN
 export function TileFace({
   task, display, size = 'md',
 }: {
-  task: { title: string; color: string }
+  task: { title: string; color: string; category?: string | null }
   display: TileDisplay
   size?: 'sm' | 'md'
 }) {
+  // The icon and caption follow the CATEGORY. Older cards (and copies from
+  // another board) carry a colour name such as "Act 3 · The Mission" that
+  // used to drive this — which is why two cards in one category could show
+  // different icons. The colour name is only a fallback for uncategorised
+  // cards.
+  const category = ((task.category || '').trim() || task.color || '').trim()
   if (display === 'icon') {
     return (
       <div
         className="relative z-0 flex items-center justify-center w-full h-full a-text"
         style={{ filter: 'drop-shadow(0 1px 2px rgba(0,0,0,0.45))' }}
       >
-        <CategoryIcon category={task.color} className={size === 'sm' ? 'w-[50%] h-[50%]' : 'w-[52%] h-[52%]'} />
+        <CategoryIcon category={category} className={size === 'sm' ? 'w-[50%] h-[50%]' : 'w-[52%] h-[52%]'} />
       </div>
     )
   }
 
-  const category = (task.color || '').trim()
   const short = shortenTitle(task.title, size === 'sm' ? 18 : 20)
 
   return (

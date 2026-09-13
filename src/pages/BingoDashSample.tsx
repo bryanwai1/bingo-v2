@@ -1,4 +1,4 @@
-import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react'
+import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { QRCodeSVG } from 'qrcode.react'
 import { supabase } from '../lib/supabase'
@@ -27,7 +27,7 @@ import { SignSpliceCard } from '../components/SignSpliceCard'
 import { BreakoutHuntCard } from '../components/BreakoutHuntCard'
 import { useCardDrawConfig } from '../hooks/useCardDrawConfig'
 import { RetroGamesSample } from '../components/RetroGamesSample'
-import { normalizeTileDisplay, type TileDisplay } from '../lib/bingoTileDisplay'
+import { normalizeTileDisplay, withCategoryColors, type TileDisplay } from '../lib/bingoTileDisplay'
 import { normalizeUrl } from '../lib/normalizeUrl'
 import type { BingoSection, BingoTask } from '../types/database'
 
@@ -535,7 +535,7 @@ function TimerDisplay({ settings }: { settings: BingoSection | null }) {
 // ── Board Screen (sandbox) ────────────────────────────────────────────────────
 
 function BoardScreen({
-  teamName, gridTasks, scanState, quickWinSlots, section, glowSlots, glowMode,
+  teamName, gridTasks: gridTasksProp, scanState, quickWinSlots, section, glowSlots, glowMode,
   onToggleGlow, onClearGlow, onToggleGlowMode, onOpenTask, onSwitchTeam,
 }: {
   teamName: string
@@ -553,6 +553,8 @@ function BoardScreen({
   onOpenTask: (task: BingoTask) => void
   onSwitchTeam: () => void
 }) {
+  // One colour per category on the board, whatever each card row carries.
+  const gridTasks = useMemo(() => withCategoryColors(gridTasksProp), [gridTasksProp])
   const [showLeaveConfirm, setShowLeaveConfirm] = useState(false)
   const [popupLetters, setPopupLetters] = useState<string | null>(null)
   const [popupQueue, setPopupQueue] = useState<string[]>([])

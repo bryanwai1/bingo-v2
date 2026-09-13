@@ -528,6 +528,8 @@ export function BingoDashParticipant() {
   // Text input with only a question: nothing to match against, so whatever
   // the team writes goes to the admin like a link does.
   const freeTextMode = !!(inputs.answer && !task?.answer_text && task?.answer_min == null && !drawConfig)
+  // Free text alongside a photo/video: one Submit button sends both.
+  const combinedText = freeTextMode && !!(inputs.photo || inputs.video) && !freeTextSent && !approvedKinds.text
 
   const submitFreeText = async () => {
     const text = freeText.trim()
@@ -648,13 +650,25 @@ export function BingoDashParticipant() {
 
   /** Send everything staged, one submission row per file. */
   const submitStaged = async () => {
-    if (staged.length === 0) return
+    const text = combinedText ? freeText.trim() : ''
+    if (staged.length === 0 && !text) return
     setPhotoUploading(true)
     try {
+      // Photo + free-text cards share one Submit: the typed answer goes as
+      // its own row so the admin approves each part, but the team presses
+      // once.
+      if (text && team && taskId && scanRecord) {
+        const { error } = await supabase.from('bingo_photo_submissions').insert({
+          team_id: team.id, task_id: taskId, scan_id: scanRecord.id,
+          photo_url: text, media_type: 'text', status: 'pending',
+        })
+        if (error) { alert('Could not send your answer: ' + error.message); return }
+        setFreeTextSent(true)
+      }
       for (const item of staged) await uploadOne(item.file)
       staged.forEach(x => URL.revokeObjectURL(x.preview))
       setStaged([])
-      setPhotoSubmitted(true)
+      if (staged.length > 0) setPhotoSubmitted(true)
     } finally {
       setPhotoUploading(false)
     }
@@ -1337,6 +1351,59 @@ export function BingoDashParticipant() {
                 </div>
               )}
 
+              {/* Free text sits above the tray so a combined card reads:
+                  write, attach, one Submit. */}
+              {freeTextMode && (
+                <div className="mb-6">
+                  {task.answer_question && (
+                    <p className="text-white font-black text-lg mb-1 text-center leading-snug">{task.answer_question}</p>
+                  )}
+                  <p className="text-white/50 text-sm text-center mb-4">
+                    {combinedText
+                      ? `Write your answer here, then send it together with your ${fileNoun(inputs)} below.`
+                      : 'Write your answer - the admin reads and approves it.'}
+                  </p>
+                  {reviews.text?.status === 'rejected' && !freeTextSent && !approvedKinds.text && (
+                    <div className="mb-4 p-4 rounded-2xl bg-red-500/15 border border-red-400/50 text-center">
+                      <div className="text-3xl mb-1">✗</div>
+                      <p className="text-red-300 font-black">Answer not accepted - please redo</p>
+                      {reviews.text.note && <p className="text-red-200/90 text-sm font-bold mt-1 leading-snug">“{reviews.text.note}”</p>}
+                    </div>
+                  )}
+                  {approvedKinds.text ? (
+                    <div className="p-4 rounded-2xl bg-green-400/15 border border-green-400/40 text-center">
+                      <p className="text-green-300 font-black">✓ Answer approved</p>
+                    </div>
+                  ) : freeTextSent ? (
+                    <div className="p-4 rounded-2xl bg-green-400/15 border border-green-400/40 text-center">
+                      <div className="text-3xl mb-2">⏳</div>
+                      <p className="text-green-300 font-black">Answer submitted!</p>
+                      <p className="text-green-300/60 text-sm mt-1">Waiting for admin review</p>
+                    </div>
+                  ) : (
+                    <div className="flex flex-col gap-3">
+                      <textarea
+                        value={freeText}
+                        onChange={e => setFreeText(e.target.value)}
+                        rows={4}
+                        placeholder="Type your answer here…"
+                        className="w-full px-4 py-3 rounded-2xl bg-white/10 border-2 border-white/25 text-white placeholder-white/30 text-sm font-bold focus:outline-none focus:border-white/50 resize-y"
+                      />
+                      {!combinedText && (
+                        <button
+                          onClick={() => void submitFreeText()}
+                          disabled={freeTextBusy || !freeText.trim()}
+                          className="w-full py-3.5 rounded-2xl font-black uppercase tracking-wider transition-all active:scale-95 disabled:opacity-40"
+                          style={{ backgroundColor: task.hex_code, color: '#000' }}
+                        >
+                          {freeTextBusy ? 'Sending…' : 'Submit answer for approval'}
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+
               {/* A number with a floor comes before the evidence: the team
                   proves the count first, then sends the screenshots. */}
               {numberMode && !needsDrawnAnswer && (
@@ -1474,18 +1541,28 @@ export function BingoDashParticipant() {
                         <p className="text-white/40 text-xs font-bold text-center mt-3">Max 100 MB per clip</p>
                       )}
 
-                      {staged.length > 0 && (
-                        <button
-                          onClick={submitStaged}
-                          disabled={photoUploading}
-                          className="w-full mt-4 py-3.5 rounded-2xl font-black uppercase tracking-wider transition-all active:scale-95 disabled:opacity-50"
-                          style={{ backgroundColor: task.hex_code, color: '#000' }}
-                        >
-                          {photoUploading
-                            ? 'Sending…'
-                            : `Submit ${staged.length} ${fileNoun(inputs, staged.length !== 1)} for approval`}
-                        </button>
-                      )}
+                      {(staged.length > 0 || (combinedText && freeText.trim())) && (() => {
+                        const fileRequired = inputs.photo === 'required' || inputs.video === 'required'
+                        const textRequired = inputs.answer === 'required'
+                        const missingFile = combinedText && fileRequired && staged.length === 0
+                        const missingText = combinedText && textRequired && !freeText.trim()
+                        const label = photoUploading ? 'Sending…'
+                          : missingFile ? `Add your ${fileNoun(inputs)} to submit`
+                          : missingText ? 'Write your answer above to submit'
+                          : combinedText && freeText.trim()
+                            ? `Submit ${fileNoun(inputs, staged.length !== 1)} + answer for approval`
+                            : `Submit ${staged.length} ${fileNoun(inputs, staged.length !== 1)} for approval`
+                        return (
+                          <button
+                            onClick={submitStaged}
+                            disabled={photoUploading || missingFile || missingText}
+                            className="w-full mt-4 py-3.5 rounded-2xl font-black uppercase tracking-wider transition-all active:scale-95 disabled:opacity-50"
+                            style={{ backgroundColor: task.hex_code, color: '#000' }}
+                          >
+                            {label}
+                          </button>
+                        )
+                      })()}
                     </>
                   )}
                 </>
@@ -1592,51 +1669,6 @@ export function BingoDashParticipant() {
                     </div>
                   )}
                 </>
-              )}
-
-              {freeTextMode && (
-                <div className="mb-6">
-                  {task.answer_question && (
-                    <p className="text-white font-black text-lg mb-1 text-center leading-snug">{task.answer_question}</p>
-                  )}
-                  <p className="text-white/50 text-sm text-center mb-4">Write your answer - the admin reads and approves it.</p>
-                  {reviews.text?.status === 'rejected' && !freeTextSent && !approvedKinds.text && (
-                    <div className="mb-4 p-4 rounded-2xl bg-red-500/15 border border-red-400/50 text-center">
-                      <div className="text-3xl mb-1">✗</div>
-                      <p className="text-red-300 font-black">Answer not accepted - please redo</p>
-                      {reviews.text.note && <p className="text-red-200/90 text-sm font-bold mt-1 leading-snug">“{reviews.text.note}”</p>}
-                    </div>
-                  )}
-                  {approvedKinds.text ? (
-                    <div className="p-4 rounded-2xl bg-green-400/15 border border-green-400/40 text-center">
-                      <p className="text-green-300 font-black">✓ Answer approved</p>
-                    </div>
-                  ) : freeTextSent ? (
-                    <div className="p-4 rounded-2xl bg-green-400/15 border border-green-400/40 text-center">
-                      <div className="text-3xl mb-2">⏳</div>
-                      <p className="text-green-300 font-black">Answer submitted!</p>
-                      <p className="text-green-300/60 text-sm mt-1">Waiting for admin review</p>
-                    </div>
-                  ) : (
-                    <div className="flex flex-col gap-3">
-                      <textarea
-                        value={freeText}
-                        onChange={e => setFreeText(e.target.value)}
-                        rows={4}
-                        placeholder="Type your answer here…"
-                        className="w-full px-4 py-3 rounded-2xl bg-white/10 border-2 border-white/25 text-white placeholder-white/30 text-sm font-bold focus:outline-none focus:border-white/50 resize-y"
-                      />
-                      <button
-                        onClick={() => void submitFreeText()}
-                        disabled={freeTextBusy || !freeText.trim()}
-                        className="w-full py-3.5 rounded-2xl font-black uppercase tracking-wider transition-all active:scale-95 disabled:opacity-40"
-                        style={{ backgroundColor: task.hex_code, color: '#000' }}
-                      >
-                        {freeTextBusy ? 'Sending…' : 'Submit answer for approval'}
-                      </button>
-                    </div>
-                  )}
-                </div>
               )}
 
               {inputs.answer && !numberMode && !freeTextMode && !needsDrawnAnswer && (
