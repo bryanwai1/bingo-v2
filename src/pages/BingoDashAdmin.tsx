@@ -364,7 +364,7 @@ function CategoryGroupBlock({
   categoryNamesFor, scans, copiedId,
   boardCountByTask,
   navigate,
-  saveCategoryInline, setBulkCategoryColor, setBulkCategoryPoints, setTaskPoints, setPointsForTasks,
+  saveCategoryInline, setBulkCategoryColor, setBulkCategoryPoints, setTaskPoints,
   renameCategoryByLabel,
   setQrTask, copyLink, duplicateTask, openTileEdit, deleteTask,
 }: {
@@ -380,7 +380,6 @@ function CategoryGroupBlock({
   setBulkCategoryColor: (key: string, hex: string) => void
   setBulkCategoryPoints: (key: string, pts: number) => void
   setTaskPoints: (id: string, pts: number) => void
-  setPointsForTasks: (ids: string[], pts: number) => void
   renameCategoryByLabel: (label: string, newName: string) => void
   setQrTask: (t: BingoTask) => void
   copyLink: (id: string) => void
@@ -419,8 +418,7 @@ function CategoryGroupBlock({
         )}
         <span className="text-xs a-text-3 font-medium">{group.tasks.length}</span>
         <div className="flex-1 h-px a-surface/10" />
-        {group.label !== 'Mall Hunt' && (
-          <>
+        <>
             <div className="flex items-center gap-1.5 flex-shrink-0 flex-wrap">
               <span className="text-xs a-text-3">color for all:</span>
               <input
@@ -456,26 +454,6 @@ function CategoryGroupBlock({
               />
             </div>
           </>
-        )}
-        {group.label === 'Mall Hunt' && (
-          <div className="flex items-center gap-1.5 flex-wrap">
-            <span className="text-xs a-text-3">act pts:</span>
-            {ACT_COLORS.map((c, i) => (
-              <div key={c.hex} className="flex items-center gap-1 rounded px-1 py-0.5 border" style={{ borderColor: c.hex, backgroundColor: `${c.hex}22` }}>
-                <span className="w-4 h-4 rounded-full text-[9px] font-black text-white flex items-center justify-center flex-shrink-0" style={{ backgroundColor: c.hex }}>{i + 1}</span>
-                <input
-                  type="number" min={0}
-                  defaultValue={group.tasks.find(t => t.hex_code === c.hex)?.points ?? 0}
-                  key={group.key + c.hex + '-actpts'}
-                  className="w-10 bg-transparent a-text text-xs font-bold text-center focus:outline-none"
-                  onBlur={e => setPointsForTasks(group.tasks.filter(t => t.hex_code === c.hex).map(t => t.id), Math.max(0, parseInt(e.target.value) || 0))}
-                  onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
-                  title={`Set points for all ${c.name} cards`}
-                />
-              </div>
-            ))}
-          </div>
-        )}
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
@@ -1916,19 +1894,6 @@ export function BingoDashAdmin() {
     await supabase.from('bingo_tasks').update({ points }).eq('id', taskId)
   }
 
-  // Mall Hunt cards carry their Act as a colour (see ACT_COLORS), not a
-  // separate field, so "points per Act" is a bulk set keyed by hex_code
-  // within one category — every other category has no such grouping.
-  // Takes the exact task ids to touch (from the group already on screen)
-  // rather than re-deriving them via currentSectionId: the Complete Library
-  // view lets you act on a compartment that isn't the active board, and
-  // matchesBulkCategory's section_id check would silently match nothing.
-  const setPointsForTasks = async (taskIds: string[], points: number) => {
-    if (taskIds.length === 0) return
-    const idSet = new Set(taskIds)
-    setTasks(prev => prev.map(t => idSet.has(t.id) ? { ...t, points } : t))
-    await Promise.all(taskIds.map(id => supabase.from('bingo_tasks').update({ points }).eq('id', id)))
-  }
 
   const setBulkCategoryColor = async (categoryKey: string, hex: string) => {
     const affected = tasks.filter(t => matchesBulkCategory(t, categoryKey))
@@ -3505,7 +3470,6 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                             <h3 className="text-xs font-black a-text-2 uppercase tracking-widest">{group.label}</h3>
                             <span className="text-xs a-text-2 font-medium">{group.tasks.length}</span>
                             <div className="flex-1 h-px a-surface-2" />
-                            {group.label !== 'Mall Hunt' && (
                               <>
                                 <div className="flex items-center gap-1.5 flex-shrink-0 flex-wrap">
                                   <span className="text-xs a-text-2">color for all:</span>
@@ -3531,26 +3495,6 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                                     title={`Set points for all ${group.label} tasks`} />
                                 </div>
                               </>
-                            )}
-                            {group.label === 'Mall Hunt' && (
-                              <div className="flex items-center gap-1.5 flex-wrap">
-                                <span className="text-xs a-text-2">act pts:</span>
-                                {ACT_COLORS.map((c, i) => (
-                                  <div key={c.hex} className="flex items-center gap-1 rounded px-1 py-0.5 border" style={{ borderColor: c.hex, backgroundColor: `${c.hex}22` }}>
-                                    <span className="w-4 h-4 rounded-full text-[9px] font-black text-white flex items-center justify-center flex-shrink-0" style={{ backgroundColor: c.hex }}>{i + 1}</span>
-                                    <input
-                                      type="number" min={0}
-                                      defaultValue={group.tasks.find(t => t.hex_code === c.hex)?.points ?? 0}
-                                      key={section.id + group.key + c.hex + '-actpts'}
-                                      className="w-10 bg-transparent a-text text-xs font-bold text-center focus:outline-none"
-                                      onBlur={e => setPointsForTasks(group.tasks.filter(t => t.hex_code === c.hex).map(t => t.id), Math.max(0, parseInt(e.target.value) || 0))}
-                                      onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
-                                      title={`Set points for all ${c.name} cards`}
-                                    />
-                                  </div>
-                                ))}
-                              </div>
-                            )}
                           </div>
 
                           {/* Cards grid */}
@@ -4487,7 +4431,6 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                   setBulkCategoryColor={setBulkCategoryColor}
                   setBulkCategoryPoints={setBulkCategoryPoints}
                   setTaskPoints={setTaskPoints}
-                  setPointsForTasks={setPointsForTasks}
                   renameCategoryByLabel={renameCategoryByLabel}
                   setQrTask={setQrTask}
                   copyLink={copyLink}
@@ -4536,7 +4479,6 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                             setBulkCategoryColor={setBulkCategoryColor}
                             setBulkCategoryPoints={setBulkCategoryPoints}
                             setTaskPoints={setTaskPoints}
-                  setPointsForTasks={setPointsForTasks}
                             renameCategoryByLabel={renameCategoryByLabel}
                             setQrTask={setQrTask}
                             copyLink={copyLink}
