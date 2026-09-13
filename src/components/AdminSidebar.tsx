@@ -17,7 +17,7 @@ const NAV: { id: AdminView; icon: string; label: string; hint: string }[] = [
   { id: 'board',       icon: '🎲', label: 'Board',       hint: 'The 5×5 grid' },
   { id: 'library',     icon: '🃏', label: 'Cards',       hint: 'All challenges' },
   { id: 'teams',       icon: '👥', label: 'Teams',       hint: 'Rosters + scores' },
-  { id: 'submissions', icon: '📸', label: 'Photos',      hint: 'Review evidence' },
+  { id: 'submissions', icon: '✅', label: 'Approvals',   hint: 'Photos, videos, links, answers' },
   { id: 'settings',    icon: '⚙️',  label: 'Settings',    hint: 'Board options' },
 ]
 

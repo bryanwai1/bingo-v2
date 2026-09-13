@@ -26,7 +26,9 @@ create table public.bingo_photo_submissions (
   media_type  text not null default 'image'
     constraint bingo_photo_submissions_media_type_check
       -- (tracked) media-photos/043_versus_submissions.sql — 'versus' added.
-      check (media_type in ('image', 'video', 'link', 'versus')),
+      -- (tracked) media-photos/045_text_submissions.sql — 'text' added: a
+      -- free-text answer, the text itself in photo_url.
+      check (media_type in ('image', 'video', 'link', 'versus', 'text')),
 
   -- (tracked) media-photos/043_versus_submissions.sql
   -- Versus rows only: the team they battled and whether they won.

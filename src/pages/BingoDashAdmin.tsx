@@ -36,12 +36,22 @@ function extFromUrl(url: string): string {
   return match ? match[1].toLowerCase() : 'jpg'
 }
 
-function SubmissionThumb({ url, fill = false, video = false, link = false, versus }: {
+function SubmissionThumb({ url, fill = false, video = false, link = false, versus, text = false }: {
   url: string; fill?: boolean; video?: boolean; link?: boolean
   /** A battle claim: nothing to look at but who they fought and how it went. */
   versus?: { opponent: string; won: boolean | null }
+  /** A free-text answer: url holds the text itself. */
+  text?: boolean
 }) {
   const [broken, setBroken] = useState(false)
+  if (text) {
+    return (
+      <div className={`${fill ? 'w-full aspect-square' : 'w-28 h-28'} flex flex-col items-start justify-start gap-1 rounded-lg border a-border bg-white/5 p-3 text-left flex-shrink-0 overflow-y-auto`}>
+        <span className="a-text-3 text-[9px] font-bold uppercase tracking-wider">✏️ typed answer</span>
+        <span className="a-text text-[12px] font-bold leading-snug whitespace-pre-wrap break-words">{url}</span>
+      </div>
+    )
+  }
   if (versus) {
     return (
       <div className={`${fill ? 'w-full aspect-square' : 'w-28 h-28'} flex flex-col items-center justify-center gap-1 rounded-lg border a-border bg-white/5 px-2 text-center flex-shrink-0`}>
@@ -2161,7 +2171,8 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
             video: approved.some(x => x.media_type === 'video'),
             link: approved.some(x => x.media_type === 'link'),
             versus: approved.some(x => x.media_type === 'versus'),
-            answer: scan?.answer_ok ?? false,
+            // Typed answer: matched on the phone, or free text approved here.
+            answer: (scan?.answer_ok ?? false) || approved.some(x => x.media_type === 'text'),
           }
           if (isComplete(inputs, done)) scansToComplete.push(sub.scan_id)
         }
@@ -2526,7 +2537,7 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                 onClick={() => setActiveTab('teams')} />
               <MenuItem icon="🃏" label="Card library" hint="All your challenges"
                 onClick={() => setActiveTab('library')} />
-              <MenuItem icon="📸" label="Submissions" hint="Review photo evidence"
+              <MenuItem icon="✅" label="Approvals" hint="Photos, videos, links, answers"
                 onClick={() => setActiveTab('submissions')} />
               <MenuDivider />
               <MenuItem icon="📥" label="Import cards" hint="Paste rows to bulk-add"
@@ -4821,8 +4832,8 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
         <section>
           <div className="mb-4 flex items-start justify-between gap-4 flex-wrap">
             <div>
-              <h2 className="text-xl font-bold a-text mb-1">Photo Submissions</h2>
-              <p className="text-xs a-text-3">Review images submitted by groups for photo challenges. Tick a card to act on it specifically — otherwise actions apply to every submission in view.</p>
+              <h2 className="text-xl font-bold a-text mb-1">Approvals</h2>
+              <p className="text-xs a-text-3">Everything teams send for approval — photos, videos, links, typed answers and battle results. Tick a card to act on it specifically — otherwise actions apply to every submission in view.</p>
             </div>
           </div>
 
@@ -5001,7 +5012,8 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                           >
                             <div className="a-surface-2 relative">
                               <SubmissionThumb url={sub.photo_url} fill video={sub.media_type === 'video'} link={sub.media_type === 'link'}
-                          versus={sub.media_type === 'versus' ? { opponent: teams.find(t => t.id === sub.opponent_id)?.name ?? 'Unknown team', won: sub.versus_won ?? null } : undefined} />
+                          versus={sub.media_type === 'versus' ? { opponent: teams.find(t => t.id === sub.opponent_id)?.name ?? 'Unknown team', won: sub.versus_won ?? null } : undefined}
+                          text={sub.media_type === 'text'} />
                               {isSel && (
                                 <span className="absolute top-1 right-1 text-[10px] font-black text-white bg-red-600 px-1.5 py-0.5 rounded">
                                   WRONG
@@ -5043,7 +5055,8 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                           a queue of people waiting while you open each one. */}
                       <div className="a-surface-2">
                         <SubmissionThumb url={sub.photo_url} fill video={sub.media_type === 'video'} link={sub.media_type === 'link'}
-                          versus={sub.media_type === 'versus' ? { opponent: teams.find(t => t.id === sub.opponent_id)?.name ?? 'Unknown team', won: sub.versus_won ?? null } : undefined} />
+                          versus={sub.media_type === 'versus' ? { opponent: teams.find(t => t.id === sub.opponent_id)?.name ?? 'Unknown team', won: sub.versus_won ?? null } : undefined}
+                          text={sub.media_type === 'text'} />
                       </div>
 
                       <div className="p-3">

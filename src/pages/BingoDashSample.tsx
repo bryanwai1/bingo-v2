@@ -848,6 +848,8 @@ const SampleTaskDetail = forwardRef<SampleTaskDetailHandle, {
   const [opponent, setOpponent] = useState('')
   const [versusWon, setVersusWon] = useState<boolean | null>(null)
   const [versusSent, setVersusSent] = useState(false)
+  const [freeText, setFreeText] = useState('')
+  const [freeTextSent, setFreeTextSent] = useState(false)
   const [photoSubmitted, setPhotoSubmitted] = useState(false)
   const [staged, setStaged] = useState<{ id: string; file: File; preview: string }[]>([])
   const inputs = effectiveInputs(task.task_type, task.completion_inputs)
@@ -867,7 +869,9 @@ const SampleTaskDetail = forwardRef<SampleTaskDetailHandle, {
   const aitbTimerOn = task.aitb_timer_enabled !== false
   const [aitbWords, setAitbWords] = useState<string[]>([])
 
-  const needsDrawnAnswer = !!(inputs.answer && !task.answer_text && drawConfig)
+  const needsDrawnAnswer = !!(inputs.answer && !task.answer_text && task.answer_min == null && drawConfig)
+  // Text input with only a question: free text, approved by the demo marshal.
+  const freeTextMode = !!(inputs.answer && !task.answer_text && task.answer_min == null && !drawConfig)
   const drawnPrompt = needsDrawnAnswer ? (aitbWords[0] || '') : ''
   const riddleSolved = !needsDrawnAnswer || riddleOk
 
@@ -1230,7 +1234,7 @@ const SampleTaskDetail = forwardRef<SampleTaskDetailHandle, {
             view. In-app hops go through onJump so the demo swaps cards
             without leaving the page. */}
         {(() => {
-          const submitted = completed || photoSubmitted || sentCount > 0 || !!linkSent || versusSent
+          const submitted = completed || photoSubmitted || sentCount > 0 || !!linkSent || versusSent || freeTextSent
           const items: LinkItem[] = [...links]
           const next = chain.next
           if (next && !chain.locked && submitted) {
@@ -1530,6 +1534,48 @@ const SampleTaskDetail = forwardRef<SampleTaskDetailHandle, {
                   </div>
                 )}
 
+                {/* Free-text answer: a question with nothing to match against. */}
+                {freeTextMode && (
+                  <div className="mb-6">
+                    {task.answer_question && (
+                      <p className="text-white font-black text-lg mb-1 text-center leading-snug">{task.answer_question}</p>
+                    )}
+                    <p className="text-white/50 text-sm text-center mb-4">Write your answer - the admin reads and approves it.</p>
+                    {freeTextSent ? (
+                      <div className="p-4 rounded-2xl bg-green-400/15 border border-green-400/40 text-center">
+                        <div className="text-3xl mb-2">⏳</div>
+                        <p className="text-green-300 font-black">Answer submitted!</p>
+                        <p className="text-green-300/60 text-xs mt-1 mb-3 whitespace-pre-wrap">“{freeText.trim()}”</p>
+                        <button
+                          onClick={onComplete}
+                          className="w-full py-3 rounded-2xl text-white font-black uppercase tracking-wider transition-all active:scale-95"
+                          style={{ backgroundColor: task.hex_code, boxShadow: `0 4px 0 ${task.hex_code}88` }}
+                        >
+                          👮 Approve as marshal (demo)
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="flex flex-col gap-3">
+                        <textarea
+                          value={freeText}
+                          onChange={e => setFreeText(e.target.value)}
+                          rows={4}
+                          placeholder="Type your answer here…"
+                          className="w-full px-4 py-3 rounded-2xl bg-white/10 border-2 border-white/25 text-white placeholder-white/30 text-sm font-bold focus:outline-none focus:border-white/50 resize-y"
+                        />
+                        <button
+                          onClick={() => setFreeTextSent(true)}
+                          disabled={!freeText.trim()}
+                          className="w-full py-3.5 rounded-2xl font-black uppercase tracking-wider transition-all active:scale-95 disabled:opacity-40"
+                          style={{ backgroundColor: task.hex_code, color: '#000' }}
+                        >
+                          Submit answer for approval
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 {/* Answer: letter boxes */}
                 {/* Link: paste where the thing you built lives */}
                 {inputs.link && (
@@ -1634,7 +1680,7 @@ const SampleTaskDetail = forwardRef<SampleTaskDetailHandle, {
                   </>
                 )}
 
-                {inputs.answer && (
+                {inputs.answer && !freeTextMode && (
                   <>
                     {task.answer_question && (
                       <p className="text-white font-black text-lg mb-4 text-center leading-snug">{task.answer_question}</p>

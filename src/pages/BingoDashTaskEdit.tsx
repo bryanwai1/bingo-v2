@@ -642,6 +642,12 @@ export function BingoDashTaskEdit() {
 
             {inputs.answer && (
               <>
+                <p className="mb-4 text-xs text-gray-500 rounded-lg bg-gray-50 border border-gray-200 px-3 py-2 leading-relaxed">
+                  <span className="font-bold text-gray-700">Three ways a Text input can work:</span>{' '}
+                  save <span className="font-semibold">answers</span> below and the team fills letter boxes that check themselves;
+                  set a <span className="font-semibold">minimum number</span> and one number is checked on the spot;
+                  or leave both empty and the team writes <span className="font-semibold">free text</span> that goes to you to approve, like a photo.
+                </p>
                 <div className="mb-5">
                   <label className="block text-sm font-semibold text-gray-700 mb-1.5">Question / Prompt</label>
                   <input

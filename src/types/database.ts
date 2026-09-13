@@ -334,7 +334,7 @@ export interface BingoPhotoSubmission {
   photo_url: string
   /** What photo_url points at: an uploaded picture or clip, or — for a link
    *  submission — the address itself. */
-  media_type?: 'image' | 'video' | 'link' | 'versus'
+  media_type?: 'image' | 'video' | 'link' | 'versus' | 'text'
   status: 'pending' | 'approved' | 'rejected'
   // Versus rows only: the team they battled and whether they won.
   opponent_id?: string | null

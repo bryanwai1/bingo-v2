@@ -103,13 +103,17 @@ export function BingoDashParticipant() {
   // Which of this card's inputs the team has already satisfied. Files count
   // once a marshal has approved them, which is why this is read back from the
   // submissions rather than from what was sent.
-  const [approvedKinds, setApprovedKinds] = useState<{ photo: boolean; video: boolean; link: boolean; versus: boolean }>({ photo: false, video: false, link: false, versus: false })
+  const [approvedKinds, setApprovedKinds] = useState<{ photo: boolean; video: boolean; link: boolean; versus: boolean; text: boolean }>({ photo: false, video: false, link: false, versus: false, text: false })
   // Versus input: the teams on this board to pick an opponent from, what the
   // team chose, and whether a claim is already in with the admin.
   // The newest submission per input, so the card can say "waiting" after a
   // reload and show the admin's reason when one was rejected.
   type Review = { status: 'pending' | 'approved' | 'rejected'; note: string | null }
-  const [reviews, setReviews] = useState<Partial<Record<'photo' | 'video' | 'link' | 'versus', Review>>>({})
+  const [reviews, setReviews] = useState<Partial<Record<'photo' | 'video' | 'link' | 'versus' | 'text', Review>>>({})
+  // Free-text answer (Text input with a question but no saved answer).
+  const [freeText, setFreeText] = useState('')
+  const [freeTextSent, setFreeTextSent] = useState(false)
+  const [freeTextBusy, setFreeTextBusy] = useState(false)
   const [rivals, setRivals] = useState<{ id: string; name: string }[]>([])
   const [opponentId, setOpponentId] = useState('')
   const [versusWon, setVersusWon] = useState<boolean | null>(null)
@@ -391,7 +395,9 @@ export function BingoDashParticipant() {
     video: approvedKinds.video,
     link: approvedKinds.link,
     versus: approvedKinds.versus,
-    answer: scanRecord?.answerOk ?? false,
+    // A typed answer is satisfied either by matching (letters / number) or
+    // by the admin approving a free-text one.
+    answer: (scanRecord?.answerOk ?? false) || approvedKinds.text,
   }), [approvedKinds, scanRecord?.answerOk])
   const outstanding = missingLabels(inputs, progress)
 
@@ -407,18 +413,19 @@ export function BingoDashParticipant() {
           if (!live) return
           const rows = data ?? []
           const kindOf = (m: string | null | undefined) =>
-            (m === 'video' || m === 'link' || m === 'versus') ? m : 'photo' as const
+            (m === 'video' || m === 'link' || m === 'versus' || m === 'text') ? m : 'photo' as const
           const approved = rows.filter(r => r.status === 'approved')
           setApprovedKinds({
             photo: approved.some(r => kindOf(r.media_type) === 'photo'),
             video: approved.some(r => kindOf(r.media_type) === 'video'),
             link: approved.some(r => kindOf(r.media_type) === 'link'),
             versus: approved.some(r => kindOf(r.media_type) === 'versus'),
+            text: approved.some(r => kindOf(r.media_type) === 'text'),
           })
           // Newest row per kind decides what the card says. An approval
           // anywhere in the history still counts (above); a pending row
           // outranks an older rejection.
-          const latest: Partial<Record<'photo' | 'video' | 'link' | 'versus', Review>> = {}
+          const latest: Partial<Record<'photo' | 'video' | 'link' | 'versus' | 'text', Review>> = {}
           for (const r of rows) {
             const k = kindOf(r.media_type)
             if (!latest[k]) latest[k] = { status: r.status as Review['status'], note: r.review_note ?? null }
@@ -433,6 +440,8 @@ export function BingoDashParticipant() {
           if (latest.link?.status === 'pending') setLinkSent(true)
           if (latest.link?.status === 'rejected') setLinkSent(false)
           if (latest.versus?.status === 'rejected') setVersusSent(false)
+          if (latest.text?.status === 'pending') setFreeTextSent(true)
+          if (latest.text?.status === 'rejected') setFreeTextSent(false)
         })
     }
     read()
@@ -516,6 +525,25 @@ export function BingoDashParticipant() {
    * a draw, and has no answer of its own can only mean the drawn item holds it.
    */
   const needsDrawnAnswer = !!(inputs.answer && !task?.answer_text && task?.answer_min == null && drawConfig)
+  // Text input with only a question: nothing to match against, so whatever
+  // the team writes goes to the admin like a link does.
+  const freeTextMode = !!(inputs.answer && !task?.answer_text && task?.answer_min == null && !drawConfig)
+
+  const submitFreeText = async () => {
+    const text = freeText.trim()
+    if (!team || !taskId || !scanRecord || !text || freeTextBusy) return
+    setFreeTextBusy(true)
+    try {
+      const { error } = await supabase.from('bingo_photo_submissions').insert({
+        team_id: team.id, task_id: taskId, scan_id: scanRecord.id,
+        photo_url: text, media_type: 'text', status: 'pending',
+      })
+      if (error) { alert('Could not send your answer: ' + error.message); return }
+      setFreeTextSent(true)
+    } finally {
+      setFreeTextBusy(false)
+    }
+  }
   const drawnPrompt = needsDrawnAnswer ? (scanRecord?.words?.[0] || '') : ''
   const riddleSolved = !needsDrawnAnswer || !!scanRecord?.answerOk
 
@@ -1566,7 +1594,52 @@ export function BingoDashParticipant() {
                 </>
               )}
 
-              {inputs.answer && !numberMode && !needsDrawnAnswer && (
+              {freeTextMode && (
+                <div className="mb-6">
+                  {task.answer_question && (
+                    <p className="text-white font-black text-lg mb-1 text-center leading-snug">{task.answer_question}</p>
+                  )}
+                  <p className="text-white/50 text-sm text-center mb-4">Write your answer - the admin reads and approves it.</p>
+                  {reviews.text?.status === 'rejected' && !freeTextSent && !approvedKinds.text && (
+                    <div className="mb-4 p-4 rounded-2xl bg-red-500/15 border border-red-400/50 text-center">
+                      <div className="text-3xl mb-1">✗</div>
+                      <p className="text-red-300 font-black">Answer not accepted - please redo</p>
+                      {reviews.text.note && <p className="text-red-200/90 text-sm font-bold mt-1 leading-snug">“{reviews.text.note}”</p>}
+                    </div>
+                  )}
+                  {approvedKinds.text ? (
+                    <div className="p-4 rounded-2xl bg-green-400/15 border border-green-400/40 text-center">
+                      <p className="text-green-300 font-black">✓ Answer approved</p>
+                    </div>
+                  ) : freeTextSent ? (
+                    <div className="p-4 rounded-2xl bg-green-400/15 border border-green-400/40 text-center">
+                      <div className="text-3xl mb-2">⏳</div>
+                      <p className="text-green-300 font-black">Answer submitted!</p>
+                      <p className="text-green-300/60 text-sm mt-1">Waiting for admin review</p>
+                    </div>
+                  ) : (
+                    <div className="flex flex-col gap-3">
+                      <textarea
+                        value={freeText}
+                        onChange={e => setFreeText(e.target.value)}
+                        rows={4}
+                        placeholder="Type your answer here…"
+                        className="w-full px-4 py-3 rounded-2xl bg-white/10 border-2 border-white/25 text-white placeholder-white/30 text-sm font-bold focus:outline-none focus:border-white/50 resize-y"
+                      />
+                      <button
+                        onClick={() => void submitFreeText()}
+                        disabled={freeTextBusy || !freeText.trim()}
+                        className="w-full py-3.5 rounded-2xl font-black uppercase tracking-wider transition-all active:scale-95 disabled:opacity-40"
+                        style={{ backgroundColor: task.hex_code, color: '#000' }}
+                      >
+                        {freeTextBusy ? 'Sending…' : 'Submit answer for approval'}
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {inputs.answer && !numberMode && !freeTextMode && !needsDrawnAnswer && (
                 <>
                   {task.answer_question && (
                     <p className="text-white font-black text-lg mb-4 text-center leading-snug">
