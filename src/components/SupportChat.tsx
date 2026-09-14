@@ -102,8 +102,8 @@ export function SupportChat({
     }
     // Clamped, or the bubble can be flicked off screen and never recovered.
     setPos({
-      x: Math.max(8, Math.min(window.innerWidth  - 68, x)),
-      y: Math.max(8, Math.min(window.innerHeight - 68, y)),
+      x: Math.max(8, Math.min(window.innerWidth  - 60, x)),
+      y: Math.max(8, Math.min(window.innerHeight - 60, y)),
     })
   }
 
@@ -134,22 +134,25 @@ export function SupportChat({
   const placed = pos.x >= 0
   const anchor: React.CSSProperties = placed
     ? { left: pos.x, top: pos.y }
-    : { right: 16, bottom: 16 }
+    : { right: 12, bottom: 'calc(12px + env(safe-area-inset-bottom, 0px))' }
   // Panel opens toward whichever side has room.
-  const openLeft = placed && pos.x > window.innerWidth / 2
-  const openUp   = !placed || pos.y > window.innerHeight / 2
+  // Undragged, the bubble sits in the bottom-right corner — so the panel has
+  // to open leftward or it runs straight off the screen. Only once the bubble
+  // has been moved does its actual x decide the direction.
+  const openLeft = placed ? pos.x > window.innerWidth / 2 : true
+  const openUp   = placed ? pos.y > window.innerHeight / 2 : true
 
   return (
     <>
       <div style={{ position: 'fixed', zIndex: 60, ...anchor }}>
         {open && (
           <div
-            className="absolute w-[min(340px,calc(100vw-32px))] rounded-2xl overflow-hidden shadow-2xl"
+            className="absolute w-[min(340px,calc(100vw-32px))] max-w-[calc(100vw-32px)] rounded-2xl overflow-hidden shadow-2xl"
             style={{
               background: '#111c1a',
               border: '1px solid rgba(45,212,191,0.28)',
               [openLeft ? 'right' : 'left']: 0,
-              [openUp ? 'bottom' : 'top']: 64,
+              [openUp ? 'bottom' : 'top']: 58,
             } as React.CSSProperties}
           >
             <div className="px-4 py-3 flex items-center justify-between"
@@ -209,7 +212,7 @@ export function SupportChat({
           onPointerMove={onPointerMove}
           onPointerUp={onPointerUp}
           aria-label={open ? 'Close help' : 'Open help'}
-          className="w-14 h-14 rounded-full grid place-items-center shadow-xl active:scale-95 transition-transform"
+          className="w-12 h-12 sm:w-14 sm:h-14 rounded-full grid place-items-center shadow-xl active:scale-95 transition-transform"
           style={{ background: 'linear-gradient(135deg,#2dd4bf,#0d9488)', touchAction: 'none', cursor: 'grab' }}
         >
           <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#04211c" strokeWidth="2.4"
