@@ -483,15 +483,7 @@ export function BingoDashParticipant() {
     if (!team || !taskId || !scanRecord || !opponentId || versusWon === null || versusBusy) return
     setVersusBusy(true)
     try {
-      // No rematch on this card, whichever team started the first one.
-      const { data: prior } = await supabase.from('bingo_photo_submissions').select('id')
-        .eq('task_id', taskId).eq('media_type', 'versus').neq('status', 'rejected')
-        .or(`and(team_id.eq.${team.id},opponent_id.eq.${opponentId}),and(team_id.eq.${opponentId},opponent_id.eq.${team.id})`)
-        .limit(1)
-      if ((prior ?? []).length > 0) {
-        alert(`You have already battled ${rivals.find(r => r.id === opponentId)?.name ?? 'that team'} on this card. Pick another team.`)
-        return
-      }
+      // Rematches are allowed: the admin sees every claim and decides.
       const { error } = await supabase.from('bingo_photo_submissions').insert({
         team_id: team.id, task_id: taskId, scan_id: scanRecord.id,
         photo_url: '', media_type: 'versus', status: 'pending',
@@ -1367,7 +1359,7 @@ export function BingoDashParticipant() {
                         {versusBusy ? 'Sending…' : 'Submit result for approval'}
                       </button>
                       <p className="text-white/40 text-xs font-bold text-center">
-                        Only the team that started the challenge sends this. One battle per team on this card.
+                        Only the team that started the challenge sends this.
                       </p>
                     </div>
                   )}

@@ -1542,7 +1542,7 @@ const SampleTaskDetail = forwardRef<SampleTaskDetailHandle, {
                           Submit result for approval
                         </button>
                         <p className="text-white/40 text-xs font-bold text-center">
-                          Only the team that started the challenge sends this. One battle per team on this card.
+                          Only the team that started the challenge sends this.
                         </p>
                       </div>
                     )}
