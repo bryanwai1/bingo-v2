@@ -1,4 +1,4 @@
-import { useEffect, useState, useLayoutEffect, useRef } from 'react'
+import { useCallback, useEffect, useState, useLayoutEffect, useRef } from 'react'
 import { useParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { ParticleBackground } from '../components/ParticleBackground'
@@ -48,9 +48,10 @@ export function BingoDashProjector() {
   const [timerRunning, setTimerRunning] = useState(false)
   const [showBonus, setShowBonus] = useState(false)
 
-  // Initial load
-  useEffect(() => {
-    const load = async () => {
+  // Initial load — also the periodic safety refresh (below): a projector runs
+  // for hours on venue Wi-Fi, and a dropped realtime socket otherwise leaves
+  // it frozen on old scores with nobody noticing until a team complains.
+  const loadAll = useCallback(async () => {
       const [tasksRes, boardCardsRes, teamsRes, scansRes, sectionsRes, settingsRes, duelsRes] = await Promise.all([
         supabase.from('bingo_tasks').select('*'),
         supabase.from('bingo_board_cards').select('*').order('slot'),
@@ -67,9 +68,24 @@ export function BingoDashProjector() {
       if (sectionsRes.data) setSections(sectionsRes.data)
       if (settingsRes.data) setSettings(settingsRes.data)
       if (duelsRes.data) setDuels(duelsRes.data)
-    }
-    load()
   }, [])
+  useEffect(() => { void loadAll() }, [loadAll])
+
+  // Safety net: full refresh every 20s, and immediately when the tab comes
+  // back (screen wake, tab switch) or the network returns.
+  useEffect(() => {
+    const id = setInterval(() => { void loadAll() }, 20_000)
+    const onVisible = () => { if (document.visibilityState === 'visible') void loadAll() }
+    document.addEventListener('visibilitychange', onVisible)
+    window.addEventListener('online', onVisible)
+    window.addEventListener('focus', onVisible)
+    return () => {
+      clearInterval(id)
+      document.removeEventListener('visibilitychange', onVisible)
+      window.removeEventListener('online', onVisible)
+      window.removeEventListener('focus', onVisible)
+    }
+  }, [loadAll])
 
   // Live updates
   useEffect(() => {
@@ -82,6 +98,8 @@ export function BingoDashProjector() {
         if (what === 'tasks')    { const { data } = await supabase.from('bingo_tasks').select('*'); if (data) setTasks(data) }
         if (what === 'cards')    { const { data } = await supabase.from('bingo_board_cards').select('*').order('slot'); if (data) setBoardCards(data) }
         if (what === 'settings') { const { data } = await supabase.from('bingo_settings').select('*').eq('id','main').maybeSingle(); if (data) setSettings(data) }
+        if (what === 'sections') { const { data } = await supabase.from('bingo_sections').select('*').order('sort_order'); if (data) setSections(data) }
+        if (what === 'duels')    { const { data } = await supabase.from('bingo_duels').select('*').eq('status', 'done'); if (data) setDuels(data) }
       }, 400)
     }
     const channel = supabase
@@ -94,9 +112,15 @@ export function BingoDashProjector() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'bingo_tasks' }, () => nudge('tasks'))
       .on('postgres_changes', { event: '*', schema: 'public', table: 'bingo_board_cards' }, () => nudge('cards'))
       .on('postgres_changes', { event: '*', schema: 'public', table: 'bingo_settings' }, () => nudge('settings'))
-      .subscribe()
+      // The board's own timer and live/locked state live on the section row.
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'bingo_sections' }, () => nudge('sections'))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'bingo_duels' }, () => nudge('duels'))
+      .subscribe((status) => {
+        // A re-subscribe after a drop means events were missed: catch up.
+        if (status === 'SUBSCRIBED') void loadAll()
+      })
     return () => { supabase.removeChannel(channel) }
-  }, [])
+  }, [loadAll])
 
   const slugSection = sectionSlug ? sections.find(s => s.slug === sectionSlug) ?? null : null
   const activeSectionId = slugSection?.id ?? (sectionSlug ? null : settings?.active_section_id ?? null)

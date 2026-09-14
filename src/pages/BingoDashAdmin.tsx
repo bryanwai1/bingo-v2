@@ -1988,6 +1988,12 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
     setPhotoSubmissions(prev => prev.filter(s => !teamIds.includes(s.team_id)))
     setMembers(prev => prev.filter(m => !teamIds.includes(m.team_id)))
     setTeams(prev => prev.filter(t => !teamIds.includes(t.id)))
+    // Support chat first: bingo_messages has no cascade from bingo_teams, so
+    // a reset used to leave every team's conversation behind as orphans.
+    // Deleted by board as well as by team to sweep up any strays.
+    if (currentSectionId) {
+      await supabase.from('bingo_messages').delete().or(`section_id.eq.${currentSectionId},team_id.in.(${teamIds.join(',')})`)
+    }
     const { error } = await supabase.from('bingo_teams').delete().in('id', teamIds)
     if (error) { alert('Failed to remove teams: ' + error.message); await fetchAll(); return false }
     const allPhotoPaths = [...teamPhotoPaths, ...subPhotoPaths]
@@ -2009,7 +2015,7 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
       `  • ${sectionMembers.length} player${sectionMembers.length !== 1 ? 's' : ''}\n` +
       `  • ${sectionScans.length} scan record${sectionScans.length !== 1 ? 's' : ''}\n` +
       `  • ${sectionSubs.length} photo submission${sectionSubs.length !== 1 ? 's' : ''}\n` +
-      `  • all bonus points and photos\n\n` +
+      `  • all bonus points, photos and support-chat messages\n\n` +
       `The board will be left with 0 teams. Other boards are NOT affected. This cannot be undone.`
     )) return
 
@@ -2033,7 +2039,7 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
       `Remove ALL ${sectionTeams.length} group${sectionTeams.length !== 1 ? 's' : ''} from "${section?.name ?? 'this board'}"?\n\n` +
       `This permanently deletes every group on this board, plus:\n` +
       `  • ${sectionMembers.length} player${sectionMembers.length !== 1 ? 's' : ''}\n` +
-      `  • all their scans, photo submissions, bonus points and photos\n\n` +
+      `  • all their scans, photo submissions, bonus points, photos and support-chat messages\n\n` +
       `Other boards are NOT affected. This cannot be undone.`
     )) return
 
