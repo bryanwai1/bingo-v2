@@ -186,7 +186,19 @@ export function BingoDashProjector() {
   })
 
   // When the "Total after Bonus" view is on, rank by Bingo points + manual bonus points.
-  const scoreOf = (r: Row) => showBonus ? r.points + r.bonus : r.points
+  // Postgres numeric can arrive over PostgREST as a string, and "100.5" + "0"
+  // concatenates instead of adding. Coerce before any arithmetic.
+  const num = (v: unknown) => Number(v ?? 0) || 0
+  const scoreOf = (r: Row) => showBonus ? num(r.points) + num(r.bonus) : num(r.points)
+
+  // Whole numbers unless the board opted into decimals, and trailing zeros are
+  // dropped either way — 300.50 reads slower than 300.5 from the back of a room.
+  const decimals = !!activeSection?.decimal_points
+  const fmt = (v: unknown) => {
+    const n = num(v)
+    if (!decimals) return Math.round(n).toLocaleString()
+    return n.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })
+  }
   rows.sort((a, b) => {
     if (scoreOf(b) !== scoreOf(a)) return scoreOf(b) - scoreOf(a)
     if (b.bingos !== a.bingos) return b.bingos - a.bingos
@@ -337,13 +349,13 @@ export function BingoDashProjector() {
                     </div>
                     <div className="text-center">
                       <p className={`${theme.heading} text-5xl font-black tabular-nums`}>
-                        {showBonus ? row.points + row.bonus : row.points}
+                        {fmt(scoreOf(row))}
                       </p>
                       {showBonus ? (
                         <p className={`${theme.muted} text-xs font-bold uppercase tracking-widest mt-1`}>
-                          <span className={theme.accent}>{row.points} bingo</span>
+                          <span className={theme.accent}>{fmt(row.points)} bingo</span>
                           <span className={theme.muted}> + </span>
-                          <span className={theme.bonus}>{row.bonus} bonus</span>
+                          <span className={theme.bonus}>{fmt(row.bonus)} bonus</span>
                         </p>
                       ) : row.duelBonus > 0 ? (
                         // Surface duel winnings — otherwise a defender who won

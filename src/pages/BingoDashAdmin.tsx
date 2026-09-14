@@ -17,6 +17,7 @@ import { activeFaces, faceName, faceColor, slotFor, normaliseFaceCount, TILES_PE
 import { CubeBoard } from '../components/CubeBoard'
 import { RunEventPanel, Step } from '../components/RunEventPanel'
 import { CONTEST_GAMES, getContestGame } from '../lib/contestGames'
+import { SupportInbox } from '../components/SupportInbox'
 import { aitbByName } from '../lib/aitbActivities'
 import { LED_HEX, LED_KEYS } from '../lib/ledColors'
 import { duelBonusByTeam } from '../hooks/useBingoDuels'
@@ -1865,7 +1866,13 @@ export function BingoDashAdmin() {
   // "category X in the active board": the Complete Library view lists every
   // board, and matching against currentSectionId there silently touched
   // nothing when the group belonged to another board.
-  const setBulkCategoryPoints = async (taskIds: string[], points: number) => {
+  // Whole-number boards round on save. Doing it here rather than on the input
+  // means a pasted value or a bulk edit cannot slip a decimal through.
+  const roundPoints = (n: number) =>
+    currentBoard?.decimal_points ? Math.round(n * 100) / 100 : Math.round(n)
+
+  const setBulkCategoryPoints = async (taskIds: string[], pointsRaw: number) => {
+    const points = roundPoints(pointsRaw)
     if (taskIds.length === 0) return
     const ids = new Set(taskIds)
     setTasks(prev => prev.map(t => ids.has(t.id) ? { ...t, points } : t))
@@ -1873,7 +1880,8 @@ export function BingoDashAdmin() {
     if (error) alert('Could not update points: ' + error.message)
   }
 
-  const setTaskPoints = async (taskId: string, points: number) => {
+  const setTaskPoints = async (taskId: string, pointsRaw: number) => {
+    const points = roundPoints(pointsRaw)
     setTasks(prev => prev.map(t => t.id === taskId ? { ...t, points } : t))
     await supabase.from('bingo_tasks').update({ points }).eq('id', taskId)
   }
@@ -3806,6 +3814,7 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
           const btn = 'px-4 py-2 rounded-xl text-sm font-black transition-all active:scale-95'
           return (
             <RunEventPanel>
+              {currentSectionId && <SupportInbox sectionId={currentSectionId} />}
               <div className="flex flex-wrap items-center justify-between gap-3 mb-6 px-4 py-3 rounded-xl border"
                    style={{ background: 'var(--a-surface-2)', borderColor: 'var(--a-border)' }}>
                 <div>
@@ -3903,6 +3912,28 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
               <h1 className="text-3xl font-black a-text tracking-tight">Board settings</h1>
               <p className="a-text-2 mt-1.5 text-sm">Options for <strong>{currentBoard?.name}</strong>. Each row shows its current value.</p>
             </div>
+            <AdminSection icon="🔢" title="Points Format"
+          blurb="Whole numbers keep the projector easy to read. Decimals give you a tie-breaker when two teams finish level."
+          summary={<>{currentBoard?.decimal_points ? '0.00 — decimals' : '0 — whole numbers'}</>}>
+          <div className="flex gap-2">
+            {[false, true].map(dec => {
+              const on = !!currentBoard?.decimal_points === dec
+              return (
+                <button
+                  key={String(dec)}
+                  onClick={() => { if (!on) updateBoardSettings({ decimal_points: dec }) }}
+                  className="px-4 py-3 rounded-xl font-black text-sm transition-colors"
+                  style={on
+                    ? { background: 'var(--a-brand)', color: '#fff' }
+                    : { background: 'var(--a-surface-2)', color: 'var(--a-text-2)' }}
+                >
+                  {dec ? '100.25  Decimals' : '100  Whole numbers'}
+                </button>
+              )
+            })}
+          </div>
+        </AdminSection>
+
             <AdminSection icon="🧊" title="Board Faces"
           blurb="A cube board is several 5×5 boards in one. Same bingo rules on every face — more faces simply means more to complete."
           summary={<>{normaliseFaceCount(currentBoard?.face_count)} × 5×5</>}>

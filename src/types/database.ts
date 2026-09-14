@@ -92,6 +92,10 @@ export interface BoardTimer {
 export interface BingoSection extends BoardTimer {
   /** Cube faces in play: 1, 2 or 6. See src/lib/cubeFaces.ts */
   face_count?: number | null
+  // Whole numbers by default. Decimals are opt-in per board: a projector
+  // reads 1,247 faster than 1,247.50, so only turn it on when the scoring
+  // actually needs the precision.
+  decimal_points?: boolean | null
   /** midnight | arena | daylight — see src/lib/scoreboardThemes.ts */
   scoreboard_theme?: string | null
   id: string
