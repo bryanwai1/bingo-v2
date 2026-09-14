@@ -6,6 +6,7 @@ import { fetchBoardTasks } from '../lib/boardCards'
 import { ParticleBackground } from '../components/ParticleBackground'
 import { TimeUpAlarm } from '../components/TimeUpAlarm'
 import { TileFace } from '../components/BingoTileFace'
+import { MyQrButton } from '../components/MyQrButton'
 import { IncomingDuelBanner } from '../components/ContestCard'
 import { normalizeTileDisplay, withCategoryColors, type TileDisplay } from '../lib/bingoTileDisplay'
 import type { BingoTask, BingoScan, BingoSection, BingoTeam, BingoMember, BoardTimer } from '../types/database'
@@ -51,12 +52,16 @@ function JoinScreen({
   memberCounts,
   onJoinGroup,
   isObserver = false,
+  invite = null,
 }: {
   sectionName: string
   groups: BingoTeam[]
   memberCounts: Record<string, number>
   onJoinGroup: (memberName: string, password: string, teamId: string, role: 'member' | 'observer') => Promise<void>
   isObserver?: boolean
+  /** From a teammate's invite QR: the team and its password are already
+   *  known, so the newcomer only types a name and lands on that team. */
+  invite?: { team: BingoTeam; password: string } | null
 }) {
   const [step, setStep] = useState<'name' | 'group' | 'password'>('name')
   const [playerName, setPlayerName] = useState(() => localStorage.getItem(PLAYER_NAME_KEY) ?? '')
@@ -68,11 +73,22 @@ function JoinScreen({
 
   const trimmedName = playerName.trim()
 
-  const handleSubmitName = (e: React.FormEvent) => {
+  const handleSubmitName = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!trimmedName) return
     localStorage.setItem(PLAYER_NAME_KEY, trimmedName)
     setError('')
+    if (invite && !isObserver) {
+      // Scanned a teammate's QR: straight onto their team.
+      setSubmitting(true)
+      try {
+        await onJoinGroup(trimmedName, invite.password, invite.team.id, 'member')
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Failed to join group')
+        setSubmitting(false)
+      }
+      return
+    }
     setStep('group')
   }
 
@@ -134,6 +150,12 @@ function JoinScreen({
           className="relative z-10 bg-white rounded-3xl shadow-2xl p-8 w-full max-w-sm animate-bounce-in"
           style={{ animationDelay: '0.05s', opacity: 0, animationFillMode: 'forwards' }}
         >
+          {invite && !isObserver && (
+            <div className="flex items-center gap-2 bg-teal-50 border border-teal-200 rounded-xl px-4 py-2.5 mb-5">
+              <span className="text-base">👥</span>
+              <p className="text-teal-800 text-xs font-bold">You're joining <span className="font-black">{invite.team.name}</span> — just add your name.</p>
+            </div>
+          )}
           {isObserver && (
             <div className="flex items-center gap-2 bg-blue-50 border border-blue-200 rounded-xl px-4 py-2.5 mb-5">
               <span className="text-base">👁</span>
@@ -516,6 +538,7 @@ function BoardScreen({
   sectionName,
   sectionSlug,
   memberRole,
+  teamPassword,
   gridTasks: gridTasksProp,
   scans,
   reviews,
@@ -529,6 +552,8 @@ function BoardScreen({
   sectionName: string
   sectionSlug: string
   memberRole: 'member' | 'observer'
+  /** The team's 4-digit password, for the invite QR. */
+  teamPassword?: string | null
   gridTasks: BingoTask[]
   scans: BingoScan[]
   reviews: Record<string, ReviewFlag>
@@ -661,6 +686,19 @@ function BoardScreen({
           </div>
           <div className="flex flex-col items-end gap-2 flex-shrink-0 mt-1">
             <TimerDisplay settings={settings} />
+            {/* A teammate scans this and lands on the name step for THIS
+                team — no hunting through the group list or asking for the
+                password across a noisy room. Members only: an observer has
+                no password to hand out. */}
+            {memberRole === 'member' && teamPassword && (
+              <MyQrButton
+                label="Invite teammate"
+                teamName={team.name}
+                hint="Teammate scans this, types their name, and joins your team"
+
+                value={`${window.location.origin}/bingo-dash/play/${sectionSlug}?team=${team.id}&pw=${teamPassword}`}
+              />
+            )}
             <button
               onClick={() => navigate(`/bingo-dash/projector/${sectionSlug}`)}
               className="text-xs font-bold text-teal-300 hover:text-teal-200 transition-colors"
@@ -772,6 +810,10 @@ export function BingoDashJoin() {
   const { sectionSlug } = useParams<{ sectionSlug: string }>()
   const [searchParams] = useSearchParams()
   const isObserver = searchParams.get('mode') === 'observer'
+  // ?team=<id>&pw=<4 digits> — a teammate's invite QR (see the board's
+  // "Invite teammate" button). Only honoured once the groups have loaded.
+  const inviteTeamId = searchParams.get('team')
+  const invitePw = searchParams.get('pw') ?? ''
   const [section, setSection] = useState<BingoSection | null>(null)
   const [team, setTeam] = useState<{ id: string; name: string } | null>(null)
   const [memberRole, setMemberRole] = useState<'member' | 'observer'>('member')
@@ -1132,7 +1174,13 @@ export function BingoDashJoin() {
   if (pageState === 'join' && section) {
     return (
       <>
-        <JoinScreen sectionName={section.name} groups={groups} memberCounts={memberCounts} onJoinGroup={joinGroup} isObserver={isObserver} />
+        <JoinScreen
+          sectionName={section.name} groups={groups} memberCounts={memberCounts} onJoinGroup={joinGroup} isObserver={isObserver}
+          invite={(() => {
+            const t = inviteTeamId ? groups.find(g => g.id === inviteTeamId) : null
+            return t && /^\d{4}$/.test(invitePw) ? { team: t, password: invitePw } : null
+          })()}
+        />
         {timeUpOverlay}
       </>
     )
@@ -1175,6 +1223,7 @@ export function BingoDashJoin() {
           sectionName={section.name}
           sectionSlug={sectionSlug!}
           memberRole={memberRole}
+          teamPassword={groups.find(g => g.id === team.id)?.password ?? null}
           gridTasks={gridTasks}
           scans={scans}
           reviews={reviews}

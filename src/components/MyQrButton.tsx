@@ -13,10 +13,12 @@ import { QRCodeSVG } from 'qrcode.react'
 // instead of the viewport, and z-[100] was confined to that ancestor's local
 // stacking context — so the board tiles painted straight over the QR.
 
-export function MyQrButton({ value, teamName, label = 'My QR' }: {
+export function MyQrButton({ value, teamName, label = 'My QR', hint = 'Show this to be scanned' }: {
   value: string
   teamName?: string
   label?: string
+  /** Line under the QR — what the scanner should expect to happen. */
+  hint?: string
 }) {
   const [open, setOpen] = useState(false)
 
@@ -61,7 +63,7 @@ export function MyQrButton({ value, teamName, label = 'My QR' }: {
           {teamName && (
             <p className="text-white font-black text-xl mt-5">{teamName}</p>
           )}
-          <p className="text-white/50 text-sm mt-2">Show this to be scanned</p>
+          <p className="text-white/50 text-sm mt-2">{hint}</p>
           <button
             onClick={() => setOpen(false)}
             className="mt-8 px-6 py-2.5 rounded-2xl border border-white/25 text-white/80 text-sm font-bold hover:bg-white/10 transition-colors"
