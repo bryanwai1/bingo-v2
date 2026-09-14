@@ -9,6 +9,7 @@ import { TimeUpAlarm } from '../components/TimeUpAlarm'
 import { TileFace } from '../components/BingoTileFace'
 import { IncomingDuelBanner } from '../components/ContestCard'
 import { MyQrButton } from '../components/MyQrButton'
+import { SupportChat } from '../components/SupportChat'
 import { ForestWaitingScreen } from '../components/ForestWaitingScreen'
 import { WaitingTiger } from '../components/WaitingTiger'
 import { activeFaces, faceName, faceColor, normaliseFaceCount } from '../lib/cubeFaces'
@@ -954,6 +955,9 @@ export function BingoDashHome() {
       {/* Another team can challenge us at any moment — the banner has to reach
           players wherever they are on the board, not only inside a card. */}
       {team && sectionId && <IncomingDuelBanner team={team} sectionId={sectionId} />}
+      {team && sectionId && (
+        <SupportChat sectionId={sectionId} teamId={team.id} teamName={team.name} />
+      )}
       <TimeUpAlarm settings={section} />
     </>
   )

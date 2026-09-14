@@ -4870,7 +4870,14 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
               {downloadingZip ? '⏳ Zipping…' : `⬇ Download ${actionLabelSuffix}`}
             </button>
             <button
-              onClick={() => bulkDeleteSubmissions(actionTargets)}
+              onClick={() => {
+                // Nothing ticked means "everything in view" — easy to hit by
+                // accident, and it wipes a client's photos and their progress.
+                const n = actionTargets.length
+                if (selectedSubs.length === 0 &&
+                    !confirm(`Delete all ${n} submission${n === 1 ? '' : 's'} in view? This also resets those tiles for the teams.`)) return
+                bulkDeleteSubmissions(actionTargets)
+              }}
               disabled={bulkActioning || actionTargets.length === 0}
               className="px-4 py-2 rounded-lg text-xs font-bold bg-red-600 a-text hover:bg-red-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
               title="Permanently delete these submissions and their photos. Resets the team's progress on affected tiles. Use to clear test data."

@@ -17,6 +17,7 @@ import { SwipeablePages } from '../components/SwipeablePages'
 import { ParticleBackground } from '../components/ParticleBackground'
 import { TimeUpAlarm } from '../components/TimeUpAlarm'
 import { ContestCard } from '../components/ContestCard'
+import { SupportChat } from '../components/SupportChat'
 import { SignSpliceCard } from '../components/SignSpliceCard'
 import { BreakoutHuntCard } from '../components/BreakoutHuntCard'
 import { useCardDrawConfig } from '../hooks/useCardDrawConfig'
@@ -720,7 +721,14 @@ export function BingoDashParticipant() {
 
   // The bingo time-up alarm overlays every state below — only mounted in the
   // bingo flow so Snake & Ladder players are unaffected.
-  const timeUpOverlay = !isSnakeLadder ? <TimeUpAlarm sectionId={team?.section_id ?? null} /> : null
+  const timeUpOverlay = !isSnakeLadder ? (
+    <>
+      <TimeUpAlarm sectionId={team?.section_id ?? null} />
+      {team && sectionId && (
+        <SupportChat sectionId={sectionId} teamId={team.id} teamName={team.name} />
+      )}
+    </>
+  ) : null
 
   // ── Loading ─────────────────────────────────────────────────────────
   if ((!isSnakeLadder && teamLoading) || !task) {
