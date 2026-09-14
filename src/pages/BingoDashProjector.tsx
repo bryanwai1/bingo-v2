@@ -208,7 +208,10 @@ export function BingoDashProjector() {
     const reachedAt = Math.max(lastScan, lastDuel)
     return {
       team,
-      points: tilePoints + duelBonus,
+      // A hidden hundredth per team, distinct across the board, so two teams
+      // on the same cards cannot tie. Added to the total rather than per scan:
+      // per scan it would grow with card count and become a volume bonus.
+      points: tilePoints + duelBonus + Number(team.tiebreak ?? 0),
       duelBonus,
       bonus,
       bingos,

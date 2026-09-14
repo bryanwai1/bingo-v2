@@ -239,6 +239,9 @@ export interface BingoTeam {
   password: string
   photo_url: string | null
   bonus_points: number
+  // A hidden hundredth, distinct per board, so two teams that complete the
+  // same cards cannot finish level. Too small to overtake a real point.
+  tiebreak?: number | null
   // Itemised breakdown of the bonus total: one entry per activity the marshal
   // awarded points for. bonus_points stays the authoritative sum of these.
   bonus_breakdown: BonusItem[]

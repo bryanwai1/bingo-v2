@@ -1549,6 +1549,17 @@ export function BingoDashAdmin() {
   useEffect(() => {
     const channel = supabase
       .channel('bingo-submissions-admin')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'bingo_scans' }, ({ eventType, new: row, old: prev }) => {
+        // A second facilitator approving on their own screen writes the scan
+        // row, not our local state — without this the status flips here but the
+        // score sits still until someone refreshes.
+        const sc = (row ?? prev) as BingoScan
+        if (!sc?.id || !myTeamIdsRef.current.has(sc.team_id)) return
+        setScans(p2 =>
+          eventType === 'DELETE' ? p2.filter(s => s.id !== sc.id)
+          : p2.some(s => s.id === sc.id) ? p2.map(s => s.id === sc.id ? sc : s)
+          : [...p2, sc])
+      })
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'bingo_photo_submissions' }, ({ new: row }) => {
         const sub = row as BingoPhotoSubmission
         if (!myTeamIdsRef.current.has(sub.team_id)) return
