@@ -22,8 +22,22 @@ type Msg = {
   read_at: string | null
 }
 
-const POS_KEY = 'bingo-chat-pos'
+const POS_KEY = 'bingo-chat-pos-v2'
 const DRAG_THRESHOLD = 6
+// Bubble diameter used for clamping (the phone size; desktop is a touch
+// bigger but the margin below absorbs it).
+const BUBBLE = 56
+const EDGE = 8
+// Default spot: top-left, under the board header (title + progress line),
+// where it covers no tile and no header control.
+const DEFAULT = { x: EDGE, y: 96 }
+
+/** Keep a point on screen with the bubble fully visible. */
+function clamp(x: number, y: number) {
+  const maxX = Math.max(EDGE, window.innerWidth - BUBBLE - EDGE)
+  const maxY = Math.max(EDGE, window.innerHeight - BUBBLE - EDGE)
+  return { x: Math.max(EDGE, Math.min(maxX, x)), y: Math.max(EDGE, Math.min(maxY, y)) }
+}
 
 export function SupportChat({
   sectionId, teamId, teamName,
@@ -34,13 +48,26 @@ export function SupportChat({
   const [sending, setSending] = useState(false)
   const [unread, setUnread] = useState(0)
 
+  // Position is remembered as a FRACTION of the viewport, so a spot chosen
+  // on a phone in portrait is still on screen after rotating, and a desktop
+  // choice does not land off-screen on a phone.
   const [pos, setPos] = useState(() => {
     try {
       const raw = localStorage.getItem(POS_KEY)
-      if (raw) return JSON.parse(raw) as { x: number; y: number }
+      if (raw) {
+        const f = JSON.parse(raw) as { fx: number; fy: number }
+        return clamp(f.fx * window.innerWidth, f.fy * window.innerHeight)
+      }
     } catch { /* private mode */ }
-    return { x: -1, y: -1 }        // -1 = not placed yet, use the default corner
+    return clamp(DEFAULT.x, DEFAULT.y)
   })
+
+  // Re-clamp when the viewport changes (rotation, keyboard, resize).
+  useEffect(() => {
+    const onResize = () => setPos(p => clamp(p.x, p.y))
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [])
 
   const drag = useRef<{ dx: number; dy: number; moved: boolean } | null>(null)
   const listRef = useRef<HTMLDivElement>(null)
@@ -101,10 +128,7 @@ export function SupportChat({
       d.moved = true
     }
     // Clamped, or the bubble can be flicked off screen and never recovered.
-    setPos({
-      x: Math.max(8, Math.min(window.innerWidth  - 60, x)),
-      y: Math.max(8, Math.min(window.innerHeight - 60, y)),
-    })
+    setPos(clamp(x, y))
   }
 
   const onPointerUp = (e: React.PointerEvent) => {
@@ -112,7 +136,9 @@ export function SupportChat({
     drag.current = null
     if (!d) return
     if (d.moved) {
-      try { localStorage.setItem(POS_KEY, JSON.stringify(pos)) } catch { /* private mode */ }
+      try {
+        localStorage.setItem(POS_KEY, JSON.stringify({ fx: pos.x / window.innerWidth, fy: pos.y / window.innerHeight }))
+      } catch { /* private mode */ }
     } else {
       setOpen(o => !o)                       // a tap, not a drag
     }
@@ -131,16 +157,11 @@ export function SupportChat({
     setSending(false)
   }
 
-  const placed = pos.x >= 0
-  const anchor: React.CSSProperties = placed
-    ? { left: pos.x, top: pos.y }
-    : { right: 12, bottom: 'calc(12px + env(safe-area-inset-bottom, 0px))' }
-  // Panel opens toward whichever side has room.
-  // Undragged, the bubble sits in the bottom-right corner — so the panel has
-  // to open leftward or it runs straight off the screen. Only once the bubble
-  // has been moved does its actual x decide the direction.
-  const openLeft = placed ? pos.x > window.innerWidth / 2 : true
-  const openUp   = placed ? pos.y > window.innerHeight / 2 : true
+  const anchor: React.CSSProperties = { left: pos.x, top: pos.y }
+  // Panel opens toward whichever side has room. From the default top-left
+  // spot that is rightward and downward.
+  const openLeft = pos.x > window.innerWidth / 2
+  const openUp   = pos.y > window.innerHeight / 2
 
   return (
     <>
