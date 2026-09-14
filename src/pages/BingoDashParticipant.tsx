@@ -74,6 +74,13 @@ async function compressToJpeg(file: File, maxDim = 1920, quality = 0.85): Promis
   }
 }
 
+/** "Hunt Challenge" already says challenge — don't print it twice. */
+function splashKicker(colorName: string | null | undefined): string {
+  const name = (colorName ?? '').trim()
+  if (!name) return 'Challenge'
+  return /challenge$/i.test(name) ? name : `${name} Challenge`
+}
+
 export function BingoDashParticipant() {
   const { taskId } = useParams<{ taskId: string }>()
   const navigate = useNavigate()
@@ -777,11 +784,19 @@ export function BingoDashParticipant() {
         <div className="absolute inset-0 bg-black/10" />
         <div className="absolute -top-32 -left-32 w-64 h-64 bg-white/10 rounded-full blur-3xl animate-float" />
         <div className="absolute -bottom-32 -right-32 w-80 h-80 bg-white/10 rounded-full blur-3xl animate-float" style={{ animationDelay: '1s' }} />
+        {/* Way out before committing — the tile was tapped by mistake more
+            often than not. Stops the splash's own tap-to-start. */}
+        <button
+          onClick={(e) => { e.stopPropagation(); navigate(backPath) }}
+          className="absolute top-5 left-5 z-20 flex items-center gap-1.5 px-3 py-2 rounded-xl bg-black/25 hover:bg-black/35 text-white/90 text-sm font-bold backdrop-blur-sm transition-colors"
+        >
+          ← Back to Board
+        </button>
 
         <div className="relative z-10 text-center px-8 animate-bounce-in">
           <div className="text-6xl mb-6">{isSnakeLadder ? '🐍🪜' : aitbActivity?.emoji ?? '🎯'}</div>
           <p className="text-sm font-bold opacity-70 uppercase tracking-[0.2em] mb-2">
-            {aitbActivity ? `Activity ${aitbActivity.act} · ${aitbActivity.mins} min` : `${task.color} Challenge`}
+            {aitbActivity ? `Activity ${aitbActivity.act} · ${aitbActivity.mins} min` : splashKicker(task.color)}
           </p>
           <h1 className="text-5xl font-black tracking-tight mb-4 leading-tight">
             {task.title}

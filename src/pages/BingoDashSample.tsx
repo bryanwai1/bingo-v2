@@ -1013,10 +1013,18 @@ const SampleTaskDetail = forwardRef<SampleTaskDetailHandle, {
         <div className="absolute inset-0 bg-black/10" />
         <div className="absolute -top-32 -left-32 w-64 h-64 bg-white/10 rounded-full blur-3xl animate-float" />
         <div className="absolute -bottom-32 -right-32 w-80 h-80 bg-white/10 rounded-full blur-3xl animate-float" style={{ animationDelay: '1s' }} />
+        <button
+          onClick={(e) => { e.stopPropagation(); onClose() }}
+          className="absolute top-5 left-5 z-20 flex items-center gap-1.5 px-3 py-2 rounded-xl bg-black/25 hover:bg-black/35 text-white/90 text-sm font-bold backdrop-blur-sm transition-colors"
+        >
+          ← Back to Board
+        </button>
 
         <div className="relative z-10 text-center px-8 animate-bounce-in">
           <div className="text-6xl mb-6">🎯</div>
-          <p className="text-sm font-bold opacity-70 uppercase tracking-[0.2em] mb-2">{task.color} Challenge</p>
+          <p className="text-sm font-bold opacity-70 uppercase tracking-[0.2em] mb-2">
+            {/challenge$/i.test((task.color ?? '').trim()) ? task.color : `${task.color} Challenge`}
+          </p>
           <h1 className="text-5xl font-black tracking-tight mb-4 leading-tight">{task.title}</h1>
           <div className="w-16 h-1 bg-white/40 rounded-full mx-auto mb-6" />
           <p className="text-lg opacity-80 font-medium mb-2">Team: {teamName}</p>

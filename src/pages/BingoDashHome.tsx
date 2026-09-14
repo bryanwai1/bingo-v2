@@ -598,12 +598,6 @@ function BoardScreen({
           </div>
           <div className="flex flex-col items-end gap-2 flex-shrink-0 mt-1">
             <TimerDisplay settings={settings} />
-            {/* Carried by every player so nobody has to queue at the host desk
-                for a code they need mid-activity. */}
-            <MyQrButton
-              value={`bingodash-team:${team.id}`}
-              teamName={team.name}
-            />
             {inviteUrl && (
               <MyQrButton
                 label="Invite teammate"
