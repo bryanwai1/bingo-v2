@@ -47,6 +47,12 @@ export function BingoDashProjector() {
   const [timerDisplay, setTimerDisplay] = useState('00:00')
   const [timerRunning, setTimerRunning] = useState(false)
   const [showBonus, setShowBonus] = useState(false)
+  // Live-status readout, so "is it updating?" can be answered from across
+  // the room: realtime channel state and when data was last fetched.
+  const [liveState, setLiveState] = useState<'connecting' | 'live' | 'offline'>('connecting')
+  const [lastSync, setLastSync] = useState<number>(0)
+  const [nowTick, setNowTick] = useState(Date.now())
+  useEffect(() => { const id = setInterval(() => setNowTick(Date.now()), 1000); return () => clearInterval(id) }, [])
 
   // Initial load — also the periodic safety refresh (below): a projector runs
   // for hours on venue Wi-Fi, and a dropped realtime socket otherwise leaves
@@ -68,6 +74,7 @@ export function BingoDashProjector() {
       if (sectionsRes.data) setSections(sectionsRes.data)
       if (settingsRes.data) setSettings(settingsRes.data)
       if (duelsRes.data) setDuels(duelsRes.data)
+      setLastSync(Date.now())
   }, [])
   useEffect(() => { void loadAll() }, [loadAll])
 
@@ -117,7 +124,8 @@ export function BingoDashProjector() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'bingo_duels' }, () => nudge('duels'))
       .subscribe((status) => {
         // A re-subscribe after a drop means events were missed: catch up.
-        if (status === 'SUBSCRIBED') void loadAll()
+        if (status === 'SUBSCRIBED') { setLiveState('live'); void loadAll() }
+        else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') setLiveState('offline')
       })
     return () => { supabase.removeChannel(channel) }
   }, [loadAll])
@@ -308,6 +316,11 @@ export function BingoDashProjector() {
               </div>
             )}
             <p className={`${theme.muted} text-sm font-bold`}>{sectionTeams.length} teams competing</p>
+            <p className={`${theme.muted} text-xs font-bold flex items-center gap-1.5`} title="Realtime connection and last data refresh">
+              <span className={`w-2 h-2 rounded-full ${liveState === 'live' ? 'bg-green-400 animate-pulse' : liveState === 'offline' ? 'bg-red-400' : 'bg-amber-400'}`} />
+              {liveState === 'live' ? 'Live' : liveState === 'offline' ? 'Reconnecting' : 'Connecting'}
+              {lastSync > 0 && <span className="opacity-60">· synced {Math.max(0, Math.round((nowTick - lastSync) / 1000))}s ago</span>}
+            </p>
             <button
               onClick={() => setShowBonus(v => !v)}
               className={`px-5 py-2.5 rounded-xl text-sm font-black uppercase tracking-wider transition-all ${
