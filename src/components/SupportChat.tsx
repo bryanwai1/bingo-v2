@@ -41,12 +41,15 @@ function clamp(x: number, y: number) {
 }
 
 export function SupportChat({
-  sectionId, teamId, teamName, inline = false,
+  sectionId, teamId, teamName, inline = false, demo = false,
 }: {
   sectionId: string; teamId: string; teamName?: string
   /** Anchored in the page (the board header, under the team name) instead of
    *  floating and draggable. Same panel, same messages. */
   inline?: boolean
+  /** Sample board: nothing is saved. Messages stay on this screen and a
+   *  canned marshal reply arrives after a moment, so the room sees the flow. */
+  demo?: boolean
 }) {
   const [open, setOpen] = useState(false)
   const [msgs, setMsgs] = useState<Msg[]>([])
@@ -98,6 +101,7 @@ export function SupportChat({
 
   /* ── load + live updates ───────────────────────────────────────────── */
   const load = useCallback(async () => {
+    if (demo) return
     const { data } = await supabase
       .from('bingo_messages')
       .select('id, sender, body, created_at, read_at')
@@ -106,11 +110,12 @@ export function SupportChat({
     const rows = (data ?? []) as Msg[]
     setMsgs(rows)
     setUnread(rows.filter(m => m.sender === 'admin' && !m.read_at).length)
-  }, [teamId])
+  }, [teamId, demo])
 
   useEffect(() => { void load() }, [load])
 
   useEffect(() => {
+    if (demo) return
     const ch = supabase
       .channel(`chat-${teamId}`)
       .on('postgres_changes',
@@ -118,12 +123,13 @@ export function SupportChat({
         () => { void load() })
       .subscribe()
     return () => { void supabase.removeChannel(ch) }
-  }, [teamId, load])
+  }, [teamId, load, demo])
 
   // Mark the facilitator's replies read once the panel is actually open —
   // opening is the only reliable signal that a human saw them.
   useEffect(() => {
     if (!open || unread === 0) return
+    if (demo) { setUnread(0); return }
     void supabase.from('bingo_messages')
       .update({ read_at: new Date().toISOString() })
       .eq('team_id', teamId).eq('sender', 'admin').is('read_at', null)
@@ -175,6 +181,18 @@ export function SupportChat({
     if (!body || sending) return
     setSending(true)
     setDraft('')
+    if (demo) {
+      const now = new Date().toISOString()
+      setMsgs(m => [...m, { id: `d-${Date.now()}`, sender: 'team', body, created_at: now, read_at: now }])
+      window.setTimeout(() => {
+        setMsgs(m => [...m, { id: `a-${Date.now()}`, sender: 'admin',
+          body: 'Marshal here - got your message. (Demo: in the real game a facilitator replies from the admin page.)',
+          created_at: new Date().toISOString(), read_at: null }])
+        setUnread(u => u + 1)
+      }, 1500)
+      setSending(false)
+      return
+    }
     const { error } = await supabase.from('bingo_messages')
       .insert({ section_id: sectionId, team_id: teamId, sender: 'team', body })
     if (error) setDraft(body)                // put it back rather than lose it

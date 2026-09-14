@@ -11,6 +11,7 @@ import { useBingoTaskPages } from '../hooks/useBingoTaskPages'
 import { useBingoTaskPhotos } from '../hooks/useBingoTaskPhotos'
 import { useTaskLinks } from '../hooks/useTaskLinks'
 import { TaskLinkButtons, type LinkItem } from '../components/TaskLinkButtons'
+import { SupportChat } from '../components/SupportChat'
 import { DemoBundleCard } from '../components/DemoBundleCard'
 import { AitbMissionModule } from '../components/AitbMissionModule'
 import { BonusBar } from '../components/AitbBonusBar'
@@ -648,6 +649,10 @@ function BoardScreen({
               {lettersEarned && (
                 <span className="text-purple-300 text-xs font-black tracking-widest">{lettersEarned}!</span>
               )}
+            </div>
+            {/* Same help bubble as the player board; demo-only messages. */}
+            <div className="mt-3">
+              <SupportChat inline demo sectionId={section?.id ?? 'demo'} teamId={`demo-${teamName}`} teamName={teamName} />
             </div>
           </div>
           <div className="flex flex-col items-end gap-2 flex-shrink-0 mt-1">
