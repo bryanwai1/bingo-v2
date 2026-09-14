@@ -797,7 +797,10 @@ export function BingoDashAdmin() {
   const [membersLinkCopied, setMembersLinkCopied] = useState(false)
   // Per-team bonus-points breakdown popup: which team is open + its editable draft
   const [bonusTeam, setBonusTeam] = useState<BingoTeam | null>(null)
-  const [bonusDraft, setBonusDraft] = useState<BonusItem[]>([])
+  // Draft rows carry a sign: a deduction is typed as a positive number and
+  // stored negative, so the marshal never has to think about minus signs.
+  type BonusDraftRow = BonusItem & { deduct?: boolean }
+  const [bonusDraft, setBonusDraft] = useState<BonusDraftRow[]>([])
   const [bonusSaving, setBonusSaving] = useState(false)
   // Section-wide "live teams link" share modal
   const [showAllTeamsLink, setShowAllTeamsLink] = useState(false)
@@ -2287,11 +2290,14 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
   // Open the bonus-points breakdown popup for a team. Seed the draft from its
   // saved breakdown; if the team has a legacy total with no breakdown, start it
   // as a single "Bonus" row so the number isn't silently lost.
-  const openBonusModal = (team: BingoTeam) => {
+  const openBonusModal = (team: BingoTeam, mode: 'add' | 'deduct' = 'add') => {
     const saved = team.bonus_breakdown ?? []
-    if (saved.length > 0) setBonusDraft(saved.map(i => ({ ...i })))
-    else if ((team.bonus_points ?? 0) !== 0) setBonusDraft([{ label: 'Bonus', points: team.bonus_points }])
-    else setBonusDraft([])
+    let rows: BonusDraftRow[] = []
+    if (saved.length > 0) rows = saved.map(i => ({ ...i, deduct: i.points < 0 }))
+    else if ((team.bonus_points ?? 0) !== 0) rows = [{ label: 'Bonus', points: team.bonus_points, deduct: team.bonus_points < 0 }]
+    // "Deduct" is the same sheet, opened with a fresh minus row ready to fill.
+    if (mode === 'deduct') rows = [...rows, { label: '', points: 0, deduct: true }]
+    setBonusDraft(rows)
     setBonusTeam(team)
   }
 
@@ -2299,7 +2305,7 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
   // Blank-label rows are dropped so leftover empties don't clutter the total.
   const saveBonus = async () => {
     if (!bonusTeam) return
-    const cleaned = bonusDraft
+    const cleaned: BonusItem[] = bonusDraft
       .map(i => ({ label: i.label.trim(), points: Number.isFinite(i.points) ? i.points : 0 }))
       .filter(i => i.label !== '' || i.points !== 0)
     const total = cleaned.reduce((sum, i) => sum + i.points, 0)
@@ -4783,6 +4789,15 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                                   </button>
                                 )
                               })()}
+                              {/* Same sheet as Add, opened with a minus row ready — for
+                                  penalties and corrections. */}
+                              <button
+                                onClick={() => openBonusModal(team, 'deduct')}
+                                title="Deduct points — add a penalty or correction line"
+                                className="ml-1.5 px-2.5 py-1 rounded-lg border border-red-500/40 bg-red-500/10 text-red-400 hover:bg-red-500/20 text-sm font-mono transition-colors"
+                              >
+                                Deduct
+                              </button>
                             </td>
                             {/* Actions */}
                             <td className="px-3 py-2.5 text-right">
@@ -5693,9 +5708,10 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
       {/* ── Per-team Bonus Points breakdown Modal ─────────────────────────── */}
       {bonusTeam && (() => {
         const total = bonusDraft.reduce((sum, i) => sum + (Number.isFinite(i.points) ? i.points : 0), 0)
-        const setRow = (idx: number, patch: Partial<BonusItem>) =>
+        const setRow = (idx: number, patch: Partial<BonusDraftRow>) =>
           setBonusDraft(prev => prev.map((it, i) => i === idx ? { ...it, ...patch } : it))
         const addRow = () => setBonusDraft(prev => [...prev, { label: '', points: 0 }])
+        const addDeductRow = () => setBonusDraft(prev => [...prev, { label: '', points: 0, deduct: true }])
         const removeRow = (idx: number) => setBonusDraft(prev => prev.filter((_, i) => i !== idx))
         return (
           <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 px-4"
@@ -5704,7 +5720,7 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
               onClick={e => e.stopPropagation()}>
               <div className="px-4 sm:px-6 py-5 border-b a-border flex items-center justify-between flex-shrink-0">
                 <div>
-                  <h3 className="text-lg font-bold a-text">Bonus Points</h3>
+                  <h3 className="text-lg font-bold a-text">Bonus &amp; Deductions</h3>
                   <p className="text-xs a-text-2 mt-0.5">
                     For <span className="font-bold a-text-3">{bonusTeam.name}</span> · one line per activity
                   </p>
@@ -5722,24 +5738,31 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                 <div className="flex flex-col gap-2">
                   {bonusDraft.map((item, idx) => (
                     <div key={idx} className="flex items-center gap-2">
+                      <span className={`w-5 text-center font-black text-sm ${item.deduct ? 'text-red-500' : 'text-emerald-500'}`}
+                        title={item.deduct ? 'Deduction' : 'Bonus'}>
+                        {item.deduct ? '−' : '+'}
+                      </span>
                       <input
                         type="text"
                         value={item.label}
                         autoFocus={idx === bonusDraft.length - 1 && item.label === ''}
-                        placeholder="Activity name (e.g. Tug of War)"
+                        placeholder={item.deduct ? 'Reason (e.g. Late to checkpoint)' : 'Activity name (e.g. Tug of War)'}
                         onChange={e => setRow(idx, { label: e.target.value })}
                         className="flex-1 px-3 py-2 rounded-lg border a-border focus:border-teal-500 focus:outline-none text-sm a-text a-surface"
                       />
                       <input
                         type="number"
                         step="1"
-                        value={Number.isFinite(item.points) ? item.points : 0}
+                        min={0}
+                        value={Number.isFinite(item.points) ? Math.abs(item.points) : 0}
                         onChange={e => {
-                          const n = parseInt(e.target.value, 10)
-                          setRow(idx, { points: Number.isFinite(n) ? n : 0 })
+                          const n = Math.abs(parseInt(e.target.value, 10))
+                          const mag = Number.isFinite(n) ? n : 0
+                          setRow(idx, { points: item.deduct ? -mag : mag })
                         }}
                         onFocus={e => e.target.select()}
-                        className="w-20 px-2 py-2 rounded-lg border a-border focus:border-teal-500 focus:outline-none text-sm text-center font-mono a-text a-surface"
+                        className={`w-20 px-2 py-2 rounded-lg border focus:outline-none text-sm text-center font-mono a-surface ${
+                          item.deduct ? 'border-red-500/40 text-red-400 focus:border-red-500' : 'a-border a-text focus:border-teal-500'}`}
                       />
                       <button onClick={() => removeRow(idx)}
                         title="Remove this activity"
@@ -5749,15 +5772,21 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                     </div>
                   ))}
                 </div>
-                <button onClick={addRow}
-                  className="mt-3 w-full py-2.5 rounded-lg border border-dashed a-border a-text-3 text-sm font-bold hover:border-teal-500 hover:text-teal-600 transition-colors">
-                  + Add activity
-                </button>
+                <div className="mt-3 grid grid-cols-2 gap-2">
+                  <button onClick={addRow}
+                    className="py-2.5 rounded-lg border border-dashed a-border a-text-3 text-sm font-bold hover:border-teal-500 hover:text-teal-600 transition-colors">
+                    + Add activity
+                  </button>
+                  <button onClick={addDeductRow}
+                    className="py-2.5 rounded-lg border border-dashed border-red-500/40 text-red-400 text-sm font-bold hover:border-red-500 hover:bg-red-500/10 transition-colors">
+                    − Add deduction
+                  </button>
+                </div>
               </div>
 
               <div className="px-4 sm:px-6 py-4 border-t a-border flex items-center justify-between flex-shrink-0">
                 <div className="text-sm a-text-3">
-                  Total bonus <span className="ml-1 font-mono font-black text-lg text-amber-600">{total > 0 ? `+${total}` : total}</span>
+                  Net adjustment <span className={`ml-1 font-mono font-black text-lg ${total < 0 ? 'text-red-500' : 'text-amber-600'}`}>{total > 0 ? `+${total}` : total}</span>
                 </div>
                 <div className="flex items-center gap-2">
                   <button onClick={() => { if (!bonusSaving) setBonusTeam(null) }}
