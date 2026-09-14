@@ -423,7 +423,7 @@ function AwardShow({ sectionSlug }: { sectionSlug: string }) {
                   <input
                     type="number"
                     value={r.bonusPoints}
-                    onChange={e => setBonus(r.team.id, parseInt(e.target.value, 10) || 0)}
+                    onChange={e => setBonus(r.team.id, parseFloat(e.target.value) || 0)}
                     onClick={e => (e.target as HTMLInputElement).select()}
                     className="flex-1 bg-white/10 rounded text-center font-mono font-bold py-1.5 focus:outline-none focus:ring-2 focus:ring-amber-400/50 min-w-0"
                   />

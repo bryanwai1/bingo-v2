@@ -427,13 +427,13 @@ function CategoryGroupBlock({
             <div className="flex items-center gap-1.5 flex-shrink-0">
               <span className="text-xs a-text-3">pts for all:</span>
               <input
-                type="number" min={0}
+                type="number" min={0} step="0.1"
                 defaultValue={group.tasks[0]?.points ?? 0}
                 key={group.key + '-pts'}
                 className="w-14 px-1.5 py-0.5 text-xs border a-border a-surface-2 a-text rounded text-center font-bold focus:outline-none focus:ring-1 focus:ring-teal-500"
-                onBlur={e => setBulkCategoryPoints(group.tasks.map(t => t.id), Math.max(0, parseInt(e.target.value) || 0))}
+                onBlur={e => setBulkCategoryPoints(group.tasks.map(t => t.id), Math.max(0, parseFloat(e.target.value) || 0))}
                 onKeyDown={e => {
-                  if (e.key === 'Enter') setBulkCategoryPoints(group.tasks.map(t => t.id), Math.max(0, parseInt((e.target as HTMLInputElement).value) || 0))
+                  if (e.key === 'Enter') setBulkCategoryPoints(group.tasks.map(t => t.id), Math.max(0, parseFloat((e.target as HTMLInputElement).value) || 0))
                 }}
                 title={`Set points for all ${group.label} tasks`}
               />
@@ -481,7 +481,7 @@ function CategoryGroupBlock({
                     defaultValue={task.points ?? 0}
                     key={task.id + '-pts'}
                     className="w-10 bg-transparent text-white text-[10px] font-black text-center focus:outline-none"
-                    onBlur={e => setTaskPoints(task.id, Math.max(0, parseInt(e.target.value) || 0))}
+                    onBlur={e => setTaskPoints(task.id, Math.max(0, parseFloat(e.target.value) || 0))}
                     onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
                     title="Edit points for this card"
                   />
@@ -3254,8 +3254,8 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                   </div>
                   <div className="w-24">
                     <label className="block text-sm font-medium a-text-3 mb-1">Points</label>
-                    <input type="number" value={formPoints} min={0}
-                      onChange={e => setFormPoints(Math.max(0, parseInt(e.target.value) || 0))}
+                    <input type="number" step="0.1" value={formPoints} min={0}
+                      onChange={e => setFormPoints(Math.max(0, parseFloat(e.target.value) || 0))}
                       className="w-full px-3 py-2 rounded-lg border a-border focus:outline-none focus:ring-2 focus:ring-teal-500 text-center font-bold" />
                   </div>
                 </div>
@@ -3457,8 +3457,8 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                                   <input type="number" min={0} defaultValue={group.tasks[0]?.points ?? 0}
                                     key={section.id + group.key + '-pts'}
                                     className="w-14 px-1.5 py-0.5 text-xs border a-border a-surface-2 a-text rounded text-center font-bold focus:outline-none focus:ring-1 focus:ring-teal-500"
-                                    onBlur={e => setBulkCategoryPoints(group.tasks.map(t => t.id), Math.max(0, parseInt(e.target.value) || 0))}
-                                    onKeyDown={e => { if (e.key === 'Enter') setBulkCategoryPoints(group.tasks.map(t => t.id), Math.max(0, parseInt((e.target as HTMLInputElement).value) || 0)) }}
+                                    onBlur={e => setBulkCategoryPoints(group.tasks.map(t => t.id), Math.max(0, parseFloat(e.target.value) || 0))}
+                                    onKeyDown={e => { if (e.key === 'Enter') setBulkCategoryPoints(group.tasks.map(t => t.id), Math.max(0, parseFloat((e.target as HTMLInputElement).value) || 0)) }}
                                     title={`Set points for all ${group.label} tasks`} />
                                 </div>
                               </>
@@ -3530,7 +3530,7 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                                           defaultValue={task.points ?? 0}
                                           key={task.id + '-pts'}
                                           className="w-10 bg-transparent a-text text-[10px] font-black text-center focus:outline-none"
-                                          onBlur={e => setTaskPoints(task.id, Math.max(0, parseInt(e.target.value) || 0))}
+                                          onBlur={e => setTaskPoints(task.id, Math.max(0, parseFloat(e.target.value) || 0))}
                                           onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
                                           title="Edit points for this card"
                                         />
@@ -3698,12 +3698,12 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                                               Winner bonus
                                             </label>
                                             <input
-                                              type="number"
+                                              type="number" step="0.1"
                                               min={0}
                                               defaultValue={task.contest_bonus ?? 0}
                                               key={`${task.id}-cbonus-${task.contest_bonus ?? 0}`}
                                               onBlur={async e => {
-                                                const v = Math.max(0, parseInt(e.target.value) || 0)
+                                                const v = Math.max(0, parseFloat(e.target.value) || 0)
                                                 if (v === (task.contest_bonus ?? 0)) return
                                                 setTasks(prev => prev.map(t => t.id === task.id ? { ...t, contest_bonus: v } : t))
                                                 await supabase.from('bingo_tasks').update({ contest_bonus: v }).eq('id', task.id)
@@ -4309,8 +4309,8 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                   </div>
                   <div className="w-24">
                     <label className="block text-sm font-medium a-text-3 mb-1">Points</label>
-                    <input type="number" value={formPoints} min={0}
-                      onChange={e => setFormPoints(Math.max(0, parseInt(e.target.value) || 0))}
+                    <input type="number" step="0.1" value={formPoints} min={0}
+                      onChange={e => setFormPoints(Math.max(0, parseFloat(e.target.value) || 0))}
                       className="w-full px-3 py-2 rounded-lg border a-border focus:outline-none focus:ring-2 focus:ring-teal-500 text-center font-bold" />
                   </div>
                 </div>
@@ -5185,8 +5185,8 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                 </div>
                 <div className="w-24">
                   <label className="block text-sm font-medium a-text-3 mb-1">Points</label>
-                  <input type="number" value={tilePoints} min={0}
-                    onChange={e => setTilePoints(Math.max(0, parseInt(e.target.value) || 0))}
+                  <input type="number" step="0.1" value={tilePoints} min={0}
+                    onChange={e => setTilePoints(Math.max(0, parseFloat(e.target.value) || 0))}
                     className="w-full px-3 py-2 rounded-lg border a-border focus:outline-none focus:ring-2 focus:ring-teal-500 text-center font-bold" />
                 </div>
               </div>

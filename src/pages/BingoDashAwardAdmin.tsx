@@ -457,7 +457,7 @@ export function BingoDashAwardAdmin() {
                           type="number"
                           min={0}
                           value={pts}
-                          onChange={e => setSlidePoints(s.id, parseInt(e.target.value, 10) || 0)}
+                          onChange={e => setSlidePoints(s.id, parseFloat(e.target.value) || 0)}
                           onClick={e => (e.target as HTMLInputElement).select()}
                           className="w-20 px-2 py-1.5 rounded-lg border border-gray-300 text-center font-mono font-bold text-sm focus:outline-none focus:ring-2 focus:ring-amber-400"
                           title="Points this team receives"

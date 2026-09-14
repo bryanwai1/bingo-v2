@@ -14,7 +14,7 @@ type Tile = {
 }
 
 const TILES: Tile[] = [
-  { to: '/bingo-dash',            emoji: '🎯', title: 'Player Board',  sub: 'Join a team and start playing', primary: true },
+  { to: 'https://bingo-ve2.vercel.app/bingo-dash/sample', emoji: '🎯', title: 'Player Board',  sub: 'Join a team and start playing', primary: true, external: true },
   { to: '/bingo-dash/admin',      emoji: '⚙️', title: 'Admin Panel',   sub: 'Boards, cards, teams, scoring' },
   { to: '/bingo-dash/projector',  emoji: '📺', title: 'Projector',     sub: 'Live scoreboard for the room' },
   { to: '/bingo-dash/sample',     emoji: '🎬', title: 'Try a Demo',    sub: 'Play a sandbox round — nothing is saved' },
@@ -22,6 +22,18 @@ const TILES: Tile[] = [
   { to: '/bingo-dash/crew',       emoji: '👥', title: 'Crew Passes',   sub: 'Bring co-trainers into your event' },
   { to: '/bingo-dash/events',     emoji: '🤝', title: 'Shared Events', sub: 'Run a day with another trainer' },
 ]
+
+function TileLink({ to, external, style, className, children }: {
+  to: string
+  external?: boolean
+  style?: import('react').CSSProperties
+  className?: string
+  children?: import('react').ReactNode
+}) {
+  return external
+    ? <a href={to} target="_blank" rel="noreferrer" style={style} className={className}>{children}</a>
+    : <Link to={to} style={style} className={className}>{children}</Link>
+}
 
 export function BingoDashHub() {
   return (
@@ -45,9 +57,10 @@ export function BingoDashHub() {
 
         <div className="grid sm:grid-cols-2 gap-4">
           {TILES.map((t, i) => (
-            <Link
+            <TileLink
               key={t.to}
               to={t.to}
+              external={t.external}
               style={{ animationDelay: `${i * 70}ms` }}
               className={`group animate-rise rounded-3xl border-2 p-5 transition-all duration-200
                 hover:-translate-y-1 active:scale-[0.98]
@@ -65,7 +78,7 @@ export function BingoDashHub() {
                 </div>
                 <span className="ml-auto text-white/20 group-hover:text-white/50 transition-colors">→</span>
               </div>
-            </Link>
+            </TileLink>
           ))}
         </div>
 
