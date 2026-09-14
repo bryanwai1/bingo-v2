@@ -442,9 +442,12 @@ function BoardScreen({
   boardNoteEvery,
   tileDisplay,
   faceCountProp,
+  inviteUrl,
   onLeave,
 }: {
   team: { id: string; name: string }
+  /** Link a teammate scans to join this team directly (see BingoDashJoin). */
+  inviteUrl?: string | null
   gridTasks: BingoTask[]
   scans: BingoScan[]
   reviews: Record<string, ReviewFlag>
@@ -601,6 +604,14 @@ function BoardScreen({
               value={`bingodash-team:${team.id}`}
               teamName={team.name}
             />
+            {inviteUrl && (
+              <MyQrButton
+                label="Invite teammate"
+                teamName={team.name}
+                hint="Teammate scans this, types their name, and joins your team"
+                value={inviteUrl}
+              />
+            )}
             <button
               onClick={() => navigate('/bingo-dash/projector')}
               className="text-xs font-bold text-teal-300 hover:text-teal-200 transition-colors"
@@ -933,6 +944,9 @@ export function BingoDashHome() {
     <>
       <BoardScreen
         team={team!}
+        inviteUrl={team && section?.slug && team.password && localStorage.getItem('bingo-dash-member-role') !== 'observer'
+          ? `${window.location.origin}/bingo-dash/play/${section.slug}?team=${team.id}&pw=${team.password}`
+          : null}
         gridTasks={gridTasks}
         scans={scans}
         reviews={reviews}
