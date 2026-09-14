@@ -232,7 +232,9 @@ export function BingoDashProjector() {
   const fmt = (v: unknown) => {
     const n = num(v)
     if (!decimals) return Math.round(n).toLocaleString()
-    return n.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })
+    // Always one decimal in decimal mode: every team carries a tiebreak
+    // tenth, so a bare 300 next to 300.5 would look like a missing digit.
+    return n.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 })
   }
   rows.sort((a, b) => {
     if (scoreOf(b) !== scoreOf(a)) return scoreOf(b) - scoreOf(a)
