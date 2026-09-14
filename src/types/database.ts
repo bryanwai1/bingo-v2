@@ -374,6 +374,9 @@ export interface BingoAccount {
   status: 'pending' | 'approved' | 'rejected'
   can_bingo: boolean
   can_flag: boolean
+  // Editor access: the Approvals tab only, and download without the power
+  // to approve, reject or delete. A UI limit, not a database one.
+  download_only?: boolean | null
   active_section_id: string | null
   /** Set = temporary facilitator working ON this host account's tenant. */
   facilitator_host: string | null

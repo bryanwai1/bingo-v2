@@ -762,9 +762,17 @@ export function BingoDashAdmin() {
   // Phone only: whether the navigation drawer is open.
   const [navOpen, setNavOpen] = useState(false)
   const [activeTab, setActiveTabState] = useState<AdminView>(
-    tabParam && ADMIN_VIEWS.includes(tabParam) ? tabParam : 'run'
+    // account is not loaded yet on first render, so the pin in setActiveTab
+    // cannot help here — an editor landing on ?tab=board would see it flash.
+    account?.download_only ? 'submissions'
+      : tabParam && ADMIN_VIEWS.includes(tabParam) ? tabParam : 'run'
   )
+  // An editor has one tab. Pinning it here rather than only hiding the nav
+  // means a bookmarked ?tab=board cannot get them anywhere else.
+  const downloadOnly = !!account?.download_only
+
   const setActiveTab = (v: AdminView) => {
+    if (downloadOnly) v = 'submissions'
     setActiveTabState(v)
     setSearchParams(prev => {
       const next = new URLSearchParams(prev)
@@ -2506,6 +2514,7 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
         pending={photoSubmissions.filter(x => x.status === 'pending').length}
         open={navOpen}
         onClose={() => setNavOpen(false)}
+        downloadOnly={!!account?.download_only}
       />
       <div className="flex-1 min-w-0">
       {/* Header */}
@@ -4864,20 +4873,20 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
               </button>
             )}
             <div className="flex-1" />
-            <button
+            {!downloadOnly && <button
               onClick={() => bulkSetStatus(actionTargets, 'approved')}
               disabled={bulkActioning || actionTargets.length === 0}
               className="px-4 py-2 rounded-lg text-xs font-bold bg-green-500 a-text hover:bg-green-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
             >
               ✓ Approve {actionLabelSuffix}
-            </button>
-            <button
+            </button>}
+            {!downloadOnly && <button
               onClick={() => bulkSetStatus(actionTargets, 'rejected')}
               disabled={bulkActioning || actionTargets.length === 0}
               className="px-4 py-2 rounded-lg text-xs font-bold bg-red-500/20 text-red-300 border border-red-500/30 hover:bg-red-500/30 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
             >
               ✗ Reject {actionLabelSuffix}
-            </button>
+            </button>}
             <button
               onClick={() => downloadSubmissionsZip(actionTargets)}
               disabled={downloadingZip || actionTargets.length === 0}
@@ -4886,7 +4895,7 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
             >
               {downloadingZip ? '⏳ Zipping…' : `⬇ Download ${actionLabelSuffix}`}
             </button>
-            <button
+            {!downloadOnly && <button
               onClick={() => {
                 // Nothing ticked means "everything in view" — easy to hit by
                 // accident, and it wipes a client's photos and their progress.
@@ -4900,7 +4909,7 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
               title="Permanently delete these submissions and their photos. Resets the team's progress on affected tiles. Use to clear test data."
             >
               🗑 Delete {actionLabelSuffix}
-            </button>
+            </button>}
           </div>
 
           {/* Filters */}

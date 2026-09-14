@@ -21,9 +21,11 @@ const NAV: { id: AdminView; icon: string; label: string; hint: string }[] = [
   { id: 'settings',    icon: '⚙️',  label: 'Settings',    hint: 'Board options' },
 ]
 
-export function AdminSidebar({ view, onView, email, isOwner, onSignOut, pending = 0, open = false, onClose }: {
+export function AdminSidebar({ view, onView, email, isOwner, onSignOut, pending = 0, open = false, onClose, downloadOnly = false }: {
   view: AdminView
   onView: (v: AdminView) => void
+  /** Editor accounts see the Approvals tab only — nothing else is theirs to touch. */
+  downloadOnly?: boolean
   email?: string | null
   isOwner?: boolean
   onSignOut: () => void
@@ -44,6 +46,7 @@ export function AdminSidebar({ view, onView, email, isOwner, onSignOut, pending 
   // Picking a destination on a phone closes the drawer — the content is what
   // they came for, and the drawer covers it.
   const pick = (v: AdminView) => { onView(v); onClose?.() }
+  const nav = downloadOnly ? NAV.filter(n => n.id === 'submissions') : NAV
 
   return (
     <>
@@ -80,7 +83,7 @@ export function AdminSidebar({ view, onView, email, isOwner, onSignOut, pending 
       </div>
 
       <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
-        {NAV.map(n => {
+        {nav.map(n => {
           const active = view === n.id
           return (
             <button
