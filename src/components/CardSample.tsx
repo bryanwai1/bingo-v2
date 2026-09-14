@@ -1,9 +1,9 @@
 // The "see a sample" panel.
 //
-// Renders whatever sample a card has (see src/lib/cardSamples.ts) as a pair of
-// storyboard frames that play in turn. Collapsed by default so it never pushes
-// the submit tray down the page — a team opens it, watches the move, closes it
-// and gets on with filming.
+// Renders whatever sample a card has (see src/lib/cardSamples.ts): a photo
+// pair, a clip, a tool or storyboard frames that play in turn. Shown open by
+// default so the team sees the target before starting; the header folds it
+// away once they have.
 
 import { useEffect, useRef, useState } from 'react'
 import { sampleFor, type Artefact, type Clip, type Frame, type Mark, type Panel, type Tool } from '../lib/cardSamples'
@@ -248,7 +248,9 @@ function ClipView({ clip, color }: { clip: Clip; color: string }) {
 
 export function CardSample({ title, color }: { title: string | null | undefined; color: string }) {
   const sample = sampleFor(title)
-  const [open, setOpen] = useState(false)
+  // Open by default: a team should see what "done" looks like before it
+  // starts, not discover the sample after guessing. It still folds away.
+  const [open, setOpen] = useState(true)
   const [frame, setFrame] = useState(0)
   const timer = useRef<number | null>(null)
 

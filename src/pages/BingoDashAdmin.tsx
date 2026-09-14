@@ -639,9 +639,9 @@ export function BingoDashAdmin() {
   const [formTitle, setFormTitle] = useState('')
   const [formCategory, setFormCategory] = useState('')
   const [formPoints, setFormPoints] = useState(0)
-  const [formTaskType, setFormTaskType] = useState<'standard' | 'answer' | 'photo' | 'video' | 'media' | 'sign_splice' | 'breakout_hunt'>('standard')
-  const [formAnswerQuestion, setFormAnswerQuestion] = useState('')
-  const [formAnswerText, setFormAnswerText] = useState('')
+  // Submission inputs (photo, text, marshal password, ...) are set in the
+  // card editor after creation; the form only picks the mechanism.
+  const [formTaskType, setFormTaskType] = useState<'standard' | 'sign_splice' | 'breakout_hunt'>('standard')
   const [formSaving, setFormSaving] = useState(false)
 
   // Import
@@ -1906,13 +1906,9 @@ export function BingoDashAdmin() {
         title: formTitle.trim(), color: colorName, hex_code: hex,
         category: formCategory.trim(), sort_order: nextOrder, points: formPoints,
         task_type: formTaskType,
-        answer_question: formTaskType === 'answer' ? formAnswerQuestion.trim() || null : null,
-        answer_text: formTaskType === 'answer'
-          ? formAnswerText.split('\n').map(l => l.trim()).filter(Boolean).join('\n') || null
-          : null,
       })
       setFormTitle(''); setFormCategory(''); setFormPoints(0)
-      setFormTaskType('standard'); setFormAnswerQuestion(''); setFormAnswerText('')
+      setFormTaskType('standard')
       setShowForm(false)
       await fetchAll()
     } catch (err) {
@@ -3268,12 +3264,9 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                   <label className="block text-sm font-medium a-text-3 mb-2">Card Type</label>
                   <div className="flex rounded-lg overflow-hidden border a-border">
                     <button type="button" onClick={() => setFormTaskType('standard')}
+                      title="Photo, video, link, text or versus — choose the inputs in the card editor after creating"
                       className={`flex-1 py-2 text-sm font-bold transition-colors ${formTaskType === 'standard' ? 'bg-teal-600 a-text' : 'a-surface a-text-3 hover:a-surface-2'}`}>
                       Standard
-                    </button>
-                    <button type="button" onClick={() => setFormTaskType('answer')}
-                      className={`flex-1 py-2 text-sm font-bold transition-colors ${formTaskType === 'answer' ? 'bg-teal-600 a-text' : 'a-surface a-text-3 hover:a-surface-2'}`}>
-                      Answer Input
                     </button>
                     <button type="button" onClick={() => setFormTaskType('sign_splice')}
                       title="Teams hunt each letter of their movie title on a different shop sign"
@@ -3287,24 +3280,6 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                     </button>
                   </div>
                 </div>
-                {formTaskType === 'answer' && (
-                  <>
-                    <div>
-                      <label className="block text-sm font-medium a-text-3 mb-1">Question / Prompt</label>
-                      <input type="text" value={formAnswerQuestion} onChange={e => setFormAnswerQuestion(e.target.value)}
-                        placeholder="e.g. What is the name of this landmark?"
-                        className="w-full px-4 py-2 rounded-lg border a-border focus:outline-none focus:ring-2 focus:ring-teal-500" />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium a-text-3 mb-1">Answer Template</label>
-                      <p className="text-xs a-text-2 mb-1">One answer per line. Each line becomes a row of letter boxes.</p>
-                      <textarea value={formAnswerText} onChange={e => setFormAnswerText(e.target.value)}
-                        placeholder={"e.g.\nPETRONAS\nTWIN TOWERS"}
-                        rows={3}
-                        className="w-full px-4 py-2 rounded-lg border a-border focus:outline-none focus:ring-2 focus:ring-teal-500 font-mono text-sm resize-none" />
-                    </div>
-                  </>
-                )}
                 <div className="flex gap-3">
                   <button onClick={createTask} disabled={formSaving || !formTitle.trim()}
                     className="px-6 py-2 bg-teal-600 a-text rounded-lg hover:bg-violet-700 disabled:opacity-50 text-sm transition-colors">
@@ -4344,12 +4319,9 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                   <label className="block text-sm font-medium a-text-3 mb-2">Card Type</label>
                   <div className="flex rounded-lg overflow-hidden border a-border">
                     <button type="button" onClick={() => setFormTaskType('standard')}
+                      title="Photo, video, link, text or versus — choose the inputs in the card editor after creating"
                       className={`flex-1 py-2 text-sm font-bold transition-colors ${formTaskType === 'standard' ? 'bg-teal-600 a-text' : 'a-surface a-text-3 hover:a-surface-2'}`}>
                       Standard
-                    </button>
-                    <button type="button" onClick={() => setFormTaskType('answer')}
-                      className={`flex-1 py-2 text-sm font-bold transition-colors ${formTaskType === 'answer' ? 'bg-teal-600 a-text' : 'a-surface a-text-3 hover:a-surface-2'}`}>
-                      Answer Input
                     </button>
                     <button type="button" onClick={() => setFormTaskType('sign_splice')}
                       title="Teams hunt each letter of their movie title on a different shop sign"
@@ -4363,24 +4335,6 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                     </button>
                   </div>
                 </div>
-                {formTaskType === 'answer' && (
-                  <>
-                    <div>
-                      <label className="block text-sm font-medium a-text-3 mb-1">Question / Prompt</label>
-                      <input type="text" value={formAnswerQuestion} onChange={e => setFormAnswerQuestion(e.target.value)}
-                        placeholder="e.g. What is the name of this landmark?"
-                        className="w-full px-4 py-2 rounded-lg border a-border focus:outline-none focus:ring-2 focus:ring-teal-500" />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium a-text-3 mb-1">Answer Template</label>
-                      <p className="text-xs a-text-2 mb-1">One answer per line. Each line becomes a row of letter boxes.</p>
-                      <textarea value={formAnswerText} onChange={e => setFormAnswerText(e.target.value)}
-                        placeholder={"e.g.\nPETRONAS\nTWIN TOWERS"}
-                        rows={3}
-                        className="w-full px-4 py-2 rounded-lg border a-border focus:outline-none focus:ring-2 focus:ring-teal-500 font-mono text-sm resize-none" />
-                    </div>
-                  </>
-                )}
                 <div className="flex gap-3">
                   <button onClick={createTask} disabled={formSaving || !formTitle.trim()}
                     className="px-6 py-2 bg-teal-600 a-text rounded-lg hover:bg-violet-700 disabled:opacity-50 text-sm transition-colors">
