@@ -4767,6 +4767,7 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                             </td>
                             {/* Bonus */}
                             <td className="px-3 py-2.5">
+                              <div className="flex flex-col items-start gap-1.5">
                               {(() => {
                                 const bonusTotal = team.bonus_points ?? 0
                                 const itemCount = (team.bonus_breakdown ?? []).length
@@ -4794,10 +4795,11 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                               <button
                                 onClick={() => openBonusModal(team, 'deduct')}
                                 title="Deduct points — add a penalty or correction line"
-                                className="ml-1.5 px-2.5 py-1 rounded-lg border border-red-500/40 bg-red-500/10 text-red-400 hover:bg-red-500/20 text-sm font-mono transition-colors"
+                                className="px-2.5 py-1 rounded-lg border border-red-500/40 bg-red-500/10 text-red-400 hover:bg-red-500/20 text-sm font-mono transition-colors"
                               >
                                 Deduct
                               </button>
+                              </div>
                             </td>
                             {/* Actions */}
                             <td className="px-3 py-2.5 text-right">
