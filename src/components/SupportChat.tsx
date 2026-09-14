@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { supabase } from '../lib/supabase'
 
 /* ============================================================================
@@ -40,8 +41,13 @@ function clamp(x: number, y: number) {
 }
 
 export function SupportChat({
-  sectionId, teamId, teamName,
-}: { sectionId: string; teamId: string; teamName?: string }) {
+  sectionId, teamId, teamName, inline = false,
+}: {
+  sectionId: string; teamId: string; teamName?: string
+  /** Anchored in the page (the board header, under the team name) instead of
+   *  floating and draggable. Same panel, same messages. */
+  inline?: boolean
+}) {
   const [open, setOpen] = useState(false)
   const [msgs, setMsgs] = useState<Msg[]>([])
   const [draft, setDraft] = useState('')
@@ -71,6 +77,24 @@ export function SupportChat({
 
   const drag = useRef<{ dx: number; dy: number; moved: boolean } | null>(null)
   const listRef = useRef<HTMLDivElement>(null)
+  // Inline mode: the bubble lives inside the header's stacking context, so
+  // the panel is portalled to <body> and placed from the bubble's rect —
+  // otherwise the board tiles paint over it.
+  const bubbleRef = useRef<HTMLButtonElement>(null)
+  const [panelAt, setPanelAt] = useState<{ left: number; top: number } | null>(null)
+  useEffect(() => {
+    if (!inline || !open) { setPanelAt(null); return }
+    const place = () => {
+      const r = bubbleRef.current?.getBoundingClientRect()
+      if (!r) return
+      const width = Math.min(340, window.innerWidth - 32)
+      setPanelAt({ left: Math.max(16, Math.min(r.left, window.innerWidth - width - 16)), top: r.bottom + 8 })
+    }
+    place()
+    window.addEventListener('resize', place)
+    window.addEventListener('scroll', place, true)
+    return () => { window.removeEventListener('resize', place); window.removeEventListener('scroll', place, true) }
+  }, [inline, open])
 
   /* ── load + live updates ───────────────────────────────────────────── */
   const load = useCallback(async () => {
@@ -157,24 +181,30 @@ export function SupportChat({
     setSending(false)
   }
 
-  const anchor: React.CSSProperties = { left: pos.x, top: pos.y }
+  const anchor: React.CSSProperties = inline
+    ? { position: 'relative', display: 'inline-block' }
+    : { position: 'fixed', zIndex: 60, left: pos.x, top: pos.y }
   // Panel opens toward whichever side has room. From the default top-left
-  // spot that is rightward and downward.
-  const openLeft = pos.x > window.innerWidth / 2
-  const openUp   = pos.y > window.innerHeight / 2
+  // spot (and the inline header spot) that is rightward and downward.
+  const openLeft = inline ? false : pos.x > window.innerWidth / 2
+  const openUp   = inline ? false : pos.y > window.innerHeight / 2
 
   return (
     <>
-      <div style={{ position: 'fixed', zIndex: 60, ...anchor }}>
-        {open && (
+      <div style={anchor} className={inline ? 'z-30' : undefined}>
+        {open && (() => { const panel = (
           <div
-            className="absolute w-[min(340px,calc(100vw-32px))] max-w-[calc(100vw-32px)] rounded-2xl overflow-hidden shadow-2xl"
-            style={{
-              background: '#111c1a',
-              border: '1px solid rgba(45,212,191,0.28)',
-              [openLeft ? 'right' : 'left']: 0,
-              [openUp ? 'bottom' : 'top']: 58,
-            } as React.CSSProperties}
+            className="w-[min(340px,calc(100vw-32px))] max-w-[calc(100vw-32px)] rounded-2xl overflow-hidden shadow-2xl"
+            style={inline
+              ? { position: 'fixed', zIndex: 70, left: panelAt?.left ?? 16, top: panelAt?.top ?? 100,
+                  background: '#111c1a', border: '1px solid rgba(45,212,191,0.28)', visibility: panelAt ? 'visible' : 'hidden' }
+              : {
+                  position: 'absolute', zIndex: 50,
+                  background: '#111c1a',
+                  border: '1px solid rgba(45,212,191,0.28)',
+                  [openLeft ? 'right' : 'left']: 0,
+                  [openUp ? 'bottom' : 'top']: 58,
+                } as React.CSSProperties}
           >
             <div className="px-4 py-3 flex items-center justify-between"
                  style={{ background: 'rgba(45,212,191,0.12)' }}>
@@ -226,15 +256,17 @@ export function SupportChat({
               </button>
             </div>
           </div>
-        )}
+        ); return inline ? createPortal(panel, document.body) : panel })()}
 
         <button
-          onPointerDown={onPointerDown}
-          onPointerMove={onPointerMove}
-          onPointerUp={onPointerUp}
+          ref={bubbleRef}
+          onPointerDown={inline ? undefined : onPointerDown}
+          onPointerMove={inline ? undefined : onPointerMove}
+          onPointerUp={inline ? undefined : onPointerUp}
+          onClick={inline ? () => setOpen(o => !o) : undefined}
           aria-label={open ? 'Close help' : 'Open help'}
-          className="w-12 h-12 sm:w-14 sm:h-14 rounded-full grid place-items-center shadow-xl active:scale-95 transition-transform"
-          style={{ background: 'linear-gradient(135deg,#2dd4bf,#0d9488)', touchAction: 'none', cursor: 'grab' }}
+          className="relative w-12 h-12 sm:w-14 sm:h-14 rounded-full grid place-items-center shadow-xl active:scale-95 transition-transform"
+          style={{ background: 'linear-gradient(135deg,#2dd4bf,#0d9488)', touchAction: inline ? undefined : 'none', cursor: inline ? 'pointer' : 'grab' }}
         >
           <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#04211c" strokeWidth="2.4"
                strokeLinecap="round" strokeLinejoin="round">

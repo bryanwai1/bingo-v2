@@ -7,6 +7,7 @@ import { ParticleBackground } from '../components/ParticleBackground'
 import { TimeUpAlarm } from '../components/TimeUpAlarm'
 import { TileFace } from '../components/BingoTileFace'
 import { MyQrButton } from '../components/MyQrButton'
+import { SupportChat } from '../components/SupportChat'
 import { IncomingDuelBanner } from '../components/ContestCard'
 import { normalizeTileDisplay, withCategoryColors, type TileDisplay } from '../lib/bingoTileDisplay'
 import type { BingoTask, BingoScan, BingoSection, BingoTeam, BingoMember, BoardTimer } from '../types/database'
@@ -539,6 +540,7 @@ function BoardScreen({
   sectionSlug,
   memberRole,
   teamPassword,
+  chatSectionId,
   gridTasks: gridTasksProp,
   scans,
   reviews,
@@ -554,6 +556,8 @@ function BoardScreen({
   memberRole: 'member' | 'observer'
   /** The team's 4-digit password, for the invite QR. */
   teamPassword?: string | null
+  /** Board id for the support chat anchored under the team name. */
+  chatSectionId?: string | null
   gridTasks: BingoTask[]
   scans: BingoScan[]
   reviews: Record<string, ReviewFlag>
@@ -683,6 +687,13 @@ function BoardScreen({
                 <span className="text-blue-300 text-[10px] font-black uppercase tracking-wider bg-blue-900/40 px-1.5 py-0.5 rounded">👁 Observer</span>
               )}
             </div>
+            {/* Help chat, anchored here so it is in the same place on every
+                screen size and never over a tile. */}
+            {chatSectionId && (
+              <div className="mt-3">
+                <SupportChat inline sectionId={chatSectionId} teamId={team.id} teamName={team.name} />
+              </div>
+            )}
           </div>
           <div className="flex flex-col items-end gap-2 flex-shrink-0 mt-1">
             <TimerDisplay settings={settings} />
@@ -1224,6 +1235,7 @@ export function BingoDashJoin() {
           sectionSlug={sectionSlug!}
           memberRole={memberRole}
           teamPassword={groups.find(g => g.id === team.id)?.password ?? null}
+          chatSectionId={section.id}
           gridTasks={gridTasks}
           scans={scans}
           reviews={reviews}

@@ -444,8 +444,11 @@ function BoardScreen({
   tileDisplay,
   faceCountProp,
   inviteUrl,
+  chatSectionId,
   onLeave,
 }: {
+  /** Board id for the support chat anchored under the team name. */
+  chatSectionId?: string | null
   team: { id: string; name: string }
   /** Link a teammate scans to join this team directly (see BingoDashJoin). */
   inviteUrl?: string | null
@@ -596,6 +599,13 @@ function BoardScreen({
                 <span className="text-teal-300 text-xs font-black tracking-widest">{lettersEarned}!</span>
               )}
             </div>
+            {/* Help chat, anchored here so it is in the same place on every
+                screen size and never over a tile. */}
+            {chatSectionId && (
+              <div className="mt-3">
+                <SupportChat inline sectionId={chatSectionId} teamId={team.id} teamName={team.name} />
+              </div>
+            )}
           </div>
           <div className="flex flex-col items-end gap-2 flex-shrink-0 mt-1">
             <TimerDisplay settings={settings} />
@@ -939,6 +949,7 @@ export function BingoDashHome() {
     <>
       <BoardScreen
         team={team!}
+        chatSectionId={sectionId}
         inviteUrl={team && section?.slug && team.password && localStorage.getItem('bingo-dash-member-role') !== 'observer'
           ? `${window.location.origin}/bingo-dash/play/${section.slug}?team=${team.id}&pw=${team.password}`
           : null}
@@ -955,9 +966,6 @@ export function BingoDashHome() {
       {/* Another team can challenge us at any moment — the banner has to reach
           players wherever they are on the board, not only inside a card. */}
       {team && sectionId && <IncomingDuelBanner team={team} sectionId={sectionId} />}
-      {team && sectionId && (
-        <SupportChat sectionId={sectionId} teamId={team.id} teamName={team.name} />
-      )}
       <TimeUpAlarm settings={section} />
     </>
   )
