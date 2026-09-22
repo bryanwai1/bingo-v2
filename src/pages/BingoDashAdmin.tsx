@@ -1946,6 +1946,29 @@ export function BingoDashAdmin() {
     } finally { setFormSaving(false) }
   }
 
+  // Library "+ Add Challenge": insert a blank draft and open it in the full
+  // card editor, so name / category / points / type / instructions are all
+  // filled in on one page. The editor discards the row if it's abandoned.
+  const createBlankTaskAndOpen = async () => {
+    if (!currentSectionId) { alert('Select a board first, then add a challenge to it.'); return }
+    setFormSaving(true)
+    try {
+      const nextOrder = Math.max(25, scopedTasks.length + 25)
+      const { data, error } = await supabase.from('bingo_tasks').insert({
+        section_id: currentSectionId,
+        owner_id: myOwnerValue,
+        title: 'Untitled challenge', color: 'Blue', hex_code: '#3B82F6',
+        category: '', sort_order: nextOrder, points: 0,
+        task_type: 'standard',
+      }).select('id').single()
+      if (error || !data) throw error ?? new Error('No row returned')
+      navigate(`/bingo-dash/admin/task/${data.id}?from=library&new=1`)
+    } catch (err) {
+      alert('Failed to create: ' + (err instanceof Error ? err.message : 'Unknown error'))
+      setFormSaving(false)
+    }
+  }
+
   const deleteTask = async (id: string, title: string) => {
     if (!confirm(`Delete "${title}"? All scans for this challenge will also be removed.`)) return
     await supabase.from('bingo_tasks').delete().eq('id', id)
@@ -3151,9 +3174,9 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                 className="px-4 py-2 border a-border a-surface-2 a-text rounded-lg hover:a-surface text-sm font-medium transition-colors disabled:opacity-40">
                 + New Category
               </button>
-              <button onClick={() => setShowForm(!showForm)}
-                className="px-4 py-2 bg-teal-600 a-text rounded-lg hover:bg-violet-700 text-sm font-medium transition-colors">
-                + Add Challenge
+              <button onClick={createBlankTaskAndOpen} disabled={formSaving}
+                className="px-4 py-2 bg-teal-600 a-text rounded-lg hover:bg-violet-700 text-sm font-medium transition-colors disabled:opacity-50">
+                {formSaving ? 'Creating…' : '+ Add Challenge'}
               </button>
             </div>
           </div>
@@ -3254,85 +3277,6 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
               </select>
             </div>
           </div>
-
-          {/* New challenge form (scoped to current section) */}
-          {showForm && (
-            <div className="a-surface rounded-xl border a-border p-6 mb-6">
-              <h3 className="font-bold a-text mb-1">New Challenge</h3>
-              {currentSectionId && (
-                <p className="text-xs a-text-2 mb-4">
-                  Adding to: <span className="font-bold a-text-3">{sections.find(s => s.id === currentSectionId)?.name}</span>
-                  {' '}— change compartment via the section switcher in the header
-                </p>
-              )}
-              <div className="flex flex-col gap-4">
-                <div>
-                  <label className="block text-sm font-medium a-text-3 mb-1">Title</label>
-                  <input type="text" value={formTitle} onChange={e => setFormTitle(e.target.value)}
-                    placeholder="e.g. Water Challenge"
-                    className="w-full px-4 py-2 rounded-lg border a-border focus:outline-none focus:ring-2 focus:ring-teal-500" autoFocus />
-                </div>
-                <div className="flex gap-3">
-                  <div className="flex-1">
-                    <label className="block text-sm font-medium a-text-3 mb-1">Category</label>
-                    <select value={formCategory} onChange={async e => {
-                      if (e.target.value === '__new__') {
-                        if (!currentSectionId) return
-                        const name = await promptAndCreateCategory(currentSectionId)
-                        if (name) setFormCategory(name)
-                        return
-                      }
-                      setFormCategory(e.target.value)
-                    }}
-                      className="w-full px-3 py-2 rounded-lg border a-border focus:outline-none focus:ring-2 focus:ring-teal-500 a-surface">
-                      <option value="">— Uncategorized —</option>
-                      {categoryNamesFor(currentSectionId).map(name => (
-                        <option key={name} value={name}>{name}</option>
-                      ))}
-                      <option value="__new__">+ New category…</option>
-                    </select>
-                  </div>
-                  <div className="w-24">
-                    <label className="block text-sm font-medium a-text-3 mb-1">Points</label>
-                    <input type="number" step="0.1" value={formPoints} min={0}
-                      onChange={e => setFormPoints(Math.max(0, parseFloat(e.target.value) || 0))}
-                      className="w-full px-3 py-2 rounded-lg border a-border focus:outline-none focus:ring-2 focus:ring-teal-500 text-center font-bold" />
-                  </div>
-                </div>
-                {/* Type toggle */}
-                <div>
-                  <label className="block text-sm font-medium a-text-3 mb-2">Card Type</label>
-                  <div className="flex rounded-lg overflow-hidden border a-border">
-                    <button type="button" onClick={() => setFormTaskType('standard')}
-                      title="Photo, video, link, text or versus — choose the inputs in the card editor after creating"
-                      className={`flex-1 py-2 text-sm font-bold transition-colors ${formTaskType === 'standard' ? 'bg-teal-600 a-text' : 'a-surface a-text-3 hover:a-surface-2'}`}>
-                      Standard
-                    </button>
-                    <button type="button" onClick={() => setFormTaskType('sign_splice')}
-                      title="Teams hunt each letter of their movie title on a different shop sign"
-                      className={`flex-1 py-2 text-sm font-bold transition-colors ${formTaskType === 'sign_splice' ? 'bg-teal-600 a-text' : 'a-surface a-text-3 hover:a-surface-2'}`}>
-                      Sign Splice
-                    </button>
-                    <button type="button" onClick={() => setFormTaskType('breakout_hunt')}
-                      title="Teams decode 10 puzzles, then photograph each object in the venue"
-                      className={`flex-1 py-2 text-sm font-bold transition-colors ${formTaskType === 'breakout_hunt' ? 'bg-teal-600 a-text' : 'a-surface a-text-3 hover:a-surface-2'}`}>
-                      Breakout
-                    </button>
-                  </div>
-                </div>
-                <div className="flex gap-3">
-                  <button onClick={createTask} disabled={formSaving || !formTitle.trim()}
-                    className="px-6 py-2 bg-teal-600 a-text rounded-lg hover:bg-violet-700 disabled:opacity-50 text-sm transition-colors">
-                    {formSaving ? 'Creating...' : 'Create Challenge'}
-                  </button>
-                  <button onClick={() => setShowForm(false)}
-                    className="px-6 py-2 a-surface-2 a-text-3 rounded-lg hover:bg-gray-300 text-sm transition-colors">
-                    Cancel
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
 
           {/* Compartment > Category > Cards hierarchy */}
           {tasks.length === 0 ? (

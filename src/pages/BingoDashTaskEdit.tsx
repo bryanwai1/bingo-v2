@@ -37,8 +37,17 @@ export function BingoDashTaskEdit() {
     from === 'snake-ladder' ? '/snake-ladder/admin'
     : from && ADMIN_TABS.includes(from) ? `/bingo-dash/admin?tab=${from}`
     : '/bingo-dash/admin?tab=library'
+  // ?new=1: this row was just inserted blank by the library's "+ Add Challenge",
+  // so the editor opens ready to name it and discards it if left untouched.
+  const isNew = searchParams.get('new') === '1'
   const [task, setTask] = useState<BingoTask | null>(null)
   const { reload: reloadDraw } = useCardDrawConfig(taskId)
+  // Card details row (category / points / type) — the fields the old inline
+  // create form collected, now editable here.
+  const [categoryRows, setCategoryRows] = useState<{ name: string; sort_order: number }[]>([])
+  const [siblingCards, setSiblingCards] = useState<Pick<BingoTask, 'id' | 'title' | 'category' | 'color' | 'hex_code'>[]>([])
+  const [pointsValue, setPointsValue] = useState('0')
+  const [detailsSaving, setDetailsSaving] = useState(false)
   const [editingTitle, setEditingTitle] = useState(false)
   const [titleValue, setTitleValue] = useState('')
   const [titleSaving, setTitleSaving] = useState(false)
@@ -102,7 +111,11 @@ export function BingoDashTaskEdit() {
     supabase.from('bingo_tasks').select('*').eq('id', taskId).single().then(({ data }) => {
       if (data) {
         setTask(data)
-        setTitleValue(data.title)
+        setTitleValue(isNew ? '' : data.title)
+        if (isNew) setEditingTitle(true)
+        setPointsValue(String(data.points ?? 0))
+        supabase.from('bingo_categories').select('name, sort_order').eq('section_id', data.section_id).order('sort_order')
+          .then(({ data: rows }) => setCategoryRows((rows ?? []) as { name: string; sort_order: number }[]))
         setTaskType((data.task_type ?? 'standard') as 'standard' | 'answer' | 'photo' | 'video' | 'media')
         setInputs(effectiveInputs(data.task_type, data.completion_inputs))
         setAnswerQuestion(data.answer_question ?? '')
@@ -111,8 +124,12 @@ export function BingoDashTaskEdit() {
         setCompletionWarning(data.completion_warning ?? '')
         setPrereqId(data.prerequisite_task_id ?? '')
         setMapsUrl(data.maps_url ?? '')
-        supabase.from('bingo_tasks').select('id, title').eq('section_id', data.section_id).neq('id', data.id).order('title')
-          .then(({ data: rows }) => setBoardCards((rows ?? []) as { id: string; title: string }[]))
+        supabase.from('bingo_tasks').select('id, title, category, color, hex_code').eq('section_id', data.section_id).neq('id', data.id).order('title')
+          .then(({ data: rows }) => {
+            const list = (rows ?? []) as typeof siblingCards
+            setSiblingCards(list)
+            setBoardCards(list.map(r => ({ id: r.id, title: r.title })))
+          })
         setMapsLabel(data.maps_label ?? '')
       }
     })
@@ -138,6 +155,83 @@ export function BingoDashTaskEdit() {
     if (error) { alert('Failed to save title: ' + error.message); return }
     setTask({ ...task, title: titleValue.trim() })
     setEditingTitle(false)
+  }
+
+  // Every category name this board uses: its bingo_categories rows plus
+  // whatever text sibling cards carry (same rule as the admin library).
+  const categoryNames = (() => {
+    const names = new Set<string>()
+    categoryRows.forEach(c => names.add(c.name))
+    siblingCards.forEach(t => { if (t.category?.trim()) names.add(t.category.trim()) })
+    if (task?.category?.trim()) names.add(task.category.trim())
+    return [...names].sort((a, b) => a.localeCompare(b))
+  })()
+
+  const saveDetails = async (patch: Partial<BingoTask>) => {
+    if (!task) return
+    setDetailsSaving(true)
+    const { error } = await supabase.from('bingo_tasks').update(patch).eq('id', task.id)
+    setDetailsSaving(false)
+    if (error) { alert('Failed to save: ' + error.message); return }
+    setTask(prev => (prev ? { ...prev, ...patch } : prev))
+  }
+
+  // A card takes its category's colour, so changing category re-colours it
+  // to match a sibling in that category (default blue when it's the first).
+  const handleCategoryChange = async (name: string) => {
+    if (!task) return
+    const sibling = siblingCards.find(t => (t.category ?? '') === name && t.hex_code)
+    await saveDetails({
+      category: name,
+      hex_code: sibling?.hex_code ?? '#3B82F6',
+      color: sibling?.color?.trim() || name || 'Blue',
+    })
+  }
+
+  const handleNewCategory = async () => {
+    if (!task) return
+    const raw = window.prompt('New category name:')
+    const name = raw?.trim()
+    if (!name) return
+    if (!categoryRows.some(c => c.name === name)) {
+      const maxOrder = categoryRows.reduce((m, c) => Math.max(m, c.sort_order), -1)
+      const { error } = await supabase.from('bingo_categories')
+        .insert({ section_id: task.section_id, name, sort_order: maxOrder + 1 })
+      if (error) { alert('Failed to create category: ' + error.message); return }
+      setCategoryRows(prev => [...prev, { name, sort_order: maxOrder + 1 }])
+    }
+    await handleCategoryChange(name)
+  }
+
+  const handlePointsSave = async () => {
+    if (!task) return
+    const n = Math.max(0, parseFloat(pointsValue) || 0)
+    setPointsValue(String(n))
+    if (n === (task.points ?? 0)) return
+    await saveDetails({ points: n })
+  }
+
+  // Standard / Sign Splice / Breakout. Leaving a special type goes back to
+  // 'standard'; the Answer tab's saveInputs refines it from there.
+  const handleCardTypeChange = async (type: 'standard' | 'sign_splice' | 'breakout_hunt') => {
+    if (!task) return
+    const current = task.task_type === 'sign_splice' || task.task_type === 'breakout_hunt' ? task.task_type : 'standard'
+    if (type === current) return
+    await saveDetails({ task_type: type })
+    if (type === 'standard') setTaskType('standard')
+  }
+
+  // Back from a fresh, still-blank card deletes it rather than leaving an
+  // "Untitled challenge" behind in the library.
+  const handleBack = async () => {
+    if (isNew && task) {
+      const untouched = (task.title === 'Untitled challenge' || !task.title.trim()) && pages.length === 0 && photos.length === 0
+      if (untouched && window.confirm('Discard this empty challenge?')) {
+        const { error } = await supabase.from('bingo_tasks').delete().eq('id', task.id)
+        if (error) alert('Failed to discard: ' + error.message)
+      }
+    }
+    navigate(backPath)
   }
 
   const handleAnswerSave = async () => {
@@ -422,13 +516,14 @@ export function BingoDashTaskEdit() {
       <header className="bg-white border-b border-gray-200 px-6 py-4">
         <div className="max-w-4xl mx-auto flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <button onClick={() => navigate(backPath)} className="text-gray-400 hover:text-gray-600 transition-colors">
+            <button onClick={handleBack} className="text-gray-400 hover:text-gray-600 transition-colors">
               ← Back
             </button>
             <div className="w-6 h-6 rounded-full shrink-0" style={{ backgroundColor: task.hex_code }} />
             {editingTitle ? (
               <input
                 autoFocus
+                placeholder="Challenge name"
                 value={titleValue}
                 onChange={e => setTitleValue(e.target.value)}
                 onBlur={handleTitleSave}
@@ -461,6 +556,69 @@ export function BingoDashTaskEdit() {
       </header>
 
       <main className="max-w-4xl mx-auto px-6 py-8">
+        {isNew && (
+          <div className="mb-6 px-4 py-3 rounded-xl bg-violet-50 border border-violet-200 text-sm text-violet-800">
+            <span className="font-bold">New challenge</span> — give it a name, pick a category, points and card type, then add instructions and photos below. Everything saves as you go.
+          </div>
+        )}
+
+        {/* Card details: category / points / type */}
+        <div className="mb-6 bg-white border border-gray-200 rounded-xl p-5">
+          <div className="flex flex-col md:flex-row gap-4">
+            <div className="flex-1">
+              <label className="block text-sm font-medium text-gray-600 mb-1">Category</label>
+              <select
+                value={task.category ?? ''}
+                disabled={detailsSaving}
+                onChange={e => {
+                  if (e.target.value === '__new__') { handleNewCategory(); return }
+                  handleCategoryChange(e.target.value)
+                }}
+                className="w-full px-3 py-2 rounded-lg border border-gray-300 bg-white focus:outline-none focus:ring-2 focus:ring-violet-500"
+              >
+                <option value="">— Uncategorized —</option>
+                {categoryNames.map(name => <option key={name} value={name}>{name}</option>)}
+                <option value="__new__">+ New category…</option>
+              </select>
+            </div>
+            <div className="w-full md:w-28">
+              <label className="block text-sm font-medium text-gray-600 mb-1">Points</label>
+              <input
+                type="number" step="0.1" min={0}
+                value={pointsValue}
+                disabled={detailsSaving}
+                onChange={e => setPointsValue(e.target.value)}
+                onBlur={handlePointsSave}
+                onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
+                className="w-full px-3 py-2 rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-violet-500 text-center font-bold"
+              />
+            </div>
+            <div className="flex-1">
+              <label className="block text-sm font-medium text-gray-600 mb-1">Card Type</label>
+              <div className="flex rounded-lg overflow-hidden border border-gray-300">
+                {([
+                  ['standard', 'Standard', 'Photo, video, link, text or versus — choose the inputs in the Answer Input tab'],
+                  ['sign_splice', 'Sign Splice', 'Teams hunt each letter of their movie title on a different shop sign'],
+                  ['breakout_hunt', 'Breakout', 'Teams decode 10 puzzles, then photograph each object in the venue'],
+                ] as const).map(([value, label, tip]) => {
+                  const active = value === 'standard'
+                    ? task.task_type !== 'sign_splice' && task.task_type !== 'breakout_hunt'
+                    : task.task_type === value
+                  return (
+                    <button
+                      key={value} type="button" title={tip} disabled={detailsSaving}
+                      onClick={() => handleCardTypeChange(value)}
+                      className={`flex-1 py-2 text-sm font-bold transition-colors ${active ? 'bg-violet-600 text-white' : 'bg-white text-gray-500 hover:bg-gray-50'}`}
+                    >
+                      {label}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          </div>
+        </div>
+
         {/* Hero photos */}
         <div className="mb-6">
           <BingoAdminPhotoUpload taskId={task.id} />
