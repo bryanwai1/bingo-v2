@@ -114,7 +114,9 @@ export function BingoDashTaskEdit() {
         setTitleValue(isNew ? '' : data.title)
         if (isNew) setEditingTitle(true)
         setPointsValue(String(data.points ?? 0))
-        supabase.from('bingo_categories').select('name, sort_order').eq('section_id', data.section_id).order('sort_order')
+        // All categories across every board, so the dropdown is the same
+        // wherever the card lives.
+        supabase.from('bingo_categories').select('name, sort_order').order('sort_order')
           .then(({ data: rows }) => setCategoryRows((rows ?? []) as { name: string; sort_order: number }[]))
         setTaskType((data.task_type ?? 'standard') as 'standard' | 'answer' | 'photo' | 'video' | 'media')
         setInputs(effectiveInputs(data.task_type, data.completion_inputs))
@@ -133,6 +135,7 @@ export function BingoDashTaskEdit() {
         setMapsLabel(data.maps_label ?? '')
       }
     })
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- isNew is fixed for the page's lifetime
   }, [taskId])
 
   const previewActivity = task ? aitbByName(task.title) : undefined
@@ -157,8 +160,8 @@ export function BingoDashTaskEdit() {
     setEditingTitle(false)
   }
 
-  // Every category name this board uses: its bingo_categories rows plus
-  // whatever text sibling cards carry (same rule as the admin library).
+  // Every category name across all boards, plus whatever text sibling cards
+  // carry (a copied card can have a category with no row).
   const categoryNames = (() => {
     const names = new Set<string>()
     categoryRows.forEach(c => names.add(c.name))

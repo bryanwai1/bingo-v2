@@ -115,118 +115,45 @@ function SubmissionThumb({ url, fill = false, video = false, link = false, versu
   )
 }
 
-const PRESET_COLORS = [
-  { name: 'Red', hex: '#EF4444' },
-  { name: 'Orange', hex: '#F97316' },
-  { name: 'Amber', hex: '#F59E0B' },
-  { name: 'Yellow', hex: '#EAB308' },
-  { name: 'Lime', hex: '#84CC16' },
-  { name: 'Green', hex: '#22C55E' },
-  { name: 'Emerald', hex: '#10B981' },
-  { name: 'Teal', hex: '#14B8A6' },
-  { name: 'Cyan', hex: '#06B6D4' },
-  { name: 'Sky Blue', hex: '#38BDF8' },
-  { name: 'Blue', hex: '#3B82F6' },
-  { name: 'Indigo', hex: '#6366F1' },
-  { name: 'Violet', hex: '#8B5CF6' },
-  { name: 'Purple', hex: '#A855F7' },
-  { name: 'Fuchsia', hex: '#D946EF' },
-  { name: 'Pink', hex: '#EC4899' },
-  { name: 'Rose', hex: '#F43F5E' },
-]
-
-
-function formatTime(totalSeconds: number): string {
-  const s = Math.max(0, Math.round(totalSeconds))
-  const m = Math.floor(s / 60)
-  const sec = s % 60
-  return `${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`
+// Countdown display for the Run Event tab: seconds -> MM:SS.
+function formatTime(seconds: number): string {
+  const total = Math.max(0, Math.round(seconds))
+  const m = Math.floor(total / 60)
+  const s = total % 60
+  return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
 }
 
-// .in() filters with many ids can blow past URL limits — fetch in chunks.
-async function fetchInChunks<T>(table: string, column: string, ids: string[]): Promise<T[]> {
-  if (ids.length === 0) return []
-  const CHUNK = 150
-  const out: T[] = []
-  for (let i = 0; i < ids.length; i += CHUNK) {
-    const { data } = await supabase.from(table).select('*').in(column, ids.slice(i, i + CHUNK))
-    if (data) out.push(...(data as T[]))
-  }
-  return out
-}
+// Bulk import: a JSON array of { title, color, hex_code, clue? | clues?[] }.
+interface ImportRow { title: string; color: string; hex_code: string; clues: string[] }
 
-// ── Import helpers ─────────────────────────────────────────────────────────────
-interface ImportRow {
-  title: string
-  color: string
-  hex_code: string
-  clues: string[]
-}
-
-function parseImport(raw: string): ImportRow[] {
-  const parsed = JSON.parse(raw)
+function parseImport(text: string): ImportRow[] {
+  const parsed: unknown = JSON.parse(text)
   if (!Array.isArray(parsed)) throw new Error('JSON must be an array of objects')
-  return parsed.map((item: unknown, i: number) => {
-    if (typeof item !== 'object' || item === null) throw new Error(`Item ${i + 1} is not an object`)
-    const obj = item as Record<string, unknown>
-    if (!obj.title || typeof obj.title !== 'string') throw new Error(`Item ${i + 1} missing "title"`)
-    if (!obj.color || typeof obj.color !== 'string') throw new Error(`Item ${i + 1} missing "color"`)
-    if (!obj.hex_code || typeof obj.hex_code !== 'string') throw new Error(`Item ${i + 1} missing "hex_code"`)
+  return parsed.map((item, i) => {
+    if (typeof item !== 'object' || !item) throw new Error(`Item ${i + 1} is not an object`)
+    const row = item as Record<string, unknown>
+    if (!row.title || typeof row.title !== 'string') throw new Error(`Item ${i + 1} missing "title"`)
+    if (!row.color || typeof row.color !== 'string') throw new Error(`Item ${i + 1} missing "color"`)
+    if (!row.hex_code || typeof row.hex_code !== 'string') throw new Error(`Item ${i + 1} missing "hex_code"`)
     const clues: string[] = []
-    if (typeof obj.clue === 'string' && obj.clue.trim()) clues.push(obj.clue.trim())
-    if (Array.isArray(obj.clues)) {
-      for (const c of obj.clues) {
-        if (typeof c === 'string' && c.trim()) clues.push(c.trim())
-      }
+    if (typeof row.clue === 'string' && row.clue.trim()) clues.push(row.clue.trim())
+    if (Array.isArray(row.clues)) {
+      for (const c of row.clues) if (typeof c === 'string' && c.trim()) clues.push(c.trim())
     }
-    return { title: obj.title.trim(), color: obj.color.trim(), hex_code: obj.hex_code.trim(), clues }
+    return { title: row.title.trim(), color: row.color.trim(), hex_code: row.hex_code.trim(), clues }
   })
 }
 
-
-// Colour for one existing card (edit-tile modal). New cards do not get this:
-// they take their category's colour, set once from the category header.
-function ColorPicker({
-  hex, colorName, onHexChange, onNameChange,
-}: {
-  hex: string
-  colorName: string
-  onHexChange: (h: string) => void
-  onNameChange: (n: string) => void
-}) {
-  return (
-    <div className="flex flex-col gap-3">
-      <div>
-        <label className="block text-sm font-medium a-text-3 mb-1">Color Name</label>
-        <input
-          type="text"
-          value={colorName}
-          onChange={e => onNameChange(e.target.value)}
-          placeholder="e.g. Blue"
-          className="w-full px-3 py-2 rounded-lg border a-border text-sm focus:outline-none focus:ring-2 focus:ring-teal-500"
-        />
-      </div>
-      <div>
-        <label className="block text-sm font-medium a-text-3 mb-2">Color</label>
-        <div className="flex gap-1.5 flex-wrap mb-2">
-          {PRESET_COLORS.map(c => (
-            <button
-              key={c.hex}
-              type="button"
-              onClick={() => { onHexChange(c.hex); if (!colorName) onNameChange(c.name) }}
-              className={`w-7 h-7 rounded-full border-2 transition-all ${hex === c.hex ? 'border-gray-900 scale-110' : 'border-transparent'}`}
-              style={{ backgroundColor: c.hex }}
-              title={c.name}
-            />
-          ))}
-        </div>
-        <div className="flex items-center gap-2">
-          <input type="color" value={hex} onChange={e => onHexChange(e.target.value)} className="w-9 h-9 rounded cursor-pointer" />
-          <input type="text" value={hex} onChange={e => onHexChange(e.target.value)} className="px-3 py-2 rounded-lg border a-border font-mono text-sm w-28" />
-        </div>
-      </div>
-    </div>
-  )
+// Sub-accounts can't `select *` across every board, so rows keyed to my
+// boards/teams are fetched in `.in()` chunks small enough for the URL limit.
+async function fetchInChunks<T>(table: string, column: string, ids: string[]): Promise<T[]> {
+  if (ids.length === 0) return []
+  const out: T[] = []
+  for (let i = 0; i < ids.length; i += 150) {
+    const { data } = await supabase.from(table).select('*').in(column, ids.slice(i, i + 150))
+    if (data) out.push(...(data as T[]))
+  }
+  return out
 }
 
 // ── Board tile (interactive editor with drag support) ──────────────────────────
@@ -601,6 +528,14 @@ export function BingoDashAdmin() {
     tasks.filter(t => t.section_id === sectionId && t.category?.trim()).forEach(t => names.add(t.category.trim()))
     return [...names].sort((a, b) => a.localeCompare(b))
   }
+  // Every category name across all boards: the Move modal and card editor
+  // offer the full list regardless of which board is currently selected.
+  const allCategoryNames = (): string[] => {
+    const names = new Set<string>()
+    categories.forEach(c => names.add(c.name))
+    tasks.forEach(t => { if (t.category?.trim()) names.add(t.category.trim()) })
+    return [...names].sort((a, b) => a.localeCompare(b))
+  }
   const [challengeSections, setChallengeSections] = useState<BingoChallengeSection[]>([])
   const [duels, setDuels] = useState<BingoDuel[]>([])
   
@@ -661,14 +596,9 @@ export function BingoDashAdmin() {
   // Tile editor modal
   const [editingTile, setEditingTile] = useState<BingoTask | null>(null)
   const [tileTitle, setTileTitle] = useState('')
-  const [tileColor, setTileColor] = useState('')
   const [tileHex, setTileHex] = useState('#3B82F6')
   const [tileCategory, setTileCategory] = useState('')
   const [tilePoints, setTilePoints] = useState(0)
-  const [tileSectionId, setTileSectionId] = useState<string>('')
-  const [tileTaskType, setTileTaskType] = useState<'standard' | 'answer' | 'photo' | 'video' | 'media' | 'sign_splice' | 'breakout_hunt'>('standard')
-  const [tileAnswerQuestion, setTileAnswerQuestion] = useState('')
-  const [tileAnswerText, setTileAnswerText] = useState('')
   const [tileSaving, setTileSaving] = useState(false)
 
   // Inline category picker on gallery cards (shows a <select> dropdown)
@@ -1815,33 +1745,20 @@ export function BingoDashAdmin() {
   const openTileEdit = (task: BingoTask) => {
     setEditingTile(task)
     setTileTitle(task.title)
-    setTileColor(task.color)
     setTileHex(task.hex_code)
     setTileCategory(task.category || '')
     setTilePoints(task.points ?? 0)
-    setTileSectionId(task.section_id)
-    setTileTaskType(task.task_type ?? 'standard')
-    setTileAnswerQuestion(task.answer_question ?? '')
-    setTileAnswerText(task.answer_text ?? '')
   }
 
+  // The Move modal only edits title / category / points; type, colour and
+  // section live in the full card editor.
   const saveTile = async () => {
-    if (!editingTile || !tileTitle.trim() || !tileColor.trim()) return
+    if (!editingTile || !tileTitle.trim()) return
     setTileSaving(true)
     try {
       const updates: Partial<BingoTask> = {
-        title: tileTitle.trim(), color: tileColor.trim(), hex_code: tileHex,
+        title: tileTitle.trim(),
         category: tileCategory.trim(), points: tilePoints,
-        task_type: tileTaskType,
-        answer_question: tileTaskType === 'answer' ? tileAnswerQuestion.trim() || null : null,
-        answer_text: tileTaskType === 'answer'
-          ? tileAnswerText.split('\n').map(l => l.trim()).filter(Boolean).join('\n') || null
-          : null,
-      }
-      // Moving a tile to another compartment only changes where it lives in
-      // the library — board placements are separate rows and stay intact.
-      if (tileSectionId !== editingTile.section_id) {
-        updates.section_id = tileSectionId
       }
       await supabase.from('bingo_tasks').update(updates).eq('id', editingTile.id)
       setTasks(prev => prev.map(t => t.id === editingTile.id ? { ...t, ...updates } : t))
@@ -5179,22 +5096,12 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                 <input type="text" value={tileTitle} onChange={e => setTileTitle(e.target.value)} autoFocus
                   className="w-full px-4 py-2 rounded-lg border a-border focus:outline-none focus:ring-2 focus:ring-teal-500" />
               </div>
-              <div>
-                <label className="block text-sm font-medium a-text-3 mb-1">Section</label>
-                <select value={tileSectionId} onChange={e => setTileSectionId(e.target.value)}
-                  className="w-full px-3 py-2 rounded-lg border a-border focus:outline-none focus:ring-2 focus:ring-teal-500 a-surface">
-                  {myBoards.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                </select>
-                {editingTile && tileSectionId !== editingTile.section_id && (
-                  <p className="text-xs text-amber-600 mt-1">Moving to a different section will take this card off the board.</p>
-                )}
-              </div>
               <div className="flex gap-3">
                 <div className="flex-1">
                   <label className="block text-sm font-medium a-text-3 mb-1">Category</label>
                   <select value={tileCategory} onChange={async e => {
                     if (e.target.value === '__new__') {
-                      const name = await promptAndCreateCategory(tileSectionId)
+                      const name = await promptAndCreateCategory(editingTile.section_id)
                       if (name) setTileCategory(name)
                       return
                     }
@@ -5202,8 +5109,8 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                   }}
                     className="w-full px-3 py-2 rounded-lg border a-border focus:outline-none focus:ring-2 focus:ring-teal-500 a-surface">
                     <option value="">— Uncategorized —</option>
-                    {categories.filter(c => c.section_id === tileSectionId).map(c => (
-                      <option key={c.id} value={c.name}>{c.name}</option>
+                    {allCategoryNames().map(name => (
+                      <option key={name} value={name}>{name}</option>
                     ))}
                     <option value="__new__">+ New category…</option>
                   </select>
@@ -5215,47 +5122,8 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                     className="w-full px-3 py-2 rounded-lg border a-border focus:outline-none focus:ring-2 focus:ring-teal-500 text-center font-bold" />
                 </div>
               </div>
-              <ColorPicker hex={tileHex} colorName={tileColor} onHexChange={setTileHex} onNameChange={setTileColor} />
-              {/* Type toggle */}
-              <div>
-                <label className="block text-sm font-medium a-text-3 mb-2">Card Type</label>
-                <div className="flex rounded-lg overflow-hidden border a-border">
-                  <button
-                    type="button"
-                    onClick={() => setTileTaskType('standard')}
-                    className={`flex-1 py-2 text-sm font-bold transition-colors ${tileTaskType === 'standard' ? 'bg-teal-600 a-text' : 'a-surface a-text-3 hover:a-surface-2'}`}
-                  >
-                    Standard
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setTileTaskType('answer')}
-                    className={`flex-1 py-2 text-sm font-bold transition-colors ${tileTaskType === 'answer' ? 'bg-teal-600 a-text' : 'a-surface a-text-3 hover:a-surface-2'}`}
-                  >
-                    Answer Input
-                  </button>
-                </div>
-              </div>
-              {tileTaskType === 'answer' && (
-                <>
-                  <div>
-                    <label className="block text-sm font-medium a-text-3 mb-1">Question / Prompt</label>
-                    <input type="text" value={tileAnswerQuestion} onChange={e => setTileAnswerQuestion(e.target.value)}
-                      placeholder="e.g. What is the name of this landmark?"
-                      className="w-full px-4 py-2 rounded-lg border a-border focus:outline-none focus:ring-2 focus:ring-teal-500" />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium a-text-3 mb-1">Answer Template</label>
-                    <p className="text-xs a-text-2 mb-1">One answer per line. Each line becomes a row of letter boxes.</p>
-                    <textarea value={tileAnswerText} onChange={e => setTileAnswerText(e.target.value)}
-                      placeholder={"e.g.\nPETRONAS\nTWIN TOWERS"}
-                      rows={3}
-                      className="w-full px-4 py-2 rounded-lg border a-border focus:outline-none focus:ring-2 focus:ring-teal-500 font-mono text-sm resize-none" />
-                  </div>
-                </>
-              )}
               <div className="flex gap-3 pt-2">
-                <button onClick={saveTile} disabled={tileSaving || !tileTitle.trim() || !tileColor.trim()}
+                <button onClick={saveTile} disabled={tileSaving || !tileTitle.trim()}
                   className="flex-1 py-2.5 bg-teal-600 a-text rounded-xl font-bold hover:bg-violet-700 disabled:opacity-50 transition-colors">
                   {tileSaving ? 'Saving...' : 'Save Changes'}
                 </button>
