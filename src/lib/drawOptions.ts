@@ -46,16 +46,16 @@ export function slotKey(slot: Pick<SlotRow, 'id' | 'source' | 'pool_key'>): stri
 /** Presentation styles a card can use for its draw. */
 export const DRAW_STYLES = [
   { value: 'spin', label: 'Spin wheel', hint: 'Pie wheels the team spins, then locks.' },
-  { value: 'deal', label: 'Card deal', hint: 'Cards dealt face-up together, no re-draws.' },
-  { value: 'pick', label: 'Instant reveal', hint: 'Each slot flickers, then all land at once.' },
-  { value: 'gamepick', label: 'Game checklist', hint: 'Tick a fixed list off as it is built.' },
+  { value: 'deal', label: 'Text only', hint: 'Cards dealt face-up together as plain text, no re-draws.' },
+  { value: 'pick', label: 'Image and text', hint: 'Each slot flickers, then all land at once with artwork.' },
 ] as const
 
 export type DrawStyle = (typeof DRAW_STYLES)[number]['value']
 
-/** What a card may already carry. 'list' was the standalone per-team deal;
- *  it is no longer offered, but cards configured with it still read back. */
-export type StoredDrawStyle = DrawStyle | 'list'
+/** What a card may already carry. 'list' (standalone per-team deal) and
+ *  'gamepick' (fixed checklist) are no longer offered, but cards configured
+ *  with them still read back. */
+export type StoredDrawStyle = DrawStyle | 'list' | 'gamepick'
 
 /** Styles that draw from slots. 'gamepick' tracks a fixed list instead. */
 export function styleUsesSlots(style: string | null | undefined): boolean {

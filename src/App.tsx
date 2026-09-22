@@ -2,6 +2,7 @@ import { lazy, Suspense } from 'react'
 import { BrowserRouter, Routes, Route, Outlet, Navigate, useParams } from 'react-router-dom'
 import { BingoAuthProvider } from './hooks/useBingoAuth'
 import { RequireBingoAdmin } from './components/RequireBingoAdmin'
+import { useAutoTranslate } from './lib/autoTranslate'
 
 const InstructionsSlide     = lazy(() => import('./pages/InstructionsSlide').then(m => ({ default: m.InstructionsSlide })))
 const InstructionsHub       = lazy(() => import('./pages/InstructionsHub').then(m => ({ default: m.InstructionsHub })))
@@ -37,6 +38,8 @@ const BingoDashAccount      = lazy(() => import('./pages/BingoDashAccount').then
 const BingoDashEvents       = lazy(() => import('./pages/BingoDashEvents').then(m => ({ default: m.BingoDashEvents })))
 
 export default function App() {
+  // EN / BM: translates the whole rendered page when Bahasa Melayu is chosen.
+  useAutoTranslate()
   return (
     <BrowserRouter>
       <Suspense fallback={null}>

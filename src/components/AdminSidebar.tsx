@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { getStoredTheme, setStoredTheme, type ThemeMode } from '../lib/adminTheme'
+import { LanguageToggle } from './LanguageToggle'
 
 // Fixed left navigation.
 //
@@ -113,6 +114,11 @@ export function AdminSidebar({ view, onView, email, isOwner, onSignOut, pending 
       </nav>
 
       <div className="px-3 py-3 border-t a-border space-y-1">
+        <div className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl a-text-2">
+          <span className="text-lg w-5 text-center">🌐</span>
+          <span className="text-sm font-bold flex-1">Language</span>
+          <LanguageToggle variant="light" />
+        </div>
         <button
           onClick={toggle}
           className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl a-text-2 hover:a-surface-2 transition-colors"

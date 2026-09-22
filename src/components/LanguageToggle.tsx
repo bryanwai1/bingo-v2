@@ -10,8 +10,9 @@ export function LanguageToggle({ className = '', variant = 'dark' }: Props) {
   const isDark = variant === 'dark'
   return (
     <div
+      translate="no"
       className={`inline-flex rounded-full p-1 backdrop-blur-sm border ${
-        isDark ? 'bg-black/30 border-white/20' : 'bg-white border-gray-200'
+        isDark ? 'bg-black/30 border-white/20' : 'a-surface-2 a-border'
       } ${className}`}
     >
       {(['en', 'ms'] as const).map(l => {
@@ -22,8 +23,8 @@ export function LanguageToggle({ className = '', variant = 'dark' }: Props) {
             onClick={() => setLang(l)}
             className={`px-2.5 py-0.5 rounded-full text-[11px] font-black uppercase tracking-wider transition-all ${
               active
-                ? isDark ? 'bg-white text-gray-900' : 'a-surface a-text'
-                : isDark ? 'a-text-2 hover:a-text' : 'text-gray-500 hover:text-gray-800'
+                ? isDark ? 'bg-white text-gray-900' : 'a-surface a-text shadow-sm'
+                : isDark ? 'a-text-2 hover:a-text' : 'a-text-3 hover:a-text'
             }`}
             aria-label={l === 'en' ? 'Switch to English' : 'Tukar ke Bahasa Malaysia'}
           >
