@@ -424,16 +424,10 @@ export function BingoDashProjector() {
                           <span className={theme.muted}> + </span>
                           <span className={theme.bonus}>{fmt(row.bonus)} bonus</span>
                         </p>
-                      ) : (row.lineBonus > 0 || row.duelBonus > 0) ? (
-                        // Surface where the total came from — otherwise a line
-                        // multiplier or a winning defender reads as having
-                        // scored from nowhere.
-                        <p className={`${theme.muted} text-[9px] lg:text-xs font-bold uppercase tracking-wider lg:tracking-widest mt-1`}>
-                          pts
-                          {row.lineBonus > 0 && <span className={theme.lines}> · incl. {fmt(row.lineBonus)} lines</span>}
-                          {row.duelBonus > 0 && <span className={theme.duel}> · incl. {row.duelBonus} duel</span>}
-                        </p>
                       ) : (
+                        // No breakdown under the score: the lines column next
+                        // to it already says how many landed, and duel
+                        // winnings are rolled into the total silently.
                         <p className={`${theme.muted} text-[9px] lg:text-xs font-bold uppercase tracking-wider lg:tracking-widest mt-1`}>pts</p>
                       )}
                     </div>
