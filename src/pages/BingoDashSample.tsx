@@ -576,6 +576,11 @@ const BoardScreen = forwardRef<BoardScreenHandle, {
   const gridTasks = useMemo(() => withCategoryColors(gridTasksProp), [gridTasksProp])
   const [showLeaveConfirm, setShowLeaveConfirm] = useState(false)
   const [popupLetters, setPopupLetters] = useState<string | null>(null)
+  // Opened by hand from the remote, rather than fired by completing a line.
+  // A celebration that fires on its own gets out of the way after 4s; one the
+  // presenter opened stays put until they close it, so the Message button is a
+  // real toggle instead of something that flips itself back mid-sentence.
+  const [popupSticky, setPopupSticky] = useState(false)
   const [inviteOpen, setInviteOpen] = useState(false)
   const [popupQueue, setPopupQueue] = useState<string[]>([])
   const celebratedLinesRef = useRef<Set<number> | null>(null)
@@ -635,7 +640,10 @@ const BoardScreen = forwardRef<BoardScreenHandle, {
     if (newLines.length === 0) return
     const baseSize = celebratedLinesRef.current.size
     newLines.forEach(idx => celebratedLinesRef.current!.add(idx))
-    const queued = newLines.map((_, i) => BINGO_WORD.slice(0, Math.min(baseSize + i + 1, 5)))
+    // Distinct letters only. Past five lines the label is capped at 'BINGO',
+    // so a press that lands several lines at once would otherwise queue the
+    // same celebration over and over — 4s each, with the room waiting.
+    const queued = [...new Set(newLines.map((_, i) => BINGO_WORD.slice(0, Math.min(baseSize + i + 1, 5))))]
     setPopupQueue(prev => [...prev, ...queued])
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [completedLinesKey])
@@ -643,24 +651,28 @@ const BoardScreen = forwardRef<BoardScreenHandle, {
   useEffect(() => {
     if (popupLetters || popupQueue.length === 0) return
     setPopupLetters(popupQueue[0])
+    setPopupSticky(false)
     setPopupQueue(prev => prev.slice(1))
   }, [popupLetters, popupQueue])
 
+  const closePopup = useCallback(() => { setPopupLetters(null); setPopupSticky(false) }, [])
+
   useEffect(() => {
-    if (!popupLetters) return
-    const t = setTimeout(() => setPopupLetters(null), 4000)
+    if (!popupLetters || popupSticky) return
+    const t = setTimeout(closePopup, 4000)
     return () => clearTimeout(t)
-  }, [popupLetters])
+  }, [popupLetters, popupSticky, closePopup])
 
   // Let a paired phone clear the celebration. Dismisses the current one only,
   // exactly like tapping the screen — the next queued one then takes over, so
   // the presenter taps through a burst at their own pace.
   useImperativeHandle(ref, () => ({
-    dismissPopup: () => setPopupLetters(null),
-    // Replays the team's current level: 2 lines shows 'BI'. With no lines yet
+    dismissPopup: closePopup,
+    // Shows the team's current level: 2 lines shows 'BI'. With no lines yet
     // there is nothing earned to celebrate, so show the full BINGO — on a
-    // pitch that is the shot you want on the big screen.
-    showPopup: () => setPopupLetters(lettersEarned || 'BINGO'),
+    // pitch that is the shot you want on the big screen. Stays up until it is
+    // closed again.
+    showPopup: () => { setPopupLetters(lettersEarned || 'BINGO'); setPopupSticky(true) },
     setInvite: (next: boolean) => setInviteOpen(next),
   }))
 
@@ -674,7 +686,7 @@ const BoardScreen = forwardRef<BoardScreenHandle, {
     <div className="min-h-[80vh] bg-gray-950 relative overflow-x-hidden">
       <ParticleBackground />
 
-      {popupLetters && <BingoPopup letters={popupLetters} onDismiss={() => setPopupLetters(null)} />}
+      {popupLetters && <BingoPopup letters={popupLetters} onDismiss={closePopup} />}
 
       <header className="relative z-10 px-4 pt-5 pb-3">
         <div className="board-col flex items-start justify-between gap-3">
@@ -2006,6 +2018,13 @@ function SampleProjector() {
     return () => { cancelled = true }
   }, [selectedId])
 
+  // How many of the five rows Quick BINGO has filled — the phone shows this
+  // as 3/5 so the presenter knows how many presses are left before BINGO.
+  const quickWinRows = useMemo(
+    () => BINGO_LINES.slice(0, 5).filter(line => line.every(slot => quickWinSlots.has(slot))).length,
+    [quickWinSlots],
+  )
+
   const handleSelectBoard = (id: string) => { setSelectedId(id) }
 
   // Stable identity: BoardScreen reports on every popup change, and a fresh
@@ -2039,11 +2058,27 @@ function SampleProjector() {
   const markComplete = (taskId: string) => setScanState(prev => ({ ...prev, [taskId]: 'completed' }))
   const markUncomplete = (taskId: string) => setScanState(prev => ({ ...prev, [taskId]: 'scanned' }))
 
-  // Instantly complete the top row (demo helper) — always slots 0-4, on every
-  // board, so the demo is predictable regardless of how a board is laid out.
+  // Demo helper: each press completes the next ROW, so five presses walk the
+  // board through B → I → N → G → O with a celebration at every step. Always
+  // the same five rows on every board, so the demo is predictable regardless
+  // of how a board is laid out.
+  //
   // Tracked by slot (quickWinSlots), not scanState, so a card that also sits
   // in other boxes elsewhere on the board doesn't light those too.
-  const handleQuickWin = () => setQuickWinSlots(new Set(BINGO_LINES[0]))
+  //
+  // BINGO_LINES[0..4] are the five rows; the last press therefore fills the
+  // board, which also completes the columns and both diagonals. That is why
+  // the popup queue collapses duplicates — otherwise the fifth press would
+  // fire eight identical "BINGO!" celebrations back to back.
+  const handleQuickWin = () => setQuickWinSlots(prev => {
+    const next = new Set(prev)
+    for (let row = 0; row < 5; row++) {
+      if (BINGO_LINES[row].every(slot => next.has(slot))) continue
+      BINGO_LINES[row].forEach(slot => next.add(slot))
+      break
+    }
+    return next
+  })
 
   // ── Remote control wiring ──────────────────────────────────────────────────
   const snapshot = (): RemoteState => ({
@@ -2056,6 +2091,7 @@ function SampleProjector() {
     popup: popup.letters,
     popupQueued: popup.queued,
     inviteOpen,
+    quickWinRows,
   })
 
   const applyCommand = (c: RemoteCommand) => {
@@ -2103,8 +2139,9 @@ function SampleProjector() {
       popup: popup.letters,
       popupQueued: popup.queued,
       inviteOpen,
+      quickWinRows,
     })
-  }, [remoteCode, selectedId, teamName, scanState, openTask, view, detailStep, popup, inviteOpen, sendState])
+  }, [remoteCode, selectedId, teamName, scanState, openTask, view, detailStep, popup, inviteOpen, quickWinRows, sendState])
 
   // Heartbeat. The phone cannot tell "nothing has changed" from "the projector
   // is gone", so the projector re-broadcasts its state every few seconds and
@@ -2578,6 +2615,7 @@ function SampleController({ code }: { code: string }) {
   const popup = state?.popup ?? null
   const popupQueued = state?.popupQueued ?? 0
   const inviteOpen = state?.inviteOpen ?? false
+  const quickWinRows = state?.quickWinRows ?? 0
 
   return (
     <div className="min-h-screen bg-gray-950 text-white flex flex-col">
@@ -2622,7 +2660,7 @@ function SampleController({ code }: { code: string }) {
               </p>
               <button onClick={() => sendCommand({ action: 'dismissPopup' })}
                 className="w-full py-2.5 rounded-lg bg-purple-500 text-white text-sm font-black hover:bg-purple-400 active:scale-95 transition-all">
-                ✕ Close celebration
+                ✕ Close message
               </button>
             </div>
           )}
@@ -2782,7 +2820,7 @@ function SampleController({ code }: { code: string }) {
                     ? 'bg-purple-500 text-white border-purple-400'
                     : 'bg-purple-500/20 text-purple-100 border-purple-400/40 hover:bg-purple-500/30'
                 }`}>
-                {popup ? '✕ Close BINGO' : '🎉 Show BINGO'}
+                {popup ? '✕ Close message' : '💬 Message'}
               </button>
               <button
                 onClick={() => sendCommand({ action: 'setInvite', open: !inviteOpen })}
@@ -2799,9 +2837,10 @@ function SampleController({ code }: { code: string }) {
           {/* Bottom actions */}
           <div className="mt-auto grid grid-cols-2 gap-2 pt-2">
             <button onClick={() => sendCommand({ action: 'quickWin' })}
-              disabled={!teamName}
+              disabled={!teamName || quickWinRows >= 5}
+              title={quickWinRows >= 5 ? 'Board is full — reset the demo to run it again' : 'Complete the next row'}
               className="py-3 rounded-lg bg-yellow-400/20 text-yellow-200 border border-yellow-400/40 text-sm font-black hover:bg-yellow-400/30 disabled:opacity-40 transition-colors">
-              ⚡ Quick BINGO
+              ⚡ Quick BINGO <span className="tabular-nums font-black">{quickWinRows}/5</span>
             </button>
             <button onClick={() => sendCommand({ action: 'reset' })}
               className="py-3 rounded-lg bg-white/10 text-gray-200 border border-white/15 text-sm font-bold hover:bg-white/20 transition-colors">

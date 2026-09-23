@@ -70,6 +70,8 @@ export type RemoteState = {
   popupQueued: number
   /** Whether the Invite-teammate QR overlay is up on the projector. */
   inviteOpen: boolean
+  /** Rows Quick BINGO has completed so far, 0-5 — one letter per row. */
+  quickWinRows: number
 }
 
 /**
