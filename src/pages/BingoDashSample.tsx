@@ -539,10 +539,10 @@ function TimerDisplay({ settings }: { settings: BingoSection | null }) {
 export type BoardScreenHandle = {
   /** Clear the BINGO celebration — same as tapping it on the projector. */
   dismissPopup: () => void
-  /** Replay the celebration on demand, for a pitch. */
-  showPopup: () => void
   /** Show or hide the Invite-teammate QR overlay. */
   setInvite: (open: boolean) => void
+  /** Open or close the help-chat message box. */
+  setChat: (open: boolean) => void
 }
 
 const BoardScreen = forwardRef<BoardScreenHandle, {
@@ -567,10 +567,12 @@ const BoardScreen = forwardRef<BoardScreenHandle, {
   onPopupChange?: (letters: string | null, queued: number) => void
   /** Invite-QR overlay state, so the phone's toggle reflects the screen. */
   onInviteChange?: (open: boolean) => void
+  /** Help-chat state, so the phone's toggle reflects the screen. */
+  onChatChange?: (open: boolean) => void
 }>(function BoardScreen({
   teamName, gridTasks: gridTasksProp, scanState, quickWinSlots, section, glowSlots, glowMode,
   onToggleGlow, onClearGlow, onToggleGlowMode, onOpenTask, onSwitchTeam,
-  inviteUrl, onShowScoreboard, onPopupChange, onInviteChange,
+  inviteUrl, onShowScoreboard, onPopupChange, onInviteChange, onChatChange,
 }, ref) {
   // One colour per category on the board, whatever each card row carries.
   const gridTasks = useMemo(() => withCategoryColors(gridTasksProp), [gridTasksProp])
@@ -582,6 +584,7 @@ const BoardScreen = forwardRef<BoardScreenHandle, {
   // real toggle instead of something that flips itself back mid-sentence.
   const [popupSticky, setPopupSticky] = useState(false)
   const [inviteOpen, setInviteOpen] = useState(false)
+  const [chatOpen, setChatOpen] = useState(false)
   const [popupQueue, setPopupQueue] = useState<string[]>([])
   const celebratedLinesRef = useRef<Set<number> | null>(null)
 
@@ -668,12 +671,8 @@ const BoardScreen = forwardRef<BoardScreenHandle, {
   // the presenter taps through a burst at their own pace.
   useImperativeHandle(ref, () => ({
     dismissPopup: closePopup,
-    // Shows the team's current level: 2 lines shows 'BI'. With no lines yet
-    // there is nothing earned to celebrate, so show the full BINGO — on a
-    // pitch that is the shot you want on the big screen. Stays up until it is
-    // closed again.
-    showPopup: () => { setPopupLetters(lettersEarned || 'BINGO'); setPopupSticky(true) },
     setInvite: (next: boolean) => setInviteOpen(next),
+    setChat: (next: boolean) => setChatOpen(next),
   }))
 
   useEffect(() => {
@@ -681,6 +680,7 @@ const BoardScreen = forwardRef<BoardScreenHandle, {
   }, [onPopupChange, popupLetters, popupQueue.length])
 
   useEffect(() => { onInviteChange?.(inviteOpen) }, [onInviteChange, inviteOpen])
+  useEffect(() => { onChatChange?.(chatOpen) }, [onChatChange, chatOpen])
 
   return (
     <div className="min-h-[80vh] bg-gray-950 relative overflow-x-hidden">
@@ -701,7 +701,14 @@ const BoardScreen = forwardRef<BoardScreenHandle, {
             </div>
             {/* Same help bubble as the player board; demo-only messages. */}
             <div className="mt-3">
-              <SupportChat inline demo sectionId={section?.id ?? 'demo'} teamId={`demo-${teamName}`} teamName={teamName} />
+              <SupportChat
+                inline demo
+                sectionId={section?.id ?? 'demo'}
+                teamId={`demo-${teamName}`}
+                teamName={teamName}
+                open={chatOpen}
+                onOpenChange={setChatOpen}
+              />
             </div>
           </div>
           <div className="flex flex-col items-end gap-2 flex-shrink-0 mt-1">
@@ -1902,6 +1909,22 @@ export function BingoDashSample() {
   return remoteCode ? <SampleController code={remoteCode} /> : <SampleProjector />
 }
 
+// Quick BINGO: five presses, one new line each. The first four fill rows 0-3;
+// the fifth adds the single box that closes COLUMN 1 (1,6,11,16,21).
+//
+// Filling row 4 instead would complete the whole board, closing the four
+// remaining columns and both diagonals in one press — eight lines at once, not
+// one. Column 1 is the only choice that lands exactly one: every other column
+// still needs its row-4 box, the main diagonal still needs slot 24, and the
+// anti-diagonal still needs slot 20.
+const QUICK_WIN_STEPS: number[][] = [
+  [0, 1, 2, 3, 4],       // row 0        → B
+  [5, 6, 7, 8, 9],       // row 1        → I
+  [10, 11, 12, 13, 14],  // row 2        → N
+  [15, 16, 17, 18, 19],  // row 3        → G
+  [21],                  // closes col 1 → O
+]
+
 function SampleProjector() {
   // `?board=<sectionId>` lets the admin launch the demo pre-scoped to a
   // specific event's board (from the Run Event panel); when present it also
@@ -1976,6 +1999,7 @@ function SampleProjector() {
   // Celebration on screen, mirrored to the paired phone.
   const [popup, setPopup] = useState<{ letters: string | null; queued: number }>({ letters: null, queued: 0 })
   const [inviteOpen, setInviteOpen] = useState(false)
+  const [chatOpen, setChatOpen] = useState(false)
   const boardRef = useRef<BoardScreenHandle>(null)
   const detailRef = useRef<SampleTaskDetailHandle | null>(null)
 
@@ -2018,10 +2042,10 @@ function SampleProjector() {
     return () => { cancelled = true }
   }, [selectedId])
 
-  // How many of the five rows Quick BINGO has filled — the phone shows this
-  // as 3/5 so the presenter knows how many presses are left before BINGO.
+  // Presses taken so far — the phone shows this as 3/5 so the presenter knows
+  // how many are left before BINGO.
   const quickWinRows = useMemo(
-    () => BINGO_LINES.slice(0, 5).filter(line => line.every(slot => quickWinSlots.has(slot))).length,
+    () => QUICK_WIN_STEPS.filter(slots => slots.every(slot => quickWinSlots.has(slot))).length,
     [quickWinSlots],
   )
 
@@ -2066,17 +2090,11 @@ function SampleProjector() {
   // Tracked by slot (quickWinSlots), not scanState, so a card that also sits
   // in other boxes elsewhere on the board doesn't light those too.
   //
-  // BINGO_LINES[0..4] are the five rows; the last press therefore fills the
-  // board, which also completes the columns and both diagonals. That is why
-  // the popup queue collapses duplicates — otherwise the fifth press would
-  // fire eight identical "BINGO!" celebrations back to back.
   const handleQuickWin = () => setQuickWinSlots(prev => {
+    const step = QUICK_WIN_STEPS.findIndex(slots => slots.some(slot => !prev.has(slot)))
+    if (step === -1) return prev
     const next = new Set(prev)
-    for (let row = 0; row < 5; row++) {
-      if (BINGO_LINES[row].every(slot => next.has(slot))) continue
-      BINGO_LINES[row].forEach(slot => next.add(slot))
-      break
-    }
+    QUICK_WIN_STEPS[step].forEach(slot => next.add(slot))
     return next
   })
 
@@ -2092,6 +2110,7 @@ function SampleProjector() {
     popupQueued: popup.queued,
     inviteOpen,
     quickWinRows,
+    chatOpen,
   })
 
   const applyCommand = (c: RemoteCommand) => {
@@ -2119,9 +2138,9 @@ function SampleProjector() {
         if (openTask && detailRef.current) detailRef.current.scroll(c.direction)
         else window.scrollBy({ top: c.direction === 'down' ? 400 : -400, behavior: 'smooth' })
         break
-      case 'showPopup': boardRef.current?.showPopup(); break
       case 'dismissPopup': boardRef.current?.dismissPopup(); break
       case 'setInvite': boardRef.current?.setInvite(c.open); break
+      case 'setChat': boardRef.current?.setChat(c.open); break
       case 'requestState': sendState(snapshot()); break
     }
   }
@@ -2140,8 +2159,9 @@ function SampleProjector() {
       popupQueued: popup.queued,
       inviteOpen,
       quickWinRows,
+      chatOpen,
     })
-  }, [remoteCode, selectedId, teamName, scanState, openTask, view, detailStep, popup, inviteOpen, quickWinRows, sendState])
+  }, [remoteCode, selectedId, teamName, scanState, openTask, view, detailStep, popup, inviteOpen, quickWinRows, chatOpen, sendState])
 
   // Heartbeat. The phone cannot tell "nothing has changed" from "the projector
   // is gone", so the projector re-broadcasts its state every few seconds and
@@ -2242,6 +2262,7 @@ function SampleProjector() {
           ref={boardRef}
           onPopupChange={handlePopupChange}
           onInviteChange={setInviteOpen}
+          onChatChange={setChatOpen}
         />
       )}
 
@@ -2616,6 +2637,7 @@ function SampleController({ code }: { code: string }) {
   const popupQueued = state?.popupQueued ?? 0
   const inviteOpen = state?.inviteOpen ?? false
   const quickWinRows = state?.quickWinRows ?? 0
+  const chatOpen = state?.chatOpen ?? false
 
   return (
     <div className="min-h-screen bg-gray-950 text-white flex flex-col">
@@ -2814,13 +2836,13 @@ function SampleController({ code }: { code: string }) {
           {teamName && (
             <div className="grid grid-cols-2 gap-2">
               <button
-                onClick={() => sendCommand({ action: popup ? 'dismissPopup' : 'showPopup' })}
+                onClick={() => sendCommand({ action: 'setChat', open: !chatOpen })}
                 className={`py-2.5 rounded-lg border text-sm font-black active:scale-95 transition-all ${
-                  popup
-                    ? 'bg-purple-500 text-white border-purple-400'
-                    : 'bg-purple-500/20 text-purple-100 border-purple-400/40 hover:bg-purple-500/30'
+                  chatOpen
+                    ? 'bg-teal-500 text-black border-teal-400'
+                    : 'bg-teal-500/20 text-teal-100 border-teal-400/40 hover:bg-teal-500/30'
                 }`}>
-                {popup ? '✕ Close message' : '💬 Message'}
+                {chatOpen ? '✕ Close message' : '💬 Message'}
               </button>
               <button
                 onClick={() => sendCommand({ action: 'setInvite', open: !inviteOpen })}

@@ -42,6 +42,7 @@ function clamp(x: number, y: number) {
 
 export function SupportChat({
   sectionId, teamId, teamName, inline = false, demo = false,
+  open: openProp, onOpenChange,
 }: {
   sectionId: string; teamId: string; teamName?: string
   /** Anchored in the page (the board header, under the team name) instead of
@@ -50,8 +51,21 @@ export function SupportChat({
   /** Sample board: nothing is saved. Messages stay on this screen and a
    *  canned marshal reply arrives after a moment, so the room sees the flow. */
   demo?: boolean
+  /**
+   * Optional controlled mode. Left undefined the bubble owns its own state, as
+   * every player-facing use does; the Sample demo passes it so a paired phone
+   * can open and close the chat on the projector.
+   */
+  open?: boolean
+  onOpenChange?: (open: boolean) => void
 }) {
-  const [open, setOpen] = useState(false)
+  const [openSelf, setOpenSelf] = useState(false)
+  const open = openProp ?? openSelf
+  const setOpen = (next: boolean | ((prev: boolean) => boolean)) => {
+    const value = typeof next === 'function' ? next(open) : next
+    if (openProp === undefined) setOpenSelf(value)
+    onOpenChange?.(value)
+  }
   const [msgs, setMsgs] = useState<Msg[]>([])
   const [draft, setDraft] = useState('')
   const [sending, setSending] = useState(false)

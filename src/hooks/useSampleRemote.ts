@@ -31,12 +31,11 @@ export type RemoteCommand =
   | { action: 'fillMarshal' }
   | { action: 'submitComplete' }
   | { action: 'scroll'; direction: 'up' | 'down' } // scroll the projector's viewport
-  // The BINGO celebration covering the projector. `showPopup` replays it on
-  // demand (for a pitch), `dismissPopup` clears it — same effect as tapping it
-  // on the screen. It also self-clears after 4s, so dismiss is mainly about
-  // skipping ahead when several lines land at once.
-  | { action: 'showPopup' }
+  // The BINGO celebration covering the projector. It self-clears after 4s, so
+  // dismiss is about skipping ahead when several lines land at once.
   | { action: 'dismissPopup' }
+  // Open or close the help-chat message box on the projector.
+  | { action: 'setChat'; open: boolean }
   // Put the Invite-teammate QR on the projector, or take it away.
   | { action: 'setInvite'; open: boolean }
   | { action: 'requestState' } // controller → projector: "resend your state now"
@@ -70,8 +69,10 @@ export type RemoteState = {
   popupQueued: number
   /** Whether the Invite-teammate QR overlay is up on the projector. */
   inviteOpen: boolean
-  /** Rows Quick BINGO has completed so far, 0-5 — one letter per row. */
+  /** Bingo lines Quick BINGO has completed so far, 0-5 — one per press. */
   quickWinRows: number
+  /** Whether the help-chat message box is open on the projector. */
+  chatOpen: boolean
 }
 
 /**
