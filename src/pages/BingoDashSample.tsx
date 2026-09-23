@@ -5,7 +5,7 @@ import { supabase } from '../lib/supabase'
 import { fetchBoardTasks, tasksForFace } from '../lib/boardCards'
 import { effectiveInputs, fileAccept, fileEmoji, fileHeading, fileNoun } from '../lib/completionInputs'
 import { activeFaces, faceName, faceColor, normaliseFaceCount } from '../lib/cubeFaces'
-import { buildBingoSlots, completedBingoLines } from '../lib/bingoLines'
+import { buildBingoSlots, completedBingoLines, bingoLineBonus } from '../lib/bingoLines'
 import { useSampleRemote, makeRemoteCode, type RemoteCommand, type RemoteState, type SampleView, type DetailStep } from '../hooks/useSampleRemote'
 import { useBingoTaskPages } from '../hooks/useBingoTaskPages'
 import { useBingoTaskPhotos } from '../hooks/useBingoTaskPhotos'
@@ -2300,8 +2300,10 @@ function SampleScoreboard({
     const completedIds = isPlayed
       ? new Set(Object.entries(scanState).filter(([, v]) => v === 'completed').map(([k]) => k))
       : new Set(orderedTasks.slice(0, Math.round((SCOREBOARD_PRESET[name] ?? 0.3) * total)).map(t => t.id))
-    const points = gridTasks.reduce((s, t) => completedIds.has(t.id) ? s + (t.points ?? 0) : s, 0)
+    const tilePoints = gridTasks.reduce((s, t) => completedIds.has(t.id) ? s + (t.points ?? 0) : s, 0)
     const bingos = completedBingoLines(slots, completedIds).length
+    // Same multiplier the live scoreboard uses: +0.2 per completed line.
+    const points = tilePoints + bingoLineBonus(tilePoints, bingos)
     const tasksDone = completedIds.size
     return { name, points, bingos, tasksDone, isPlayed, idx }
   })
@@ -2362,7 +2364,7 @@ function SampleScoreboard({
                   )}
                 </div>
                 <div className="text-center">
-                  <p className="text-white text-xl sm:text-4xl font-black tabular-nums">{row.points}</p>
+                  <p className="text-white text-xl sm:text-4xl font-black tabular-nums">{Math.round(row.points * 10) / 10}</p>
                 </div>
                 <div className="text-center">
                   <p className="text-amber-400 text-xl sm:text-4xl font-black tabular-nums">

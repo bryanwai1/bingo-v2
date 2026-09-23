@@ -3,7 +3,7 @@ import { useParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { ParticleBackground } from '../components/ParticleBackground'
 import { getScoreboardTheme } from '../lib/scoreboardThemes'
-import { buildBingoSlots, completedBingoLines } from '../lib/bingoLines'
+import { buildBingoSlots, completedBingoLines, bingoLineBonus, bingoMultiplier } from '../lib/bingoLines'
 import { duelBonusByTeam } from '../hooks/useBingoDuels'
 import type { BingoTask, BingoTeam, BingoScan, BingoSettings, BingoSection, BingoBoardCard, BingoDuel } from '../types/database'
 
@@ -23,6 +23,8 @@ type Row = {
   /** Manual bonus the admin adds during the award ceremony. */
   bonus: number
   bingos: number
+  tilePoints: number
+  lineBonus: number
   tasksDone: number
   /**
    * When this team last scored — the moment they reached their current total.
@@ -194,6 +196,9 @@ export function BingoDashProjector() {
     )
     const duelBonus = duelBonuses.get(team.id) ?? 0
     const bingos = completedBingoLines(lineSlots, completedIds).length
+    // Lines multiply the tile points rather than adding a flat sum, so the
+    // reward scales with how hard the line was to complete.
+    const lineBonus = bingoLineBonus(tilePoints, bingos)
     const tasksDone = completedIds.size
     const bonus = team.bonus_points ?? 0
     const lastScan = teamScans.reduce((latest, s) => {
@@ -211,7 +216,9 @@ export function BingoDashProjector() {
       // A hidden hundredth per team, distinct across the board, so two teams
       // on the same cards cannot tie. Added to the total rather than per scan:
       // per scan it would grow with card count and become a volume bonus.
-      points: tilePoints + duelBonus + Number(team.tiebreak ?? 0),
+      points: tilePoints + lineBonus + duelBonus + Number(team.tiebreak ?? 0),
+      tilePoints,
+      lineBonus,
       duelBonus,
       bonus,
       bingos,
@@ -298,37 +305,37 @@ export function BingoDashProjector() {
       {theme.ambient && <ParticleBackground />}
 
       {/* Header */}
-      <header className="relative z-10 px-10 pt-10 pb-6">
-        <div className="max-w-[1600px] mx-auto flex items-center justify-between gap-6">
-          <div>
-            <p className={`text-sm font-black uppercase tracking-[0.3em] ${theme.accent}`}>Bingo Dash</p>
-            <h1 className={`text-6xl font-black tracking-tight mt-1 ${theme.heading}`}>Scoreboard</h1>
+      <header className="relative z-10 px-3 pt-5 pb-4 sm:px-6 sm:pt-8 lg:px-10 lg:pt-10 lg:pb-6">
+        <div className="max-w-[1600px] mx-auto flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-6">
+          <div className="min-w-0">
+            <p className={`text-[10px] sm:text-sm font-black uppercase tracking-[0.3em] ${theme.accent}`}>Bingo Dash</p>
+            <h1 className={`text-3xl sm:text-5xl lg:text-6xl font-black tracking-tight mt-1 ${theme.heading}`}>Scoreboard</h1>
             {activeSection && (
-              <p className={`text-xl font-bold mt-2 ${theme.muted}`}>{activeSection.name}</p>
+              <p className={`text-base sm:text-xl font-bold mt-1 sm:mt-2 truncate ${theme.muted}`}>{activeSection.name}</p>
             )}
           </div>
-          <div className="flex flex-col items-end gap-2">
+          <div className="flex flex-col items-start gap-1.5 sm:items-end sm:gap-2 flex-shrink-0">
             {activeSection && (activeSection.timer_end_at || activeSection.timer_seconds > 0) && (
               <div
-                className={`px-6 py-3 rounded-2xl font-black text-4xl tabular-nums transition-colors ${
+                className={`px-3 py-2 sm:px-6 sm:py-3 rounded-xl sm:rounded-2xl font-black text-2xl sm:text-4xl tabular-nums transition-colors ${
                   timerRunning ? `bg-white/10 ${theme.heading}` : `bg-white/5 ${theme.muted}`
                 }`}
               >
-                <span className={`mr-3 text-2xl ${timerRunning ? theme.positive : theme.muted}`}>
+                <span className={`mr-2 sm:mr-3 text-base sm:text-2xl ${timerRunning ? theme.positive : theme.muted}`}>
                   {timerRunning ? '●' : '■'}
                 </span>
                 {timerDisplay}
               </div>
             )}
-            <p className={`${theme.muted} text-sm font-bold`}>{sectionTeams.length} teams competing</p>
-            <p className={`${theme.muted} text-xs font-bold flex items-center gap-1.5`} title="Realtime connection and last data refresh">
-              <span className={`w-2 h-2 rounded-full ${liveState === 'live' ? 'bg-green-400 animate-pulse' : liveState === 'offline' ? 'bg-red-400' : 'bg-amber-400'}`} />
+            <p className={`${theme.muted} text-xs sm:text-sm font-bold`}>{sectionTeams.length} teams competing</p>
+            <p className={`${theme.muted} text-[11px] sm:text-xs font-bold flex items-center gap-1.5`} title="Realtime connection and last data refresh">
+              <span className={`w-2 h-2 rounded-full flex-shrink-0 ${liveState === 'live' ? 'bg-green-400 animate-pulse' : liveState === 'offline' ? 'bg-red-400' : 'bg-amber-400'}`} />
               {liveState === 'live' ? 'Live' : liveState === 'offline' ? 'Reconnecting' : 'Connecting'}
               {lastSync > 0 && <span className="opacity-60">· synced {Math.max(0, Math.round((nowTick - lastSync) / 1000))}s ago</span>}
             </p>
             <button
               onClick={() => setShowBonus(v => !v)}
-              className={`px-5 py-2.5 rounded-xl text-sm font-black uppercase tracking-wider transition-all ${
+              className={`px-3 py-2 sm:px-5 sm:py-2.5 rounded-xl text-xs sm:text-sm font-black uppercase tracking-wider transition-all ${
                 showBonus
                   ? 'bg-amber-400 text-gray-950 shadow-lg shadow-amber-500/30'
                   : 'bg-white/10 text-amber-300 border border-amber-700/50 hover:bg-white/15'
@@ -341,18 +348,19 @@ export function BingoDashProjector() {
       </header>
 
       {/* Scoreboard */}
-      <main className="relative z-10 px-10 pb-10">
+      <main className="relative z-10 px-3 pb-8 sm:px-6 lg:px-10 lg:pb-10">
         <div className="max-w-[1600px] mx-auto">
           <div className="flex-1 min-w-0">
           {rows.length === 0 ? (
-            <div className={`text-center py-32 ${theme.muted}`}>
-              <div className="text-6xl mb-4">🎯</div>
-              <p className="text-2xl font-bold">No teams registered yet</p>
+            <div className={`text-center py-20 lg:py-32 ${theme.muted}`}>
+              <div className="text-5xl lg:text-6xl mb-4">🎯</div>
+              <p className="text-xl lg:text-2xl font-bold">No teams registered yet</p>
             </div>
           ) : (
-            <div className="flex flex-col gap-3">
-              {/* Column headers */}
-              <div className={`grid grid-cols-[80px_1fr_200px_200px_200px] gap-4 px-6 py-2 text-xs font-black uppercase tracking-widest ${theme.muted}`}>
+            <div className="flex flex-col gap-2.5 lg:gap-3">
+              {/* Column headers — the 5-column table only exists from lg up;
+                  on phones each row carries its own inline labels instead. */}
+              <div className={`hidden lg:grid grid-cols-[80px_1fr_200px_200px_200px] gap-4 px-6 py-2 text-xs font-black uppercase tracking-widest ${theme.muted}`}>
                 <div>Rank</div>
                 <div>Team</div>
                 <div className="text-center">{showBonus ? 'Total (Bingo + Bonus)' : 'Points'}</div>
@@ -371,7 +379,7 @@ export function BingoDashProjector() {
                       if (el) rowEls.current.set(row.team.id, el)
                       else rowEls.current.delete(row.team.id)
                     }}
-                    className="grid grid-cols-[80px_1fr_200px_200px_200px] gap-4 items-center px-6 py-5 rounded-2xl"
+                    className="grid grid-cols-[2.75rem_minmax(0,1fr)] gap-x-2.5 gap-y-3 items-center px-3 py-3.5 rounded-2xl lg:grid-cols-[80px_1fr_200px_200px_200px] lg:gap-4 lg:px-6 lg:py-5"
                     style={{
                       background: isTop3
                         ? `linear-gradient(90deg, ${rankColor}22 0%, rgba(255,255,255,0.03) 100%)`
@@ -381,45 +389,57 @@ export function BingoDashProjector() {
                     }}
                   >
                     <div
-                      className="text-4xl font-black tabular-nums"
+                      className="text-2xl lg:text-4xl font-black tabular-nums"
                       style={{ color: rankColor }}
                     >
                       {rank === 1 ? '🥇' : rank === 2 ? '🥈' : rank === 3 ? '🥉' : `#${rank}`}
                     </div>
-                    <div>
-                      <p className={`${theme.heading} text-3xl font-black tracking-tight`}>{row.team.name}</p>
+                    <div className="min-w-0">
+                      <p className={`${theme.heading} text-lg sm:text-2xl lg:text-3xl font-black tracking-tight break-words`}>{row.team.name}</p>
                     </div>
-                    <div className="text-center">
-                      <p className={`${theme.heading} text-5xl font-black tabular-nums`}>
+                    {/* On phones the three stats sit on their own row under the
+                        team name; `lg:contents` drops this wrapper so they become
+                        real table columns again on a projector. */}
+                    <div className="col-span-2 grid grid-cols-3 gap-1.5 lg:contents">
+                    <div className="text-center min-w-0">
+                      <p className={`${theme.heading} text-3xl sm:text-4xl lg:text-5xl font-black tabular-nums`}>
                         {fmt(scoreOf(row))}
                       </p>
                       {showBonus ? (
-                        <p className={`${theme.muted} text-xs font-bold uppercase tracking-widest mt-1`}>
+                        <p className={`${theme.muted} text-[9px] lg:text-xs font-bold uppercase tracking-wider lg:tracking-widest mt-1`}>
                           <span className={theme.accent}>{fmt(row.points)} bingo</span>
                           <span className={theme.muted}> + </span>
                           <span className={theme.bonus}>{fmt(row.bonus)} bonus</span>
                         </p>
-                      ) : row.duelBonus > 0 ? (
-                        // Surface duel winnings — otherwise a defender who won
-                        // reads as having scored from nowhere.
-                        <p className={`${theme.muted} text-xs font-bold uppercase tracking-widest mt-1`}>
-                          pts <span className={theme.duel}>· incl. {row.duelBonus} duel</span>
+                      ) : (row.lineBonus > 0 || row.duelBonus > 0) ? (
+                        // Surface where the total came from — otherwise a line
+                        // multiplier or a winning defender reads as having
+                        // scored from nowhere.
+                        <p className={`${theme.muted} text-[9px] lg:text-xs font-bold uppercase tracking-wider lg:tracking-widest mt-1`}>
+                          pts
+                          {row.lineBonus > 0 && <span className={theme.lines}> · incl. {fmt(row.lineBonus)} lines</span>}
+                          {row.duelBonus > 0 && <span className={theme.duel}> · incl. {row.duelBonus} duel</span>}
                         </p>
                       ) : (
-                        <p className={`${theme.muted} text-xs font-bold uppercase tracking-widest mt-1`}>pts</p>
+                        <p className={`${theme.muted} text-[9px] lg:text-xs font-bold uppercase tracking-wider lg:tracking-widest mt-1`}>pts</p>
                       )}
                     </div>
-                    <div className="text-center">
-                      <p className={`${theme.lines} text-5xl font-black tabular-nums`}>
-                        {row.bingos}<span className={`text-2xl ${theme.muted}`}>/12</span>
+                    <div className="text-center min-w-0">
+                      <p className={`${theme.lines} text-3xl sm:text-4xl lg:text-5xl font-black tabular-nums`}>
+                        {row.bingos}<span className={`text-lg lg:text-2xl ${theme.muted}`}>/12</span>
                       </p>
-                      <p className={`${theme.muted} text-xs font-bold uppercase tracking-widest mt-1`}>lines</p>
+                      <p className={`${theme.muted} text-[9px] lg:text-xs font-bold uppercase tracking-wider lg:tracking-widest mt-1`}>
+                        {row.bingos > 0
+                          ? <>lines <span className={theme.lines}>· ×{bingoMultiplier(row.bingos).toFixed(1)}</span></>
+                          : 'lines'}
+                      </p>
                     </div>
-                    <div className="text-center">
-                      <p className={`${theme.positive} text-5xl font-black tabular-nums`}>
+                    <div className="text-center min-w-0">
+                      <p className={`${theme.positive} text-3xl sm:text-4xl lg:text-5xl font-black tabular-nums`}>
                         {row.tasksDone}
                       </p>
-                      <p className={`${theme.muted} text-xs font-bold uppercase tracking-widest mt-1`}>completed</p>
+                      <p className={`${theme.muted} text-[9px] lg:text-xs font-bold uppercase tracking-wider lg:tracking-widest mt-1`}>completed</p>
+                    </div>
                     </div>
                   </div>
                 )

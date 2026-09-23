@@ -6,9 +6,8 @@ import JSZip from 'jszip'
 import { supabase } from '../lib/supabase'
 import { useBingoAuth } from '../hooks/useBingoAuth'
 import type { BingoTask, BingoTeam, BingoScan, BingoSettings, BingoSection, BingoCategory, BingoChallengeSection, BingoMember, BingoPhotoSubmission, BingoBoardCard, BingoDuel, BonusItem } from '../types/database'
-import { BINGO_LINES, buildBingoSlots, completedBingoLines } from '../lib/bingoLines'
+import { BINGO_LINES, buildBingoSlots, completedBingoLines, bingoLineBonus } from '../lib/bingoLines'
 import { TileFace } from '../components/BingoTileFace'
-import { SharedLibraryPanel } from '../components/SharedLibraryPanel'
 import { SCOREBOARD_THEMES, getScoreboardTheme } from '../lib/scoreboardThemes'
 import { Menu, MenuItem, MenuDivider } from '../components/AdminHeader'
 import { AdminSection } from '../components/AdminSection'
@@ -121,27 +120,6 @@ function formatTime(seconds: number): string {
   const m = Math.floor(total / 60)
   const s = total % 60
   return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
-}
-
-// Bulk import: a JSON array of { title, color, hex_code, clue? | clues?[] }.
-interface ImportRow { title: string; color: string; hex_code: string; clues: string[] }
-
-function parseImport(text: string): ImportRow[] {
-  const parsed: unknown = JSON.parse(text)
-  if (!Array.isArray(parsed)) throw new Error('JSON must be an array of objects')
-  return parsed.map((item, i) => {
-    if (typeof item !== 'object' || !item) throw new Error(`Item ${i + 1} is not an object`)
-    const row = item as Record<string, unknown>
-    if (!row.title || typeof row.title !== 'string') throw new Error(`Item ${i + 1} missing "title"`)
-    if (!row.color || typeof row.color !== 'string') throw new Error(`Item ${i + 1} missing "color"`)
-    if (!row.hex_code || typeof row.hex_code !== 'string') throw new Error(`Item ${i + 1} missing "hex_code"`)
-    const clues: string[] = []
-    if (typeof row.clue === 'string' && row.clue.trim()) clues.push(row.clue.trim())
-    if (Array.isArray(row.clues)) {
-      for (const c of row.clues) if (typeof c === 'string' && c.trim()) clues.push(c.trim())
-    }
-    return { title: row.title.trim(), color: row.color.trim(), hex_code: row.hex_code.trim(), clues }
-  })
 }
 
 // Sub-accounts can't `select *` across every board, so rows keyed to my
@@ -579,13 +557,6 @@ export function BingoDashAdmin() {
   // card editor after creation; the form only picks the mechanism.
   const [formTaskType, setFormTaskType] = useState<'standard' | 'sign_splice' | 'breakout_hunt'>('standard')
   const [formSaving, setFormSaving] = useState(false)
-
-  // Import
-  const [showImport, setShowImport] = useState(false)
-  const [importText, setImportText] = useState('')
-  const [importError, setImportError] = useState('')
-  const [importPreview, setImportPreview] = useState<ImportRow[] | null>(null)
-  const [importing, setImporting] = useState(false)
 
   // Timer
   const [settings, setSettings] = useState<BingoSettings | null>(null)
@@ -2397,46 +2368,6 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
     </div>
   )
 
-  // ── Import ─────────────────────────────────────────────────────────────────
-  const handleImportPreview = () => {
-    setImportError(''); setImportPreview(null)
-    try {
-      const rows = parseImport(importText)
-      if (rows.length === 0) throw new Error('No items found')
-      setImportPreview(rows)
-    } catch (err) { setImportError(err instanceof Error ? err.message : 'Invalid JSON') }
-  }
-
-  const handleImportConfirm = async () => {
-    if (!importPreview) return
-    setImporting(true)
-    try {
-      if (!currentSectionId) throw new Error('No section selected')
-      const startOrder = Math.max(25, scopedTasks.length + 25)
-      for (let i = 0; i < importPreview.length; i++) {
-        const row = importPreview[i]
-        const { data: task, error: taskErr } = await supabase
-          .from('bingo_tasks')
-          .insert({ section_id: currentSectionId, owner_id: myOwnerValue, title: row.title, color: row.color, hex_code: row.hex_code, category: '', sort_order: startOrder + i * 10 })
-          .select().single()
-        if (taskErr) throw taskErr
-        if (row.clues.length > 0) {
-          await supabase.from('bingo_task_pages').insert({
-            task_id: task.id, page_order: 0, media_url: null, media_type: null,
-            pointer_1: row.clues[0] ?? null, pointer_2: row.clues[1] ?? null,
-            pointer_3: row.clues[2] ?? null, pointer_4: row.clues[3] ?? null,
-            pointer_5: row.clues[4] ?? null, pointer_6: row.clues[5] ?? null,
-            example_1: null, example_2: null, example_3: null, example_4: null, example_5: null, example_6: null,
-            icon_1: null, icon_2: null, icon_3: null, icon_4: null, icon_5: null, icon_6: null,
-          })
-        }
-      }
-      setShowImport(false); setImportText(''); setImportPreview(null)
-      await fetchAll()
-    } catch (err) { setImportError(err instanceof Error ? err.message : 'Import failed') }
-    finally { setImporting(false) }
-  }
-
   if (loading) {
     return (
       <div className="min-h-screen a-surface-2 flex items-center justify-center">
@@ -2519,8 +2450,6 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
               <MenuItem icon="✅" label="Approvals" hint="Photos, videos, links, answers"
                 onClick={() => setActiveTab('submissions')} />
               <MenuDivider />
-              <MenuItem icon="📥" label="Import cards" hint="Paste rows to bulk-add"
-                onClick={() => { setShowImport(true); setImportText(''); setImportPreview(null); setImportError('') }} />
               {!isOwner && !account?.facilitator_host && (
                 <MenuItem icon="🤝" label="My crew" hint="Invite helpers to your event"
                   to="/bingo-dash/crew" />
@@ -3144,11 +3073,6 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
               </div>
             </div>
           )}
-
-          {/* Owner-authored content packs any tenant can copy in. Replaces the
-              old hardcoded AI Team Building import, which only the house
-              account could use. */}
-          <SharedLibraryPanel sectionId={currentSectionId} onImported={() => void fetchAll()} />
 
           {/* Compartment filter chips */}
           <div className="flex gap-2 flex-wrap mb-5">
@@ -4475,14 +4399,18 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                         )
                         const completedCount = completedPlacements.length
                         const completedIds = new Set(completedPlacements.map(t => t.placementId))
-                        // Tile points plus any contest bonuses this team won in
-                        // duels — the latter is a defender's only scoring record.
-                        const pointsEarned = completedPlacements.reduce((sum, t) => sum + (t.points ?? 0), 0)
-                          + (duelBonuses.get(team.id) ?? 0)
                         const pct = sectionGridTasks.length > 0 ? Math.round((completedCount / sectionGridTasks.length) * 100) : 0
                         const teamSlots = buildBingoSlots(sectionGridTasks)
                         const teamLineSlots = teamSlots.map(t => t ? { ...t, id: t.placementId } : null)
                         const teamBingoLines = completedBingoLines(teamLineSlots, completedIds).length
+                        // Tile points scaled by the bingo-line multiplier, plus
+                        // any contest bonuses this team won in duels — the
+                        // latter is a defender's only scoring record, and is
+                        // added after the multiplier rather than scaled by it.
+                        const teamTilePoints = completedPlacements.reduce((sum, t) => sum + (t.points ?? 0), 0)
+                        const pointsEarned = teamTilePoints
+                          + bingoLineBonus(teamTilePoints, teamBingoLines)
+                          + (duelBonuses.get(team.id) ?? 0)
                         const teamMembers = members.filter(m => m.team_id === team.id)
                         const isFull = teamMembers.length >= 4
                         return (
@@ -4622,7 +4550,7 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                                 <span className="text-[11px] font-black text-amber-500">{teamBingoLines}</span>
                                 <span className="text-[11px] a-text-3">bingos</span>
                                 {pointsEarned > 0 && (
-                                  <span className="text-[11px] a-text-3 font-bold">{pointsEarned}pts</span>
+                                  <span className="text-[11px] a-text-3 font-bold">{Math.round(pointsEarned * 10) / 10}pts</span>
                                 )}
                               </div>
                             </td>
@@ -5161,72 +5089,6 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
         </div>
       )}
 
-      {/* ── Import Modal ─────────────────────────────────────────────────────── */}
-      {showImport && (
-        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 px-4" onClick={() => { if (!importing) setShowImport(false) }}>
-          <div className="a-surface rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col animate-bounce-in" onClick={e => e.stopPropagation()}>
-            <div className="px-4 sm:px-6 py-5 border-b a-border flex items-center justify-between">
-              <div>
-                <h2 className="text-xl font-bold a-text">Import Challenges</h2>
-                <p className="text-sm a-text-2 mt-0.5">Bulk-create tiles from JSON</p>
-              </div>
-              <button onClick={() => setShowImport(false)} className="a-text-2 hover:a-text-3 text-2xl font-light">&times;</button>
-            </div>
-            <div className="px-4 sm:px-6 py-5 flex-1 overflow-y-auto flex flex-col gap-4">
-              <details className="a-surface-2 rounded-xl overflow-hidden">
-                <summary className="px-4 py-3 text-sm font-medium a-text-3 cursor-pointer hover:a-surface-2">JSON format reference ▾</summary>
-                <pre className="px-4 pb-4 text-xs a-text-3 leading-relaxed overflow-x-auto">{`[
-  {
-    "title": "Water Challenge",
-    "color": "Blue",
-    "hex_code": "#3B82F6",
-    "clues": ["Find a water source", "Take a team photo"]
-  }
-]`}</pre>
-              </details>
-              <textarea value={importText} onChange={e => { setImportText(e.target.value); setImportPreview(null); setImportError('') }}
-                placeholder="Paste your JSON array here..."
-                className="w-full h-40 px-4 py-3 rounded-xl border a-border font-mono text-sm resize-none focus:outline-none focus:ring-2 focus:ring-teal-500"
-                disabled={importing} />
-              {importError && (
-                <div className="flex items-start gap-2 bg-red-50 border border-red-200 rounded-xl px-4 py-3">
-                  <span>🚫</span><p className="text-red-600 font-bold text-sm">{importError}</p>
-                </div>
-              )}
-              {importPreview && (
-                <div>
-                  <p className="text-sm font-bold a-text-3 mb-2">Preview — {importPreview.length} challenge{importPreview.length !== 1 ? 's' : ''} to import:</p>
-                  <div className="border a-border rounded-xl overflow-hidden divide-y divide-gray-100">
-                    {importPreview.map((row, i) => (
-                      <div key={i} className="flex items-center gap-3 px-4 py-3">
-                        <div className="w-5 h-5 rounded-full flex-shrink-0" style={{ backgroundColor: row.hex_code }} />
-                        <div className="flex-1 min-w-0">
-                          <p className="font-medium a-text text-sm truncate">{row.title}</p>
-                          <p className="text-xs a-text-2">{row.color}{row.clues.length > 0 ? ` · ${row.clues.length} clue${row.clues.length !== 1 ? 's' : ''}` : ''}</p>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-            <div className="px-4 sm:px-6 py-4 border-t a-border flex gap-3 justify-end">
-              <button onClick={() => setShowImport(false)} disabled={importing}
-                className="px-5 py-2 rounded-lg a-surface-2 a-text-3 text-sm font-medium hover:a-surface-2 transition-colors disabled:opacity-50">Cancel</button>
-              {!importPreview ? (
-                <button onClick={handleImportPreview} disabled={!importText.trim()}
-                  className="px-5 py-2 rounded-lg bg-teal-600 a-text text-sm font-bold hover:bg-violet-700 transition-colors disabled:opacity-50">Preview Import</button>
-              ) : (
-                <button onClick={handleImportConfirm} disabled={importing}
-                  className="px-5 py-2 rounded-lg bg-teal-600 a-text text-sm font-bold hover:bg-violet-700 transition-colors disabled:opacity-50">
-                  {importing ? 'Importing...' : `Import ${importPreview.length} Challenge${importPreview.length !== 1 ? 's' : ''}`}
-                </button>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* ── Section Manager Modal ───────────────────────────────────────────── */}
       {showSectionManager && (
         <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 px-4"
@@ -5329,7 +5191,10 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
         const bingoSlotSet = new Set<number>()
         completedLineIdx.forEach(i => BINGO_LINES[i].forEach(idx => bingoSlotSet.add(idx)))
         const tasksDone = completedPlacements.length
-        const points = completedPlacements.reduce((sum, t) => sum + (t.points ?? 0), 0)
+        // Same rule as the scoreboard: tile points scaled by the bingo-line
+        // multiplier (+0.2 per completed line).
+        const tilePoints = completedPlacements.reduce((sum, t) => sum + (t.points ?? 0), 0)
+        const points = tilePoints + bingoLineBonus(tilePoints, completedLineIdx.length)
         return (
           <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 px-4"
             onClick={() => setViewingTeam(null)}>
@@ -5347,7 +5212,7 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
               <div className="px-5 py-3 border-b a-border grid grid-cols-3 gap-3">
                 <div className="text-center">
                   <p className="text-xs a-text-2 font-bold uppercase tracking-wider">Points</p>
-                  <p className="text-2xl font-black a-text">{points}</p>
+                  <p className="text-2xl font-black a-text">{Math.round(points * 10) / 10}</p>
                 </div>
                 <div className="text-center">
                   <p className="text-xs a-text-2 font-bold uppercase tracking-wider">Bingos</p>

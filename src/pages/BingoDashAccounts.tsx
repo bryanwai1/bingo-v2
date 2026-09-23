@@ -11,14 +11,6 @@ const STATUS_STYLES: Record<BingoAccount['status'], string> = {
   rejected: 'bg-red-400/15 text-red-300 border-red-400/40',
 }
 
-const FACILITATOR_DURATIONS = [
-  { label: '4 hours',  hours: 4 },
-  { label: '12 hours', hours: 12 },
-  { label: '24 hours', hours: 24 },
-  { label: '48 hours', hours: 48 },
-  { label: '7 days',   hours: 168 },
-]
-
 const fmtExpiry = (iso: string) =>
   new Date(iso).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })
 
@@ -63,10 +55,6 @@ export function BingoDashAccounts() {
   const [busyId, setBusyId] = useState<string | null>(null)
   const [notice, setNotice] = useState('')
   const [copiedInvite, setCopiedInvite] = useState(false)
-  // "Make facilitator" inline form: which row it's open on + its inputs
-  const [facForId, setFacForId] = useState<string | null>(null)
-  const [facHost, setFacHost] = useState('')
-  const [facHours, setFacHours] = useState(24)
   const inviteUrl = `${window.location.origin}/bingo-dash/login`
 
   const load = useCallback(async () => {
@@ -149,28 +137,6 @@ export function BingoDashAccounts() {
     } finally { setBusyId(null) }
   }
 
-  const makeFacilitator = async (a: BingoAccount) => {
-    if (!facHost) { setNotice('Pick whose event this facilitator is helping with.'); return }
-    setBusyId(a.id)
-    setNotice('')
-    try {
-      const expires = new Date(Date.now() + facHours * 3600_000).toISOString()
-      const { error } = await supabase.from('bingo_accounts').update({
-        facilitator_host: facHost,
-        access_expires_at: expires,
-        status: 'approved',
-        can_bingo: true,
-        can_flag: true,
-      }).eq('id', a.id)
-      if (error) throw error
-      setFacForId(null)
-      setNotice(`${a.email ?? 'Account'} is now a facilitator until ${fmtExpiry(expires)}.`)
-      await load()
-    } catch (err) {
-      setNotice(err instanceof Error ? `Could not grant facilitator access: ${err.message}` : 'Could not grant facilitator access')
-    } finally { setBusyId(null) }
-  }
-
   const endFacilitatorAccess = async (a: BingoAccount) => {
     setBusyId(a.id)
     try {
@@ -193,10 +159,6 @@ export function BingoDashAccounts() {
   const standalone = accounts.filter(a => !a.facilitator_session_id)
   const pending = standalone.filter(a => a.status === 'pending')
   const others = standalone.filter(a => a.status !== 'pending')
-  // Accounts a facilitator can assist: you (the owner) or any approved,
-  // non-facilitator sub (renters running their own events).
-  const hostOptions = accounts.filter(a =>
-    a.role === 'owner' || (a.status === 'approved' && !a.facilitator_host))
 
   const Row = ({ a }: { a: BingoAccount }) => {
     const isFac = !!a.facilitator_host
@@ -233,13 +195,6 @@ export function BingoDashAccounts() {
         </div>
         {a.role !== 'owner' && (
           <div className="flex gap-2 flex-shrink-0">
-            {!isFac && a.status !== 'approved' && (
-              <button onClick={() => { setFacForId(facForId === a.id ? null : a.id); setFacHost(me?.id ?? ''); setFacHours(24) }}
-                title="Grant temporary helper access instead of a full account (no board clone)"
-                className="px-3 py-1.5 rounded-xl text-xs font-bold text-sky-300 border border-sky-400/40 hover:bg-sky-400/10 transition-colors">
-                Make facilitator
-              </button>
-            )}
             {a.status !== 'approved' && (
               <button onClick={() => setStatus(a.id, 'approved')} disabled={busyId === a.id}
                 className="px-3 py-1.5 rounded-xl text-xs font-black bg-green-600 hover:bg-green-500 a-text transition-colors disabled:opacity-50">
@@ -286,10 +241,6 @@ export function BingoDashAccounts() {
           <GameToggle label="Bingo Dash" on={a.can_bingo} busy={busyId === a.id} onToggle={() => toggleGame(a, 'can_bingo')} />
           <GameToggle label="Flag Retrieval" on={a.can_flag} busy={busyId === a.id} onToggle={() => toggleGame(a, 'can_flag')} />
           <div className="flex gap-2 ml-auto">
-            <button onClick={() => { setFacForId(facForId === a.id ? null : a.id); setFacHost(me?.id ?? ''); setFacHours(24) }}
-              className="px-3 py-1.5 rounded-xl text-xs font-bold text-sky-300 border border-sky-400/40 hover:bg-sky-400/10 transition-colors">
-              Make facilitator
-            </button>
             <button onClick={() => provision(a)} disabled={busyId === a.id || !templateId}
               title={templateId ? 'Clone the template board into this account' : 'Pick a template board first'}
               className="px-3 py-1.5 rounded-xl text-xs font-bold a-text border border-white/20 hover:bg-white/10 transition-colors disabled:opacity-40">
@@ -324,35 +275,6 @@ export function BingoDashAccounts() {
           {a.company_name && (
             <span className="text-[11px] a-text-3 ml-auto">{a.company_name}</span>
           )}
-        </div>
-      )}
-      {!isFac && a.role !== 'owner' && facForId === a.id && (
-        <div className="mt-3 pt-3 border-t a-border flex flex-col gap-2">
-          <p className="text-[11px] a-text-3 font-bold uppercase tracking-widest">
-            Temporary event helper — edits the host's boards, auto-expires
-          </p>
-          <div className="flex flex-wrap items-center gap-2">
-            <select value={facHost} onChange={e => setFacHost(e.target.value)}
-              className="flex-1 min-w-[160px] px-3 py-2 rounded-xl bg-black/30 border-2 border-white/15 a-text text-sm focus:border-sky-500 outline-none transition-colors">
-              {hostOptions.filter(h => h.id !== a.id).map(h => (
-                <option key={h.id} value={h.id}>
-                  {h.role === 'owner' ? `You (${h.email ?? 'main account'})` : h.email ?? h.id}
-                </option>
-              ))}
-            </select>
-            <select value={facHours} onChange={e => setFacHours(Number(e.target.value))}
-              className="px-3 py-2 rounded-xl bg-black/30 border-2 border-white/15 a-text text-sm focus:border-sky-500 outline-none transition-colors">
-              {FACILITATOR_DURATIONS.map(d => <option key={d.hours} value={d.hours}>{d.label}</option>)}
-            </select>
-            <button onClick={() => makeFacilitator(a)} disabled={busyId === a.id || !facHost}
-              className="px-4 py-2 rounded-xl text-xs font-black bg-sky-600 hover:bg-sky-500 a-text transition-colors disabled:opacity-50">
-              Grant access
-            </button>
-            <button onClick={() => setFacForId(null)}
-              className="px-3 py-2 rounded-xl text-xs font-bold a-text-2 hover:bg-white/10 transition-colors">
-              Cancel
-            </button>
-          </div>
         </div>
       )}
     </div>

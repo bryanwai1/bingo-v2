@@ -11,6 +11,7 @@ import {
 } from '../lib/awardSlides'
 import { duelBonusByTeam } from '../hooks/useBingoDuels'
 import type { BingoSection, BingoTeam, BingoScan, BingoTask, BingoAwardConfig, BingoDuel } from '../types/database'
+import { bingoLineBonus } from '../lib/bingoLines'
 
 const BINGO_LINES: number[][] = [
   [0, 1, 2, 3, 4], [5, 6, 7, 8, 9], [10, 11, 12, 13, 14], [15, 16, 17, 18, 19], [20, 21, 22, 23, 24],
@@ -209,15 +210,17 @@ function AwardShow({ sectionSlug }: { sectionSlug: string }) {
         (t.placement_id && completedPlacementIds.has(t.placement_id)) || legacyCompletedTaskIds.has(t.id),
       )
       const completedIds = new Set(completedPlacements.map(t => t.placement_id ?? t.id))
-      // Contest bonuses count as earned play, alongside tile points — a winning
-      // defender has no tile, so this is the only record of their win.
-      const basePoints = completedPlacements.reduce((sum, t) => sum + (t.points ?? 0), 0)
-        + (duelBonuses.get(team.id) ?? 0)
-      const bonusPoints = team.bonus_points ?? 0
       const bingos = BINGO_LINES.filter(line => line.every(i => {
         const t = slots[i]
         return t && completedIds.has(t.placement_id ?? t.id)
       })).length
+      // Tile points scaled by the bingo-line multiplier (+0.2 per line), then
+      // contest bonuses added on top — a winning defender has no tile, so the
+      // duel bonus is the only record of their win and is never scaled.
+      const tilePoints = completedPlacements.reduce((sum, t) => sum + (t.points ?? 0), 0)
+      const basePoints = tilePoints + bingoLineBonus(tilePoints, bingos)
+        + (duelBonuses.get(team.id) ?? 0)
+      const bonusPoints = team.bonus_points ?? 0
       const reachedAt = teamScans.reduce(
         (latest, sc) => (sc.completed && gridTaskIds.has(sc.task_id) && sc.completed_at)
           ? Math.max(latest, Date.parse(sc.completed_at)) : latest,
