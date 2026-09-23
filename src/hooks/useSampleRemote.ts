@@ -31,6 +31,14 @@ export type RemoteCommand =
   | { action: 'fillMarshal' }
   | { action: 'submitComplete' }
   | { action: 'scroll'; direction: 'up' | 'down' } // scroll the projector's viewport
+  // The BINGO celebration covering the projector. `showPopup` replays it on
+  // demand (for a pitch), `dismissPopup` clears it — same effect as tapping it
+  // on the screen. It also self-clears after 4s, so dismiss is mainly about
+  // skipping ahead when several lines land at once.
+  | { action: 'showPopup' }
+  | { action: 'dismissPopup' }
+  // Put the Invite-teammate QR on the projector, or take it away.
+  | { action: 'setInvite'; open: boolean }
   | { action: 'requestState' } // controller → projector: "resend your state now"
 
 export type SampleView = 'board' | 'scoreboard'
@@ -51,7 +59,27 @@ export type RemoteState = {
   openTaskId: string | null
   view: SampleView
   detail: DetailStep | null
+  /**
+   * The BINGO celebration on screen right now ('B', 'BI', … 'BINGO'), or null.
+   * Full-screen and opaque, so the controller has to know: without this the
+   * phone offers board controls while the room sees only the celebration, and
+   * taps look ignored even though they apply underneath.
+   */
+  popup: string | null
+  /** Celebrations still queued behind this one — one per line just completed. */
+  popupQueued: number
+  /** Whether the Invite-teammate QR overlay is up on the projector. */
+  inviteOpen: boolean
 }
+
+/**
+ * How often the projector re-broadcasts its state, and how long the phone
+ * waits before calling the link dead. The gap is deliberately ~3 beats: one
+ * dropped broadcast on venue Wi-Fi should not flip the phone to
+ * "Reconnecting" mid-sentence.
+ */
+export const HEARTBEAT_MS = 3000
+export const HEARTBEAT_TIMEOUT_MS = 10000
 
 /** Short, unambiguous pairing code (no 0/O/1/I to avoid QR-less typos). */
 export function makeRemoteCode(): string {

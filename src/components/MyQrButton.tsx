@@ -13,14 +13,29 @@ import { QRCodeSVG } from 'qrcode.react'
 // instead of the viewport, and z-[100] was confined to that ancestor's local
 // stacking context — so the board tiles painted straight over the QR.
 
-export function MyQrButton({ value, teamName, label = 'My QR', hint = 'Show this to be scanned' }: {
+export function MyQrButton({
+  value, teamName, label = 'My QR', hint = 'Show this to be scanned',
+  open: openProp, onOpenChange,
+}: {
   value: string
   teamName?: string
   label?: string
   /** Line under the QR — what the scanner should expect to happen. */
   hint?: string
+  /**
+   * Optional controlled mode. Left undefined the button owns its own state, as
+   * every player-facing use does; the Sample demo passes it so a paired phone
+   * can put the QR on the projector and take it away again.
+   */
+  open?: boolean
+  onOpenChange?: (open: boolean) => void
 }) {
-  const [open, setOpen] = useState(false)
+  const [openSelf, setOpenSelf] = useState(false)
+  const open = openProp ?? openSelf
+  const setOpen = (next: boolean) => {
+    if (openProp === undefined) setOpenSelf(next)
+    onOpenChange?.(next)
+  }
 
   useEffect(() => {
     if (!open) return

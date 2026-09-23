@@ -1,4 +1,4 @@
-import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react'
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { QRCodeSVG } from 'qrcode.react'
 import { supabase } from '../lib/supabase'
@@ -6,12 +6,13 @@ import { fetchBoardTasks, tasksForFace } from '../lib/boardCards'
 import { effectiveInputs, fileAccept, fileEmoji, fileHeading, fileNoun } from '../lib/completionInputs'
 import { activeFaces, faceName, faceColor, normaliseFaceCount } from '../lib/cubeFaces'
 import { buildBingoSlots, completedBingoLines, scoreWithBingoLines } from '../lib/bingoLines'
-import { useSampleRemote, makeRemoteCode, type RemoteCommand, type RemoteState, type SampleView, type DetailStep } from '../hooks/useSampleRemote'
+import { useSampleRemote, makeRemoteCode, HEARTBEAT_MS, HEARTBEAT_TIMEOUT_MS, type RemoteCommand, type RemoteState, type SampleView, type DetailStep } from '../hooks/useSampleRemote'
 import { useBingoTaskPages } from '../hooks/useBingoTaskPages'
 import { useBingoTaskPhotos } from '../hooks/useBingoTaskPhotos'
 import { useTaskLinks } from '../hooks/useTaskLinks'
 import { TaskLinkButtons, type LinkItem } from '../components/TaskLinkButtons'
 import { SupportChat } from '../components/SupportChat'
+import { MyQrButton } from '../components/MyQrButton'
 import { DemoBundleCard } from '../components/DemoBundleCard'
 import { AitbMissionModule } from '../components/AitbMissionModule'
 import { BonusBar } from '../components/AitbBonusBar'
@@ -535,10 +536,16 @@ function TimerDisplay({ settings }: { settings: BingoSection | null }) {
 
 // ── Board Screen (sandbox) ────────────────────────────────────────────────────
 
-function BoardScreen({
-  teamName, gridTasks: gridTasksProp, scanState, quickWinSlots, section, glowSlots, glowMode,
-  onToggleGlow, onClearGlow, onToggleGlowMode, onOpenTask, onSwitchTeam,
-}: {
+export type BoardScreenHandle = {
+  /** Clear the BINGO celebration — same as tapping it on the projector. */
+  dismissPopup: () => void
+  /** Replay the celebration on demand, for a pitch. */
+  showPopup: () => void
+  /** Show or hide the Invite-teammate QR overlay. */
+  setInvite: (open: boolean) => void
+}
+
+const BoardScreen = forwardRef<BoardScreenHandle, {
   teamName: string
   gridTasks: BingoTask[]
   scanState: ScanState
@@ -553,11 +560,23 @@ function BoardScreen({
   onToggleGlowMode: () => void
   onOpenTask: (task: BingoTask) => void
   onSwitchTeam: () => void
-}) {
+  /** Sandbox link for this board — the same URL the Try-it QR hands out. */
+  inviteUrl: string
+  onShowScoreboard: () => void
+  /** Celebration state, so a paired phone can see and skip it. */
+  onPopupChange?: (letters: string | null, queued: number) => void
+  /** Invite-QR overlay state, so the phone's toggle reflects the screen. */
+  onInviteChange?: (open: boolean) => void
+}>(function BoardScreen({
+  teamName, gridTasks: gridTasksProp, scanState, quickWinSlots, section, glowSlots, glowMode,
+  onToggleGlow, onClearGlow, onToggleGlowMode, onOpenTask, onSwitchTeam,
+  inviteUrl, onShowScoreboard, onPopupChange, onInviteChange,
+}, ref) {
   // One colour per category on the board, whatever each card row carries.
   const gridTasks = useMemo(() => withCategoryColors(gridTasksProp), [gridTasksProp])
   const [showLeaveConfirm, setShowLeaveConfirm] = useState(false)
   const [popupLetters, setPopupLetters] = useState<string | null>(null)
+  const [inviteOpen, setInviteOpen] = useState(false)
   const [popupQueue, setPopupQueue] = useState<string[]>([])
   const celebratedLinesRef = useRef<Set<number> | null>(null)
 
@@ -633,6 +652,24 @@ function BoardScreen({
     return () => clearTimeout(t)
   }, [popupLetters])
 
+  // Let a paired phone clear the celebration. Dismisses the current one only,
+  // exactly like tapping the screen — the next queued one then takes over, so
+  // the presenter taps through a burst at their own pace.
+  useImperativeHandle(ref, () => ({
+    dismissPopup: () => setPopupLetters(null),
+    // Replays the team's current level: 2 lines shows 'BI'. With no lines yet
+    // there is nothing earned to celebrate, so show the full BINGO — on a
+    // pitch that is the shot you want on the big screen.
+    showPopup: () => setPopupLetters(lettersEarned || 'BINGO'),
+    setInvite: (next: boolean) => setInviteOpen(next),
+  }))
+
+  useEffect(() => {
+    onPopupChange?.(popupLetters, popupQueue.length)
+  }, [onPopupChange, popupLetters, popupQueue.length])
+
+  useEffect(() => { onInviteChange?.(inviteOpen) }, [onInviteChange, inviteOpen])
+
   return (
     <div className="min-h-[80vh] bg-gray-950 relative overflow-x-hidden">
       <ParticleBackground />
@@ -657,6 +694,24 @@ function BoardScreen({
           </div>
           <div className="flex flex-col items-end gap-2 flex-shrink-0 mt-1">
             <TimerDisplay settings={section} />
+            {/* Mirrors the real player board (BingoDashHome), so the demo shows
+                the controls a participant actually has. The QR hands out the
+                sandbox link rather than a team invite — nothing here is saved,
+                so each scan opens its own private board. */}
+            <MyQrButton
+              label="Invite teammate"
+              teamName={teamName}
+              hint="Teammate scans this to open their own demo board"
+              value={inviteUrl}
+              open={inviteOpen}
+              onOpenChange={setInviteOpen}
+            />
+            <button
+              onClick={onShowScoreboard}
+              className="text-xs font-bold text-purple-300 hover:text-purple-200 transition-colors"
+            >
+              🏆 Scoreboard
+            </button>
             {/* Presenter control: pick the tiles to light up while talking the
                 room through the board. Demo only — nothing is saved. */}
             <div className="flex items-center gap-2">
@@ -801,7 +856,7 @@ function BoardScreen({
       )}
     </div>
   )
-}
+})
 
 // ── Task Detail (sandbox overlay) ─────────────────────────────────────────────
 
@@ -1892,12 +1947,24 @@ function SampleProjector() {
 
   // Remote control: a code (generated on first "Remote" click) opens a broadcast
   // channel; a paired phone drives the state below via commands.
-  const [remoteCode, setRemoteCode] = useState<string | null>(null)
+  //
+  // The code lives in the URL as ?pair=<code>. Held only in React state it did
+  // not survive a reload of the projector — the page came back on a different
+  // channel while the phone, which has no way to know, went on showing
+  // "Connected" and silently dropped every tap. Reading it back on mount means
+  // a refreshed projector rejoins the channel the phone is already on.
+  const [remoteCode, setRemoteCode] = useState<string | null>(
+    () => new URLSearchParams(window.location.search).get('pair'),
+  )
   const [showPair, setShowPair] = useState(false)
   const [showTryIt, setShowTryIt] = useState(false)
   // Live step of the open task detail, reported up so the phone shows the right
   // buttons (Start Challenge → pages → marshal password → Complete).
   const [detailStep, setDetailStep] = useState<DetailStep | null>(null)
+  // Celebration on screen, mirrored to the paired phone.
+  const [popup, setPopup] = useState<{ letters: string | null; queued: number }>({ letters: null, queued: 0 })
+  const [inviteOpen, setInviteOpen] = useState(false)
+  const boardRef = useRef<BoardScreenHandle>(null)
   const detailRef = useRef<SampleTaskDetailHandle | null>(null)
 
   const selectedSection = sections.find(s => s.id === selectedId) ?? null
@@ -1941,6 +2008,12 @@ function SampleProjector() {
 
   const handleSelectBoard = (id: string) => { setSelectedId(id) }
 
+  // Stable identity: BoardScreen reports on every popup change, and a fresh
+  // callback each render would re-fire the effect that calls it.
+  const handlePopupChange = useCallback((letters: string | null, queued: number) => {
+    setPopup(prev => (prev.letters === letters && prev.queued === queued ? prev : { letters, queued }))
+  }, [])
+
   const handleReset = () => {
     setScanState({})
     setQuickWinSlots(new Set())
@@ -1980,6 +2053,9 @@ function SampleProjector() {
     openTaskId: openTask?.id ?? null,
     view,
     detail: openTask ? detailStep : null,
+    popup: popup.letters,
+    popupQueued: popup.queued,
+    inviteOpen,
   })
 
   const applyCommand = (c: RemoteCommand) => {
@@ -2007,6 +2083,9 @@ function SampleProjector() {
         if (openTask && detailRef.current) detailRef.current.scroll(c.direction)
         else window.scrollBy({ top: c.direction === 'down' ? 400 : -400, behavior: 'smooth' })
         break
+      case 'showPopup': boardRef.current?.showPopup(); break
+      case 'dismissPopup': boardRef.current?.dismissPopup(); break
+      case 'setInvite': boardRef.current?.setInvite(c.open); break
       case 'requestState': sendState(snapshot()); break
     }
   }
@@ -2016,11 +2095,40 @@ function SampleProjector() {
   // Push a fresh snapshot to the paired phone on every meaningful change.
   useEffect(() => {
     if (!remoteCode) return
-    sendState({ selectedId, teamName, scanState, openTaskId: openTask?.id ?? null, view, detail: openTask ? detailStep : null })
-  }, [remoteCode, selectedId, teamName, scanState, openTask, view, detailStep, sendState])
+    sendState({
+      selectedId, teamName, scanState,
+      openTaskId: openTask?.id ?? null,
+      view,
+      detail: openTask ? detailStep : null,
+      popup: popup.letters,
+      popupQueued: popup.queued,
+      inviteOpen,
+    })
+  }, [remoteCode, selectedId, teamName, scanState, openTask, view, detailStep, popup, inviteOpen, sendState])
+
+  // Heartbeat. The phone cannot tell "nothing has changed" from "the projector
+  // is gone", so the projector re-broadcasts its state every few seconds and
+  // the phone treats silence as a disconnect. Cheap: one small broadcast on an
+  // ephemeral channel, only while a remote is actually paired.
+  const snapshotRef = useRef(snapshot)
+  snapshotRef.current = snapshot
+  useEffect(() => {
+    if (!remoteCode) return
+    const id = setInterval(() => sendState(snapshotRef.current()), HEARTBEAT_MS)
+    return () => clearInterval(id)
+  }, [remoteCode, sendState])
 
   const enableRemote = () => {
-    setRemoteCode(prev => prev ?? makeRemoteCode())
+    setRemoteCode(prev => {
+      if (prev) return prev
+      const code = makeRemoteCode()
+      // replaceState, not push: the pairing is a property of this screen, not
+      // a place in history the presenter should be able to go "back" out of.
+      const url = new URL(window.location.href)
+      url.searchParams.set('pair', code)
+      window.history.replaceState(null, '', url)
+      return code
+    })
     setShowPair(true)
   }
 
@@ -2090,6 +2198,13 @@ function SampleProjector() {
           onClearGlow={() => { void setGlow([]) }}
           onOpenTask={handleOpenTask}
           onSwitchTeam={() => { setTeamName(null); setOpenTask(null) }}
+          inviteUrl={selectedId
+            ? `${window.location.origin}/bingo-dash/sample?board=${selectedId}`
+            : `${window.location.origin}/bingo-dash/sample`}
+          onShowScoreboard={() => setView('scoreboard')}
+          ref={boardRef}
+          onPopupChange={handlePopupChange}
+          onInviteChange={setInviteOpen}
         />
       )}
 
@@ -2403,7 +2518,19 @@ function SampleController({ code }: { code: string }) {
   const stateRef = useRef<RemoteState | null>(null)
   stateRef.current = state
 
-  const { sendCommand } = useSampleRemote(code, { onState: s => setState(s) })
+  // When the last state broadcast landed. The projector beats every
+  // HEARTBEAT_MS, so silence past HEARTBEAT_TIMEOUT_MS means it is gone —
+  // reloaded, closed, or off the network.
+  const [lastSeen, setLastSeen] = useState(0)
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(id)
+  }, [])
+
+  const { sendCommand } = useSampleRemote(code, {
+    onState: s => { setState(s); setLastSeen(Date.now()) },
+  })
 
   // Load board names once (for the picker labels).
   useEffect(() => {
@@ -2412,15 +2539,19 @@ function SampleController({ code }: { code: string }) {
     })
   }, [])
 
-  // Ask the projector for its state until it answers, so a controller opened
-  // after the projector still syncs up.
+  const live = lastSeen > 0 && now - lastSeen < HEARTBEAT_TIMEOUT_MS
+
+  // Keep asking the projector to introduce itself whenever we are not hearing
+  // from it — on first open, and again after it drops. This used to give up
+  // after 15 tries, which meant a projector reloaded later in the session
+  // never got picked back up and the phone stayed dead until someone noticed.
+  const liveRef = useRef(live)
+  liveRef.current = live
   useEffect(() => {
-    let tries = 0
     sendCommand({ action: 'requestState' })
     const iv = setInterval(() => {
-      if (stateRef.current || tries++ > 15) { clearInterval(iv); return }
-      sendCommand({ action: 'requestState' })
-    }, 1200)
+      if (!liveRef.current) sendCommand({ action: 'requestState' })
+    }, 2000)
     return () => clearInterval(iv)
   }, [sendCommand])
 
@@ -2434,7 +2565,8 @@ function SampleController({ code }: { code: string }) {
     return () => { cancelled = true }
   }, [selectedId])
 
-  const connected = !!state
+  // Had a state at some point AND still hearing beats.
+  const connected = !!state && live
   const teamName = state?.teamName ?? null
   const scanState = state?.scanState ?? {}
   const openTaskId = state?.openTaskId ?? null
@@ -2443,6 +2575,9 @@ function SampleController({ code }: { code: string }) {
   const completedCount = Object.values(scanState).filter(s => s === 'completed').length
   const view = state?.view ?? 'board'
   const detail = state?.detail ?? null
+  const popup = state?.popup ?? null
+  const popupQueued = state?.popupQueued ?? 0
+  const inviteOpen = state?.inviteOpen ?? false
 
   return (
     <div className="min-h-screen bg-gray-950 text-white flex flex-col">
@@ -2451,12 +2586,14 @@ function SampleController({ code }: { code: string }) {
         <span className="px-2 py-1 rounded-lg bg-emerald-500 text-black text-[11px] font-black tracking-wider">📡 REMOTE</span>
         <span className="text-[11px] text-gray-400 font-bold tracking-[0.2em]">{code}</span>
         <span className="ml-auto flex items-center gap-1.5 text-[11px] font-bold">
-          <span className={`w-2 h-2 rounded-full ${connected ? 'bg-emerald-400' : 'bg-amber-400 animate-pulse'}`} />
-          {connected ? 'Connected' : 'Connecting…'}
+          <span className={`w-2 h-2 rounded-full ${
+            connected ? 'bg-emerald-400' : state ? 'bg-red-400 animate-pulse' : 'bg-amber-400 animate-pulse'
+          }`} />
+          {connected ? 'Connected' : state ? 'Reconnecting' : 'Connecting…'}
         </span>
       </div>
 
-      {!connected ? (
+      {!state ? (
         <div className="flex-1 flex flex-col items-center justify-center text-center px-6 gap-2">
           <div className="text-4xl animate-pulse">📡</div>
           <p className="text-gray-300 font-bold">Looking for the projector…</p>
@@ -2464,6 +2601,32 @@ function SampleController({ code }: { code: string }) {
         </div>
       ) : (
         <div className="flex-1 p-3 flex flex-col gap-3 max-w-md w-full mx-auto">
+          {!connected && (
+            <div className="rounded-xl bg-red-500/15 border border-red-400/40 px-3 py-2.5">
+              <p className="text-xs font-black text-red-200">⚠ Lost the projector</p>
+              <p className="text-[11px] text-red-200/70 font-bold mt-0.5">
+                Taps won't land until it's back. The controls below show its last known state.
+              </p>
+            </div>
+          )}
+          {/* What the room is looking at right now. The celebration is
+              full-screen and opaque, so while it is up the phone says so —
+              otherwise taps land on a board nobody can see. */}
+          {popup && (
+            <div className="rounded-xl bg-purple-500/15 border border-purple-400/40 p-3 flex flex-col gap-2">
+              <p className="text-xs font-black text-purple-200">
+                🎉 On screen: <span className="text-white tracking-widest">{popup}!</span>
+                {popupQueued > 0 && (
+                  <span className="text-purple-300/80 font-bold"> · {popupQueued} more queued</span>
+                )}
+              </p>
+              <button onClick={() => sendCommand({ action: 'dismissPopup' })}
+                className="w-full py-2.5 rounded-lg bg-purple-500 text-white text-sm font-black hover:bg-purple-400 active:scale-95 transition-all">
+                ✕ Close celebration
+              </button>
+            </div>
+          )}
+
           {/* Board / Scoreboard view toggle */}
           <div className="grid grid-cols-2 gap-1 p-1 rounded-xl bg-white/5 border border-white/10">
             <button
@@ -2604,6 +2767,31 @@ function SampleController({ code }: { code: string }) {
               <button onClick={() => sendCommand({ action: 'closeTask' })}
                 className="w-full py-2 rounded-lg bg-white/5 text-gray-300 border border-white/10 text-xs font-bold hover:bg-white/10 transition-colors">
                 ← Back to board
+              </button>
+            </div>
+          )}
+
+          {/* Put something on the big screen on demand. Both are toggles so
+              the presenter can take them away without touching the laptop. */}
+          {teamName && (
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                onClick={() => sendCommand({ action: popup ? 'dismissPopup' : 'showPopup' })}
+                className={`py-2.5 rounded-lg border text-sm font-black active:scale-95 transition-all ${
+                  popup
+                    ? 'bg-purple-500 text-white border-purple-400'
+                    : 'bg-purple-500/20 text-purple-100 border-purple-400/40 hover:bg-purple-500/30'
+                }`}>
+                {popup ? '✕ Close BINGO' : '🎉 Show BINGO'}
+              </button>
+              <button
+                onClick={() => sendCommand({ action: 'setInvite', open: !inviteOpen })}
+                className={`py-2.5 rounded-lg border text-sm font-black active:scale-95 transition-all ${
+                  inviteOpen
+                    ? 'bg-emerald-500 text-black border-emerald-400'
+                    : 'bg-white/10 text-gray-200 border-white/15 hover:bg-white/20'
+                }`}>
+                {inviteOpen ? '✕ Close QR' : '▦ Invite QR'}
               </button>
             </div>
           )}
