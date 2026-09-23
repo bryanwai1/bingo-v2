@@ -578,11 +578,6 @@ const BoardScreen = forwardRef<BoardScreenHandle, {
   const gridTasks = useMemo(() => withCategoryColors(gridTasksProp), [gridTasksProp])
   const [showLeaveConfirm, setShowLeaveConfirm] = useState(false)
   const [popupLetters, setPopupLetters] = useState<string | null>(null)
-  // Opened by hand from the remote, rather than fired by completing a line.
-  // A celebration that fires on its own gets out of the way after 4s; one the
-  // presenter opened stays put until they close it, so the Message button is a
-  // real toggle instead of something that flips itself back mid-sentence.
-  const [popupSticky, setPopupSticky] = useState(false)
   const [inviteOpen, setInviteOpen] = useState(false)
   const [chatOpen, setChatOpen] = useState(false)
   const [popupQueue, setPopupQueue] = useState<string[]>([])
@@ -654,17 +649,15 @@ const BoardScreen = forwardRef<BoardScreenHandle, {
   useEffect(() => {
     if (popupLetters || popupQueue.length === 0) return
     setPopupLetters(popupQueue[0])
-    setPopupSticky(false)
     setPopupQueue(prev => prev.slice(1))
   }, [popupLetters, popupQueue])
 
-  const closePopup = useCallback(() => { setPopupLetters(null); setPopupSticky(false) }, [])
-
-  useEffect(() => {
-    if (!popupLetters || popupSticky) return
-    const t = setTimeout(closePopup, 4000)
-    return () => clearTimeout(t)
-  }, [popupLetters, popupSticky, closePopup])
+  // The celebration waits for a deliberate "continue" — a tap on the screen or
+  // the paired phone's button — which is what its own "Tap to continue" label
+  // promises. It used to clear itself after 4s regardless, so the remote's
+  // continue button appeared and vanished before anyone could reach for it,
+  // and the presenter had no say over how long the room saw it.
+  const closePopup = useCallback(() => { setPopupLetters(null) }, [])
 
   // Let a paired phone clear the celebration. Dismisses the current one only,
   // exactly like tapping the screen — the next queued one then takes over, so
@@ -1909,20 +1902,24 @@ export function BingoDashSample() {
   return remoteCode ? <SampleController code={remoteCode} /> : <SampleProjector />
 }
 
-// Quick BINGO: five presses, one new line each. The first four fill rows 0-3;
-// the fifth adds the single box that closes COLUMN 1 (1,6,11,16,21).
+// Quick BINGO: five presses, one row per press, top to bottom — so the board
+// visibly fills a row at a time and the letters walk B → I → N → G → O.
 //
-// Filling row 4 instead would complete the whole board, closing the four
-// remaining columns and both diagonals in one press — eight lines at once, not
-// one. Column 1 is the only choice that lands exactly one: every other column
-// still needs its row-4 box, the main diagonal still needs slot 24, and the
-// anti-diagonal still needs slot 20.
+// The fifth press fills the board, which also closes the five columns and both
+// diagonals: 8 new lines at once, so that team's line count jumps 4 → 12. The
+// celebration still reads a single 'BINGO' (the popup queue collapses
+// duplicates), and a full board scoring every line is what the demo is
+// showing off, so the jump is the honest result rather than a glitch.
+//
+// An earlier version made the last press a single box closing one column, to
+// keep strictly one line per press — but it left the bottom row unticked,
+// which is wrong on screen. Ticking the row is what the room reads.
 const QUICK_WIN_STEPS: number[][] = [
-  [0, 1, 2, 3, 4],       // row 0        → B
-  [5, 6, 7, 8, 9],       // row 1        → I
-  [10, 11, 12, 13, 14],  // row 2        → N
-  [15, 16, 17, 18, 19],  // row 3        → G
-  [21],                  // closes col 1 → O
+  [0, 1, 2, 3, 4],       // row 0 → B
+  [5, 6, 7, 8, 9],       // row 1 → I
+  [10, 11, 12, 13, 14],  // row 2 → N
+  [15, 16, 17, 18, 19],  // row 3 → G
+  [20, 21, 22, 23, 24],  // row 4 → O (fills the board)
 ]
 
 function SampleProjector() {
@@ -2669,20 +2666,21 @@ function SampleController({ code }: { code: string }) {
               </p>
             </div>
           )}
-          {/* What the room is looking at right now. The celebration is
-              full-screen and opaque, so while it is up the phone says so —
-              otherwise taps land on a board nobody can see. */}
+          {/* The celebration is full-screen and opaque, so while it is up the
+              phone says so and offers the same "Tap to continue" the screen
+              shows — otherwise the only way past it is walking over to the
+              laptop, and taps here land on a board nobody can see. */}
           {popup && (
-            <div className="rounded-xl bg-purple-500/15 border border-purple-400/40 p-3 flex flex-col gap-2">
+            <div className="rounded-xl bg-purple-500/20 border border-purple-400/50 p-3 flex flex-col gap-2 animate-bounce-in">
               <p className="text-xs font-black text-purple-200">
                 🎉 On screen: <span className="text-white tracking-widest">{popup}!</span>
                 {popupQueued > 0 && (
-                  <span className="text-purple-300/80 font-bold"> · {popupQueued} more queued</span>
+                  <span className="text-purple-300/80 font-bold"> · {popupQueued} more to come</span>
                 )}
               </p>
               <button onClick={() => sendCommand({ action: 'dismissPopup' })}
-                className="w-full py-2.5 rounded-lg bg-purple-500 text-white text-sm font-black hover:bg-purple-400 active:scale-95 transition-all">
-                ✕ Close message
+                className="w-full py-3.5 rounded-lg bg-purple-500 text-white text-base font-black hover:bg-purple-400 active:scale-95 transition-all">
+                ▶ Tap to continue
               </button>
             </div>
           )}

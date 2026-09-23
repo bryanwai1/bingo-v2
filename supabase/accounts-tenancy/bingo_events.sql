@@ -21,26 +21,29 @@ create policy "creator writes event" on public.bingo_events for all to authentic
   using (public.is_bingo_owner() or created_by = auth.uid())
   with check (public.is_bingo_owner() or created_by = auth.uid());
 
--- Dropped first: the view below depends on these, and bingo_line_multiplier
--- is obsolete. It applied a single closed-form multiplier to the final tile
--- total, which the running-total rule (see below) cannot be expressed as.
+-- Dropped first: the view below depends on these.
 drop view if exists public.event_scoreboard;
 drop function if exists public.bingo_line_multiplier(int);
 
 -- Per-team board score. Must match scoreWithBingoLines() in
 -- src/lib/bingoLines.ts.
 --
--- Bingo lines do not apply a single multiplier to the final tile total: each
--- line lifts the team's RUNNING total at the moment it lands (1st line ×1.2,
--- 2nd ×1.4, 3rd ×1.6, +0.2 per line), so points earned before a line are
--- lifted by it and points earned after are not:
+-- A completed line pays a multiplier on THE BOXES THAT FORM IT: the 1st line
+-- a team completes pays x1.2 on the total of its five boxes, the 2nd x1.4,
+-- then x1.6, x1.8, x2.0 -- five lines' worth of bonus and no more.
 --
---   100 pts  -> line 1 -> 100 x 1.2 = 120
---   +50 pts  ->          120 +  50 = 170
---            -> line 2 -> 170 x 1.4 = 238
+--   Line 1 (row 1):  100+100+100+100+100 = 500 x 1.2 = 600
+--   Line 2 (col 1):  100+100+100+100+100 = 500 x 1.4 = 700
+--   3 boxes in no line:                               300
+--                                            TOTAL = 1600
 --
--- That makes scoring order-dependent, so this replays the board in
--- completed_at order rather than computing a closed form.
+--  * A box on a crossing point counts in EVERY line it belongs to (box 1
+--    above is paid in both lines).
+--  * A box in no paying line is paid once at face value, so a box is never
+--    paid its face value AND a line multiple.
+--
+-- The multiplier a line earns depends on how many lines came before it, so
+-- this replays the board in completed_at order to establish that sequence.
 --
 -- Only cards actually PLACED on the board count -- the same set the
 -- TypeScript builds from bingo_board_cards. Completion is matched per BOX
@@ -56,17 +59,31 @@ stable
 parallel safe
 as $$
 declare
+  all_lines int[][] := array[
+    array[0,1,2,3,4],      array[5,6,7,8,9],      array[10,11,12,13,14],
+    array[15,16,17,18,19], array[20,21,22,23,24],
+    array[0,5,10,15,20],   array[1,6,11,16,21],   array[2,7,12,17,22],
+    array[3,8,13,18,23],   array[4,9,14,19,24],
+    array[0,6,12,18,24],   array[4,8,12,16,20]
+  ];
+  pts       numeric[] := array_fill(null::numeric, array[25]);  -- slot -> points
   done      int[]   := '{}';
+  order_of  int[]   := '{}';   -- line indexes, in the order they completed
+  paid      int[]   := '{}';   -- slots already paid through a line
   total     numeric := 0;
   raw       numeric := 0;
   n_done    int     := 0;
-  applied   int     := 0;
-  lines_now int;
+  line      int[];
+  line_total numeric;
+  i         int;
+  k         int;
+  slot      int;
   rec       record;
 begin
+  -- 1. Replay in completion order, recording when each line completes.
   for rec in
     select bc.slot as slot,
-           coalesce(bt.points, 0) as points,
+           coalesce(bt.points, 0)::numeric as points,
            min(coalesce(sc.completed_at, 'epoch'::timestamptz)) as done_at
     from public.bingo_board_cards bc
     join public.bingo_tasks bt on bt.id = bc.task_id
@@ -78,40 +95,50 @@ begin
        or (sc.board_card_id is null and sc.task_id = bc.task_id)
      )
     where bc.section_id = p_section
+      and bc.slot between 0 and 24
     group by bc.id, bc.slot, bt.points
     -- Ties and legacy scans with no completed_at fall back to slot order, so
     -- the result is deterministic either way.
     order by done_at, bc.slot
   loop
-    total  := total + rec.points;
     raw    := raw + rec.points;
     n_done := n_done + 1;
     done   := done || rec.slot;
+    pts[rec.slot + 1] := rec.points;   -- Postgres arrays are 1-based
 
-    -- How many lines are complete now: the 12 possible lines, each tested for
-    -- containment in the set of crossed-off slots. A single box can finish
-    -- two at once (a crossing slot), and each is applied in turn.
-    select count(*) into lines_now
-    from (values
-      ('{0,1,2,3,4}'::int[]),      ('{5,6,7,8,9}'::int[]),
-      ('{10,11,12,13,14}'::int[]), ('{15,16,17,18,19}'::int[]),
-      ('{20,21,22,23,24}'::int[]),
-      ('{0,5,10,15,20}'::int[]),   ('{1,6,11,16,21}'::int[]),
-      ('{2,7,12,17,22}'::int[]),   ('{3,8,13,18,23}'::int[]),
-      ('{4,9,14,19,24}'::int[]),
-      ('{0,6,12,18,24}'::int[]),   ('{4,8,12,16,20}'::int[])
-    ) as l(line)
-    where l.line <@ done;
-
-    while applied < lines_now loop
-      applied := applied + 1;
-      total := total * (1 + 0.2 * applied);
+    for i in 1..array_length(all_lines, 1) loop
+      if i = any(order_of) then continue; end if;
+      line := array[all_lines[i][1], all_lines[i][2], all_lines[i][3],
+                    all_lines[i][4], all_lines[i][5]];
+      if line <@ done then
+        order_of := order_of || i;
+      end if;
     end loop;
+  end loop;
+
+  -- 2. The first five lines each pay their own boxes at their own multiplier.
+  for k in 1..least(coalesce(array_length(order_of, 1), 0), 5) loop
+    i := order_of[k];
+    line := array[all_lines[i][1], all_lines[i][2], all_lines[i][3],
+                  all_lines[i][4], all_lines[i][5]];
+    line_total := 0;
+    foreach slot in array line loop
+      line_total := line_total + coalesce(pts[slot + 1], 0);
+      if not (slot = any(paid)) then paid := paid || slot; end if;
+    end loop;
+    total := total + line_total * (1 + 0.2 * k);
+  end loop;
+
+  -- 3. Every other completed box is paid once at face value.
+  foreach slot in array done loop
+    if not (slot = any(paid)) then
+      total := total + coalesce(pts[slot + 1], 0);
+    end if;
   end loop;
 
   tile_points   := raw;
   tiles_done    := n_done;
-  bingo_lines   := applied;
+  bingo_lines   := coalesce(array_length(order_of, 1), 0);
   scaled_points := total;
   return next;
 end;
