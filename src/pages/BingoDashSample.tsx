@@ -5,7 +5,7 @@ import { supabase } from '../lib/supabase'
 import { fetchBoardTasks, tasksForFace } from '../lib/boardCards'
 import { effectiveInputs, fileAccept, fileEmoji, fileHeading, fileNoun } from '../lib/completionInputs'
 import { activeFaces, faceName, faceColor, normaliseFaceCount } from '../lib/cubeFaces'
-import { buildBingoSlots, completedBingoLines, bingoLineBonus } from '../lib/bingoLines'
+import { buildBingoSlots, completedBingoLines, scoreWithBingoLines } from '../lib/bingoLines'
 import { useSampleRemote, makeRemoteCode, type RemoteCommand, type RemoteState, type SampleView, type DetailStep } from '../hooks/useSampleRemote'
 import { useBingoTaskPages } from '../hooks/useBingoTaskPages'
 import { useBingoTaskPhotos } from '../hooks/useBingoTaskPhotos'
@@ -2300,10 +2300,14 @@ function SampleScoreboard({
     const completedIds = isPlayed
       ? new Set(Object.entries(scanState).filter(([, v]) => v === 'completed').map(([k]) => k))
       : new Set(orderedTasks.slice(0, Math.round((SCOREBOARD_PRESET[name] ?? 0.3) * total)).map(t => t.id))
-    const tilePoints = gridTasks.reduce((s, t) => completedIds.has(t.id) ? s + (t.points ?? 0) : s, 0)
     const bingos = completedBingoLines(slots, completedIds).length
-    // Same multiplier the live scoreboard uses: +0.2 per completed line.
-    const points = tilePoints + bingoLineBonus(tilePoints, bingos)
+    // Same rule the live scoreboard uses: each line lifts the running total as
+    // it lands. The demo has no scan timestamps, so tiles replay in board
+    // order — enough to show the mechanic on a pitch.
+    const points = scoreWithBingoLines(
+      gridTasks.filter(t => completedIds.has(t.id)).map(t => ({ id: t.id, points: t.points ?? 0, at: 0 })),
+      slots,
+    ).total
     const tasksDone = completedIds.size
     return { name, points, bingos, tasksDone, isPlayed, idx }
   })

@@ -3,7 +3,7 @@ import { useParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { ParticleBackground } from '../components/ParticleBackground'
 import { getScoreboardTheme } from '../lib/scoreboardThemes'
-import { buildBingoSlots, completedBingoLines, bingoLineBonus, bingoMultiplier } from '../lib/bingoLines'
+import { buildBingoSlots, scoreWithBingoLines } from '../lib/bingoLines'
 import { duelBonusByTeam } from '../hooks/useBingoDuels'
 import type { BingoTask, BingoTeam, BingoScan, BingoSettings, BingoSection, BingoBoardCard, BingoDuel } from '../types/database'
 
@@ -191,14 +191,27 @@ export function BingoDashProjector() {
         .filter(t => (t.placement_id && completedPlacementIds.has(t.placement_id)) || legacyCompletedTaskIds.has(t.id))
         .map(t => t.placement_id ?? t.id),
     )
-    const tilePoints = gridTasks.reduce(
-      (sum, t) => completedIds.has(t.placement_id ?? t.id) ? sum + (t.points ?? 0) : sum, 0,
-    )
     const duelBonus = duelBonuses.get(team.id) ?? 0
-    const bingos = completedBingoLines(lineSlots, completedIds).length
-    // Lines multiply the tile points rather than adding a flat sum, so the
-    // reward scales with how hard the line was to complete.
-    const lineBonus = bingoLineBonus(tilePoints, bingos)
+    // When each box was crossed off, so the line multipliers can be applied in
+    // the order they were actually earned — a line lifts the total standing at
+    // that moment, not the final one.
+    const completedAt = new Map<string, number>()
+    for (const sc of teamScans) {
+      if (!sc.completed) continue
+      const when = sc.completed_at ? Date.parse(sc.completed_at) : 0
+      const key = sc.board_card_id ?? sc.task_id
+      completedAt.set(key, Math.min(completedAt.get(key) ?? Infinity, when))
+    }
+    const { total: scaledTilePoints, tilePoints, lineBonus, bingos } = scoreWithBingoLines(
+      gridTasks
+        .filter(t => completedIds.has(t.placement_id ?? t.id))
+        .map(t => ({
+          id: t.placement_id ?? t.id,
+          points: t.points ?? 0,
+          at: completedAt.get(t.placement_id ?? '') ?? completedAt.get(t.id) ?? 0,
+        })),
+      lineSlots,
+    )
     const tasksDone = completedIds.size
     const bonus = team.bonus_points ?? 0
     const lastScan = teamScans.reduce((latest, s) => {
@@ -216,7 +229,7 @@ export function BingoDashProjector() {
       // A hidden hundredth per team, distinct across the board, so two teams
       // on the same cards cannot tie. Added to the total rather than per scan:
       // per scan it would grow with card count and become a volume bonus.
-      points: tilePoints + lineBonus + duelBonus + Number(team.tiebreak ?? 0),
+      points: scaledTilePoints + duelBonus + Number(team.tiebreak ?? 0),
       tilePoints,
       lineBonus,
       duelBonus,
@@ -428,11 +441,7 @@ export function BingoDashProjector() {
                       <p className={`${theme.lines} text-3xl sm:text-4xl lg:text-5xl font-black tabular-nums`}>
                         {row.bingos}<span className={`text-lg lg:text-2xl ${theme.muted}`}>/12</span>
                       </p>
-                      <p className={`${theme.muted} text-[9px] lg:text-xs font-bold uppercase tracking-wider lg:tracking-widest mt-1`}>
-                        {row.bingos > 0
-                          ? <>lines <span className={theme.lines}>· ×{bingoMultiplier(row.bingos).toFixed(1)}</span></>
-                          : 'lines'}
-                      </p>
+                      <p className={`${theme.muted} text-[9px] lg:text-xs font-bold uppercase tracking-wider lg:tracking-widest mt-1`}>lines</p>
                     </div>
                     <div className="text-center min-w-0">
                       <p className={`${theme.positive} text-3xl sm:text-4xl lg:text-5xl font-black tabular-nums`}>

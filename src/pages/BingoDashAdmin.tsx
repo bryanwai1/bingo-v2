@@ -6,7 +6,7 @@ import JSZip from 'jszip'
 import { supabase } from '../lib/supabase'
 import { useBingoAuth } from '../hooks/useBingoAuth'
 import type { BingoTask, BingoTeam, BingoScan, BingoSettings, BingoSection, BingoCategory, BingoChallengeSection, BingoMember, BingoPhotoSubmission, BingoBoardCard, BingoDuel, BonusItem } from '../types/database'
-import { BINGO_LINES, buildBingoSlots, completedBingoLines, bingoLineBonus } from '../lib/bingoLines'
+import { BINGO_LINES, buildBingoSlots, completedBingoLines, scoreWithBingoLines } from '../lib/bingoLines'
 import { TileFace } from '../components/BingoTileFace'
 import { SCOREBOARD_THEMES, getScoreboardTheme } from '../lib/scoreboardThemes'
 import { Menu, MenuItem, MenuDivider } from '../components/AdminHeader'
@@ -4403,14 +4403,26 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                         const teamSlots = buildBingoSlots(sectionGridTasks)
                         const teamLineSlots = teamSlots.map(t => t ? { ...t, id: t.placementId } : null)
                         const teamBingoLines = completedBingoLines(teamLineSlots, completedIds).length
-                        // Tile points scaled by the bingo-line multiplier, plus
-                        // any contest bonuses this team won in duels — the
-                        // latter is a defender's only scoring record, and is
-                        // added after the multiplier rather than scaled by it.
-                        const teamTilePoints = completedPlacements.reduce((sum, t) => sum + (t.points ?? 0), 0)
-                        const pointsEarned = teamTilePoints
-                          + bingoLineBonus(teamTilePoints, teamBingoLines)
-                          + (duelBonuses.get(team.id) ?? 0)
+                        // Tile points replayed in completion order so each
+                        // bingo line lifts the total standing at the moment it
+                        // landed, plus any contest bonuses this team won in
+                        // duels — the latter is a defender's only scoring
+                        // record, and is added after rather than scaled.
+                        const teamCompletedAt = new Map<string, number>()
+                        for (const sc of teamScans) {
+                          if (!sc.completed) continue
+                          const when = sc.completed_at ? Date.parse(sc.completed_at) : 0
+                          const key = sc.board_card_id ?? sc.task_id
+                          teamCompletedAt.set(key, Math.min(teamCompletedAt.get(key) ?? Infinity, when))
+                        }
+                        const pointsEarned = scoreWithBingoLines(
+                          completedPlacements.map(t => ({
+                            id: t.placementId,
+                            points: t.points ?? 0,
+                            at: teamCompletedAt.get(t.placementId) ?? teamCompletedAt.get(t.id) ?? 0,
+                          })),
+                          teamLineSlots,
+                        ).total + (duelBonuses.get(team.id) ?? 0)
                         const teamMembers = members.filter(m => m.team_id === team.id)
                         const isFull = teamMembers.length >= 4
                         return (
@@ -5191,10 +5203,23 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
         const bingoSlotSet = new Set<number>()
         completedLineIdx.forEach(i => BINGO_LINES[i].forEach(idx => bingoSlotSet.add(idx)))
         const tasksDone = completedPlacements.length
-        // Same rule as the scoreboard: tile points scaled by the bingo-line
-        // multiplier (+0.2 per completed line).
-        const tilePoints = completedPlacements.reduce((sum, t) => sum + (t.points ?? 0), 0)
-        const points = tilePoints + bingoLineBonus(tilePoints, completedLineIdx.length)
+        // Same rule as the scoreboard: replayed in completion order so each
+        // line lifts the running total at the point it landed.
+        const modalCompletedAt = new Map<string, number>()
+        for (const sc of teamScans) {
+          if (!sc.completed) continue
+          const when = sc.completed_at ? Date.parse(sc.completed_at) : 0
+          const key = sc.board_card_id ?? sc.task_id
+          modalCompletedAt.set(key, Math.min(modalCompletedAt.get(key) ?? Infinity, when))
+        }
+        const points = scoreWithBingoLines(
+          completedPlacements.map(t => ({
+            id: t.placementId,
+            points: t.points ?? 0,
+            at: modalCompletedAt.get(t.placementId) ?? modalCompletedAt.get(t.id) ?? 0,
+          })),
+          lineSlots,
+        ).total
         return (
           <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 px-4"
             onClick={() => setViewingTeam(null)}>

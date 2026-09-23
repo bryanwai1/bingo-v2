@@ -11,7 +11,7 @@ import {
 } from '../lib/awardSlides'
 import { duelBonusByTeam } from '../hooks/useBingoDuels'
 import type { BingoSection, BingoTeam, BingoScan, BingoTask, BingoAwardConfig, BingoDuel } from '../types/database'
-import { bingoLineBonus } from '../lib/bingoLines'
+import { scoreWithBingoLines } from '../lib/bingoLines'
 
 const BINGO_LINES: number[][] = [
   [0, 1, 2, 3, 4], [5, 6, 7, 8, 9], [10, 11, 12, 13, 14], [15, 16, 17, 18, 19], [20, 21, 22, 23, 24],
@@ -214,12 +214,25 @@ function AwardShow({ sectionSlug }: { sectionSlug: string }) {
         const t = slots[i]
         return t && completedIds.has(t.placement_id ?? t.id)
       })).length
-      // Tile points scaled by the bingo-line multiplier (+0.2 per line), then
-      // contest bonuses added on top — a winning defender has no tile, so the
-      // duel bonus is the only record of their win and is never scaled.
-      const tilePoints = completedPlacements.reduce((sum, t) => sum + (t.points ?? 0), 0)
-      const basePoints = tilePoints + bingoLineBonus(tilePoints, bingos)
-        + (duelBonuses.get(team.id) ?? 0)
+      // Tile points replayed in completion order so each bingo line lifts the
+      // total standing at that moment, then contest bonuses added on top — a
+      // winning defender has no tile, so the duel bonus is the only record of
+      // their win and is never scaled.
+      const completedAt = new Map<string, number>()
+      for (const sc of teamScans) {
+        if (!sc.completed) continue
+        const when = sc.completed_at ? Date.parse(sc.completed_at) : 0
+        const key = sc.board_card_id ?? sc.task_id
+        completedAt.set(key, Math.min(completedAt.get(key) ?? Infinity, when))
+      }
+      const basePoints = scoreWithBingoLines(
+        completedPlacements.map(t => ({
+          id: t.placement_id ?? t.id,
+          points: t.points ?? 0,
+          at: completedAt.get(t.placement_id ?? '') ?? completedAt.get(t.id) ?? 0,
+        })),
+        slots.map(t => t ? { ...t, id: t.placement_id ?? t.id } : null),
+      ).total + (duelBonuses.get(team.id) ?? 0)
       const bonusPoints = team.bonus_points ?? 0
       const reachedAt = teamScans.reduce(
         (latest, sc) => (sc.completed && gridTaskIds.has(sc.task_id) && sc.completed_at)
