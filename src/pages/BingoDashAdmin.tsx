@@ -1,9 +1,10 @@
-import { useEffect, useState, useCallback, useRef } from 'react'
+import { useEffect, useState, useCallback, useMemo, useRef } from 'react'
 import { isComplete, effectiveInputs, usesInputs } from '../lib/completionInputs'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { QRCodeSVG } from 'qrcode.react'
 import JSZip from 'jszip'
 import { supabase } from '../lib/supabase'
+import { CategoryIcon } from '../components/BingoTileFace'
 import { useBingoAuth } from '../hooks/useBingoAuth'
 import type { BingoTask, BingoTeam, BingoScan, BingoSettings, BingoSection, BingoCategory, BingoChallengeSection, BingoMember, BingoPhotoSubmission, BingoBoardCard, BingoDuel, BonusItem } from '../types/database'
 import { BINGO_LINES, buildBingoSlots, completedBingoLines, scoreWithBingoLines } from '../lib/bingoLines'
@@ -17,7 +18,7 @@ import { CubeBoard } from '../components/CubeBoard'
 import { RunEventPanel, Step } from '../components/RunEventPanel'
 import { CONTEST_GAMES, getContestGame } from '../lib/contestGames'
 import { SupportInbox } from '../components/SupportInbox'
-import { aitbByName } from '../lib/aitbActivities'
+import { aitbByName, aitbHeroUrlByName } from '../lib/aitbActivities'
 import { LED_HEX, LED_KEYS } from '../lib/ledColors'
 import { duelBonusByTeam } from '../hooks/useBingoDuels'
 
@@ -124,6 +125,27 @@ function formatTime(seconds: number): string {
 
 // Sub-accounts can't `select *` across every board, so rows keyed to my
 // boards/teams are fetched in `.in()` chunks small enough for the URL limit.
+/**
+ * Chunked `in` fetch for one slice of a table: a chosen column list plus an
+ * optional equality filter. The library needs only a few narrow columns from
+ * photos and pages, so this avoids dragging every column of every row back
+ * just to read a URL and one line of text.
+ */
+async function fetchSliceInChunks<T>(
+  table: string, column: string, ids: string[],
+  select: string, eq?: { col: string; val: number | string },
+): Promise<T[]> {
+  if (ids.length === 0) return []
+  const out: T[] = []
+  for (let i = 0; i < ids.length; i += 150) {
+    let q = supabase.from(table).select(select).in(column, ids.slice(i, i + 150))
+    if (eq) q = q.eq(eq.col, eq.val)
+    const { data } = await q
+    if (data) out.push(...(data as T[]))
+  }
+  return out
+}
+
 async function fetchInChunks<T>(table: string, column: string, ids: string[]): Promise<T[]> {
   if (ids.length === 0) return []
   const out: T[] = []
@@ -249,13 +271,99 @@ function BoardTile({
 }
 
 // ── Category group block (used in Board tab gallery) ──────────────────────────
+/**
+ * Bulk colour / points for one category, behind an explicit Apply.
+ *
+ * The controls this replaces wrote straight through on every `onChange` — so
+ * dragging the colour picker rewrote every card in the group, repeatedly, with
+ * no undo. They also seeded themselves from `group.tasks[0]`, presenting the
+ * first card's value as if it were the whole group's.
+ */
+function BulkApplyPanel({ group, onApply }: {
+  group: { label: string; key: string; tasks: BingoTask[] }
+  onApply: (tasks: BingoTask[], patch: { hex?: string; points?: number }) => void | Promise<void>
+}) {
+  const [open, setOpen] = useState(false)
+  const n = group.tasks.length
+
+  // Uniform only when every card agrees; otherwise the field starts empty and
+  // reads "Mixed", so nothing is applied by accident.
+  const hexes = new Set(group.tasks.map(t => t.hex_code))
+  const pointsSet = new Set(group.tasks.map(t => t.points ?? 0))
+  const uniformHex = hexes.size === 1 ? [...hexes][0] : null
+  const uniformPoints = pointsSet.size === 1 ? [...pointsSet][0] : null
+
+  const [hex, setHex] = useState<string>(uniformHex ?? '#3B82F6')
+  const [pts, setPts] = useState<string>(uniformPoints !== null ? String(uniformPoints) : '')
+  const [touchedHex, setTouchedHex] = useState(false)
+
+  if (!open) {
+    return (
+      <button
+        onClick={() => {
+          setHex(uniformHex ?? '#3B82F6')
+          setPts(uniformPoints !== null ? String(uniformPoints) : '')
+          setTouchedHex(false)
+          setOpen(true)
+        }}
+        title={`Set colour or points for all ${n} ${group.label} card${n === 1 ? '' : 's'} at once`}
+        className="flex-shrink-0 px-2.5 py-1 rounded-lg border a-border a-surface-2 a-text-2 text-[11px] font-bold hover:a-surface transition-colors"
+      >
+        Apply to all {n}
+      </button>
+    )
+  }
+
+  const ptsNum = pts.trim() === '' ? null : Math.max(0, parseFloat(pts) || 0)
+  const nothingToDo = !touchedHex && ptsNum === null
+
+  return (
+    <div className="flex-shrink-0 flex items-center gap-2 flex-wrap a-surface-2 border a-border rounded-xl px-2.5 py-1.5">
+      <span className="text-[11px] a-text-3 font-bold uppercase tracking-wider">All {n}</span>
+
+      <input type="color" value={hex}
+        onChange={e => { setHex(e.target.value); setTouchedHex(true) }}
+        className="w-7 h-7 rounded cursor-pointer border a-border"
+        title="Colour to apply" />
+      <input type="text" value={hex}
+        onChange={e => { setHex(e.target.value); setTouchedHex(true) }}
+        placeholder={uniformHex ? undefined : 'Mixed'}
+        className="w-[5.5rem] px-1.5 py-0.5 text-xs border a-border a-surface a-text rounded font-mono focus:outline-none focus:ring-1 focus:ring-teal-500"
+        title="Exact hex code to apply" />
+
+      <input type="number" min={0} step="0.1" value={pts}
+        onChange={e => setPts(e.target.value)}
+        placeholder={uniformPoints !== null ? String(uniformPoints) : 'Mixed'}
+        className="w-16 px-1.5 py-0.5 text-xs border a-border a-surface a-text rounded text-center font-bold focus:outline-none focus:ring-1 focus:ring-teal-500"
+        title="Points to apply" />
+      <span className="text-[11px] a-text-3">pts</span>
+
+      <button
+        onClick={async () => {
+          const patch: { hex?: string; points?: number } = {}
+          if (touchedHex) patch.hex = hex
+          if (ptsNum !== null) patch.points = ptsNum
+          await onApply(group.tasks, patch)
+          setOpen(false)
+        }}
+        disabled={nothingToDo || !/^#[0-9a-fA-F]{6}$/.test(hex)}
+        className="px-3 py-1 rounded-lg bg-teal-600 text-white text-[11px] font-black disabled:opacity-40"
+      >
+        Apply to {n} card{n === 1 ? '' : 's'}
+      </button>
+      <button onClick={() => setOpen(false)}
+        className="px-2 py-1 a-text-3 text-[11px] font-bold hover:a-text">Cancel</button>
+    </div>
+  )
+}
+
 function CategoryGroupBlock({
   group,
   editingCategoryId, setEditingCategoryId,
-  categoryNamesFor, scans, copiedId,
+  categoryNamesFor, scanStatsByTask, copiedId,
   boardCountByTask,
   navigate,
-  saveCategoryInline, setBulkCategoryColor, setBulkCategoryPoints, setTaskPoints,
+  saveCategoryInline, applyBulkToCategory, setTaskPoints,
   renameCategoryByLabel,
   setQrTask, copyLink, duplicateTask, openTileEdit, deleteTask,
 }: {
@@ -263,13 +371,14 @@ function CategoryGroupBlock({
   editingCategoryId: string | null
   setEditingCategoryId: (id: string | null) => void
   categoryNamesFor: (sectionId: string | null | undefined) => string[]
-  scans: BingoScan[]
+  /** Precomputed per-card counts. Filtering `scans` per card inside the render
+   *  loop was O(cards x scans) and ran twice for every card, on every render. */
+  scanStatsByTask: Map<string, { scanned: number; completed: number }>
   copiedId: string | null
   boardCountByTask: Map<string, number>
   navigate: (path: string) => void
   saveCategoryInline: (taskId: string, cat: string) => void
-  setBulkCategoryColor: (ids: string[], hex: string) => void
-  setBulkCategoryPoints: (ids: string[], pts: number) => void
+  applyBulkToCategory: (tasks: BingoTask[], patch: { hex?: string; points?: number }) => void | Promise<void>
   setTaskPoints: (id: string, pts: number) => void
   renameCategoryByLabel: (label: string, newName: string) => void
   setQrTask: (t: BingoTask) => void
@@ -309,42 +418,7 @@ function CategoryGroupBlock({
         )}
         <span className="text-xs a-text-3 font-medium">{group.tasks.length}</span>
         <div className="flex-1 h-px a-surface/10" />
-        <>
-            <div className="flex items-center gap-1.5 flex-shrink-0 flex-wrap">
-              <span className="text-xs a-text-3">color for all:</span>
-              <input
-                type="color"
-                defaultValue={group.tasks[0]?.hex_code ?? '#3B82F6'}
-                key={group.key + '-color'}
-                className="w-7 h-7 rounded cursor-pointer border border-white/20"
-                onChange={e => setBulkCategoryColor(group.tasks.map(t => t.id), e.target.value)}
-                title={`Set color for all ${group.label} tasks`}
-              />
-              <input
-                type="text"
-                defaultValue={group.tasks[0]?.hex_code ?? '#3B82F6'}
-                key={group.key + '-color-hex'}
-                className="w-20 px-1.5 py-0.5 text-xs border a-border a-surface-2 a-text rounded font-mono focus:outline-none focus:ring-1 focus:ring-teal-500"
-                onBlur={e => { const v = e.target.value.trim(); if (/^#[0-9a-fA-F]{6}$/.test(v)) setBulkCategoryColor(group.tasks.map(t => t.id), v) }}
-                onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
-                title={`Type an exact hex code for all ${group.label} tasks`}
-              />
-            </div>
-            <div className="flex items-center gap-1.5 flex-shrink-0">
-              <span className="text-xs a-text-3">pts for all:</span>
-              <input
-                type="number" min={0} step="0.1"
-                defaultValue={group.tasks[0]?.points ?? 0}
-                key={group.key + '-pts'}
-                className="w-14 px-1.5 py-0.5 text-xs border a-border a-surface-2 a-text rounded text-center font-bold focus:outline-none focus:ring-1 focus:ring-teal-500"
-                onBlur={e => setBulkCategoryPoints(group.tasks.map(t => t.id), Math.max(0, parseFloat(e.target.value) || 0))}
-                onKeyDown={e => {
-                  if (e.key === 'Enter') setBulkCategoryPoints(group.tasks.map(t => t.id), Math.max(0, parseFloat((e.target as HTMLInputElement).value) || 0))
-                }}
-                title={`Set points for all ${group.label} tasks`}
-              />
-            </div>
-          </>
+        <BulkApplyPanel group={group} onApply={applyBulkToCategory} />
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
@@ -378,14 +452,14 @@ function CategoryGroupBlock({
               )}
               <div className="flex items-center gap-2 mt-2 flex-wrap">
                 <p className="a-text-3 text-xs">
-                  {scans.filter(s => s.task_id === task.id && s.completed).length} completed ·{' '}
-                  {scans.filter(s => s.task_id === task.id).length} scanned
+                  {scanStatsByTask.get(task.id)?.completed ?? 0} completed ·{' '}
+                  {scanStatsByTask.get(task.id)?.scanned ?? 0} scanned
                 </p>
                 <div className="flex items-center gap-1 bg-black/50 rounded px-1.5 py-0.5 shadow shadow-black/30 ring-1 ring-white/20">
                   <input
                     type="number" min={0}
                     defaultValue={task.points ?? 0}
-                    key={task.id + '-pts'}
+                    key={task.id + '-pts-' + (task.points ?? 0)}
                     className="w-10 bg-transparent text-white text-[10px] font-black text-center focus:outline-none"
                     onBlur={e => setTaskPoints(task.id, Math.max(0, parseFloat(e.target.value) || 0))}
                     onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
@@ -421,8 +495,8 @@ function CategoryGroupBlock({
               </button>
               <button onClick={() => openTileEdit(task)}
                 className="px-3 py-1.5 a-surface/20 rounded-lg a-text text-xs font-bold hover:a-surface/30 transition-colors"
-                title="Move to another section or category">
-                Move
+                title="Quick edit — title, category and points">
+                Quick edit
               </button>
               <button onClick={() => deleteTask(task.id, task.title)}
                 className="px-3 py-1.5 bg-red-500/30 rounded-lg a-text text-xs font-bold hover:bg-red-500/50 transition-colors">
@@ -478,6 +552,11 @@ type PlacedCard = BingoTask & { placementId: string }
 
 // Synthetic compartment id for the flat Complete Library group.
 const LIBRARY_ALL_ID = '__all__'
+// Cards this account created, split out of the flat Complete Library and shown
+// first. A sub-account's own cards were otherwise scattered through a catalogue
+// dominated by the main account's, with nothing to tell them apart — and theirs
+// are the only ones they can edit.
+const LIBRARY_OWN_ID = '__own__'
 
 const emptySlots = new Set<number>()
 
@@ -489,8 +568,12 @@ export function BingoDashAdmin() {
   // resolves the working tenant: owner -> null, facilitator -> host tenant,
   // sub -> own uid.
   const myOwnerValue = workingOwnerValue
-  const isMineRow = (ownerId: string | null | undefined) =>
-    (ownerId ?? null) === myOwnerValue
+  // Stable identity: this is a dependency of the library memos below, and a
+  // fresh function each render would invalidate all of them.
+  const isMineRow = useCallback(
+    (ownerId: string | null | undefined) => (ownerId ?? null) === myOwnerValue,
+    [myOwnerValue],
+  )
   const [tasks, setTasks] = useState<BingoTask[]>([])
   const [boardCards, setBoardCards] = useState<BingoBoardCard[]>([])
   const [teams, setTeams] = useState<BingoTeam[]>([])
@@ -526,6 +609,11 @@ export function BingoDashAdmin() {
   const [myActiveBoard, setMyActiveBoard] = useState<string | null>(account?.active_section_id ?? null)
   // Owner-only: sub-account emails for the "Sub-account cards" library group.
   const [accountEmails, setAccountEmails] = useState<Map<string, string>>(new Map())
+  // A title alone does not tell another admin what the game actually IS, so
+  // each library card carries its hero photo and the first line of its
+  // instructions. Both are one query for the whole library, keyed by task id.
+  const [heroByTask, setHeroByTask] = useState<Map<string, { url: string; x: number | null; y: number | null; order: number }>>(new Map())
+  const [blurbByTask, setBlurbByTask] = useState<Map<string, string>>(new Map())
   const [showSectionManager, setShowSectionManager] = useState(false)
   const [newSectionName, setNewSectionName] = useState('')
   const [showInlineBoardCreate, setShowInlineBoardCreate] = useState(false)
@@ -545,6 +633,35 @@ export function BingoDashAdmin() {
   const [showForm, setShowForm] = useState(false)
   const [qrTask, setQrTask] = useState<BingoTask | null>(null)
   const [copiedId, setCopiedId] = useState<string | null>(null)
+  // One transient message for outcomes the user would otherwise have to infer.
+  // Several actions here used to fail by doing nothing at all — adding a card
+  // to a full board being the worst, since the click looked accepted.
+  const [toast, setToast] = useState<
+    { msg: string; tone: 'ok' | 'warn' | 'error'; action?: { label: string; run: () => void | Promise<void> } } | null
+  >(null)
+  // How many same-title cards Complete Library's dedupe suppressed, keyed by
+  // the card shown in their place. Held in a ref because it is a by-product of
+  // the grouping memo — setting state from inside that memo would loop.
+  const dupeHiddenRef = useRef<Map<string, number>>(new Map())
+  // Editing a card is a full route change, so coming back re-rendered the list
+  // scrolled to the top — in a few hundred cards, a real hunt to find your
+  // place again. Remember which card we left for and return to it.
+  const openCardForEdit = useCallback((taskId: string, from: string) => {
+    try { sessionStorage.setItem('bingo-admin-lib-return', taskId) } catch { /* private mode */ }
+    navigate(`/bingo-dash/admin/task/${taskId}?from=${from}`)
+  }, [navigate])
+  const returnScrollDone = useRef(false)
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const notify = useCallback((
+    msg: string,
+    tone: 'ok' | 'warn' | 'error' = 'ok',
+    action?: { label: string; run: () => void | Promise<void> },
+  ) => {
+    if (toastTimer.current) clearTimeout(toastTimer.current)
+    setToast({ msg, tone, action })
+    // An offer to undo needs long enough to read the message and reach for it.
+    toastTimer.current = setTimeout(() => setToast(null), action ? 8000 : 4000)
+  }, [])
   const [showJoinLink, setShowJoinLink] = useState(false)
   const [joinLinkCopied, setJoinLinkCopied] = useState(false)
   const [joinLinkTab, setJoinLinkTab] = useState<'player' | 'observer'>('player')
@@ -569,7 +686,7 @@ export function BingoDashAdmin() {
   const [tileTitle, setTileTitle] = useState('')
   const [tileHex, setTileHex] = useState('#3B82F6')
   const [tileCategory, setTileCategory] = useState('')
-  const [tilePoints, setTilePoints] = useState(0)
+  const [tilePoints, setTilePoints] = useState('0')
   const [tileSaving, setTileSaving] = useState(false)
 
   // Inline category picker on gallery cards (shows a <select> dropdown)
@@ -717,25 +834,48 @@ export function BingoDashAdmin() {
   const [resettingTeams, setResettingTeams] = useState(false)
 
   // Library: compartment filter
-  const [libraryCompartmentFilter, setLibraryCompartmentFilter] = useState<'all' | string>('all')
+  // Persisted, same pattern as collapsedGroups above: editing a card is a full
+  // route change, so both filters were lost every time you opened one and came
+  // back — the single most repeated annoyance in this tab.
+  const [libraryCompartmentFilter, setLibraryCompartmentFilter] = useState<'all' | string>(
+    () => { try { return localStorage.getItem('bingo-admin-lib-compartment') ?? 'all' } catch { return 'all' } },
+  )
   // Library: category filter, only meaningful on the "All Compartments" view
-  const [libraryCategoryFilter, setLibraryCategoryFilter] = useState<'all' | string>('all')
-  // Library: free-text search across card title / category / colour label
+  const [libraryCategoryFilter, setLibraryCategoryFilter] = useState<'all' | string>(
+    () => { try { return localStorage.getItem('bingo-admin-lib-category') ?? 'all' } catch { return 'all' } },
+  )
+  // Library: free-text search across card title / category / colour label.
+  // Deliberately NOT persisted — a stale term silently hiding most of the
+  // library on your next visit is worse than retyping it.
   const [librarySearch, setLibrarySearch] = useState('')
   // Which card's three-dot action menu is open (library cards)
   const [cardMenuId, setCardMenuId] = useState<string | null>(null)
   const [cardMenuPos, setCardMenuPos] = useState<{ top: number; right: number } | null>(null)
-  // The menu is positioned against the button's viewport rect (the card clips
-  // its own overflow), so it cannot follow the page. Close it when the view
-  // moves instead of leaving it stranded over unrelated cards.
+  // The ⋯ button the open menu belongs to, so the panel can follow it.
+  const cardMenuBtnRef = useRef<HTMLElement | null>(null)
+  // The menu is positioned against the button's viewport rect, because the card
+  // clips its own overflow and an absolutely-placed panel would be cut off.
+  // It used to simply CLOSE on any scroll, so nudging the wheel while reaching
+  // for an item silently dismissed it. Follow the button instead, and close
+  // only once the button has actually left the viewport.
   useEffect(() => {
     if (!cardMenuId) return
-    const close = () => setCardMenuId(null)
-    window.addEventListener('scroll', close, true)
-    window.addEventListener('resize', close)
+    const reposition = () => {
+      const btn = cardMenuBtnRef.current
+      if (!btn) return
+      const r = btn.getBoundingClientRect()
+      if (r.bottom < 0 || r.top > window.innerHeight) { setCardMenuId(null); return }
+      const openUp = r.bottom + 280 > window.innerHeight
+      setCardMenuPos({
+        top: openUp ? Math.max(8, r.top - 280) : r.bottom + 6,
+        right: Math.max(8, window.innerWidth - r.right),
+      })
+    }
+    window.addEventListener('scroll', reposition, true)
+    window.addEventListener('resize', reposition)
     return () => {
-      window.removeEventListener('scroll', close, true)
-      window.removeEventListener('resize', close)
+      window.removeEventListener('scroll', reposition, true)
+      window.removeEventListener('resize', reposition)
     }
   }, [cardMenuId])
 
@@ -743,7 +883,14 @@ export function BingoDashAdmin() {
   // Boards this account actually manages: house boards for the owner, own
   // boards for subs. (For subs, `sections` also holds the owner's boards for
   // library labels — those must never appear as manageable boards.)
-  const myBoards = sections.filter(s => isMineRow(s.owner_id))
+  // Memoised deliberately, and before everything below: this is a fresh array
+  // on every render otherwise, which would defeat groupedLibraryAll's memo and
+  // buy nothing. Depends on the scalar myOwnerValue rather than isMineRow,
+  // which is itself re-created each render.
+  const myBoards = useMemo(
+    () => sections.filter(s => isMineRow(s.owner_id)),
+    [sections, isMineRow],
+  )
   // Which board is "live for players" from this account's point of view.
   const activeBoardPointer = isOwner ? (settings?.active_section_id ?? null) : myActiveBoard
   const scopedTasks = currentSectionId ? tasks.filter(t => t.section_id === currentSectionId) : []
@@ -758,8 +905,8 @@ export function BingoDashAdmin() {
   // therefore keyed by SLOT, not task id: removeTileAt deletes the clicked
   // slot alone, and a grid drag carries its slot so dragging one instance
   // never moves its twin.
-  const taskById = new Map(tasks.map(t => [t.id, t]))
-  const boardTasksForSection = (sectionId: string): PlacedCard[] =>
+  const taskById = useMemo(() => new Map(tasks.map(t => [t.id, t])), [tasks])
+  const boardTasksForSection = useCallback((sectionId: string): PlacedCard[] =>
     boardCards
       .filter(bc => bc.section_id === sectionId)
       .sort((a, b) => a.slot - b.slot)
@@ -768,14 +915,30 @@ export function BingoDashAdmin() {
         return t ? { ...t, sort_order: bc.slot, in_grid: true, placementId: bc.id } : null
       })
       .filter((t): t is PlacedCard => t !== null)
-      .sort((a, b) => a.sort_order - b.sort_order)
-  const gridTasks = currentSectionId ? boardTasksForSection(currentSectionId) : []
+      .sort((a, b) => a.sort_order - b.sort_order),
+    [boardCards, taskById])
+  const gridTasks = useMemo(
+    () => currentSectionId ? boardTasksForSection(currentSectionId) : [],
+    [currentSectionId, boardTasksForSection],
+  )
   // Contest bonuses won in duels, folded into each team's earned points.
   const duelBonuses = duelBonusByTeam(duels)
   // How many boards each card sits on (for the "On N boards" labels). Counts
   // distinct boards, not placements — a card reused in three slots of one board
   // is still on one board.
-  const boardCountByTask = (() => {
+  // One pass over scans instead of two filters per card in the render loop.
+  const scanStatsByTask = useMemo(() => {
+    const m = new Map<string, { scanned: number; completed: number }>()
+    for (const sc of scans) {
+      const e = m.get(sc.task_id) ?? { scanned: 0, completed: 0 }
+      e.scanned++
+      if (sc.completed) e.completed++
+      m.set(sc.task_id, e)
+    }
+    return m
+  }, [scans])
+
+  const boardCountByTask = useMemo(() => {
     const bySection = new Map<string, Set<string>>()
     for (const bc of boardCards) {
       const set = bySection.get(bc.task_id) ?? new Set<string>()
@@ -785,12 +948,12 @@ export function BingoDashAdmin() {
     const m = new Map<string, number>()
     for (const [taskId, set] of bySection) m.set(taskId, set.size)
     return m
-  })()
+  }, [boardCards])
 
   // Sparse 25-slot layout: each placed task sits at slot = sort_order (0-24).
   // Any legacy placement whose slot is out of range or colliding is placed in
   // the next available slot so existing data migrates gracefully.
-  const gridSlots: (PlacedCard | null)[] = (() => {
+  const gridSlots: (PlacedCard | null)[] = useMemo(() => {
     const slots: (PlacedCard | null)[] = Array(25).fill(null)
     const overflow: PlacedCard[] = []
     for (const t of gridTasks) {
@@ -803,10 +966,40 @@ export function BingoDashAdmin() {
       if (i !== -1) slots[i] = t
     }
     return slots
-  })()
+  }, [gridTasks])
   const allCategories = [...new Set(scopedTasks.map(t => t.category).filter(Boolean))].sort() as string[]
   // Timer + alarm + marshal password + photo toggle are per board (bingo_sections).
-  const currentBoard = sections.find(s => s.id === currentSectionId) ?? null
+  const currentBoard = useMemo(
+    () => sections.find(s => s.id === currentSectionId) ?? null,
+    [sections, currentSectionId],
+  )
+  // Where a new card or category created from the Library tab lands: the
+  // compartment being viewed, falling back to the active board in Complete
+  // Library (which is a catalogue, not a board).
+  // Persist the two filters. Written from an effect rather than at each of the
+  // many setter call sites, so no future caller can forget.
+  useEffect(() => {
+    try { localStorage.setItem('bingo-admin-lib-compartment', libraryCompartmentFilter) } catch { /* private mode */ }
+  }, [libraryCompartmentFilter])
+  useEffect(() => {
+    try { localStorage.setItem('bingo-admin-lib-category', libraryCategoryFilter) } catch { /* private mode */ }
+  }, [libraryCategoryFilter])
+
+  // A restored compartment can point at a board that has since been deleted,
+  // or one belonging to another tenant — which would leave the library stuck
+  // showing nothing with no way to tell why. Fall back to the catalogue.
+  useEffect(() => {
+    if (libraryCompartmentFilter === 'all') return
+    if (myBoards.length === 0) return              // still loading
+    if (!myBoards.some(b => b.id === libraryCompartmentFilter)) {
+      setLibraryCompartmentFilter('all')
+    }
+  }, [libraryCompartmentFilter, myBoards])
+
+  const libraryWriteSectionId = libraryCompartmentFilter !== 'all'
+    ? libraryCompartmentFilter
+    : currentSectionId
+  const libraryWriteBoardName = sections.find(s => s.id === libraryWriteSectionId)?.name ?? null
   // Where THIS account's players actually land. /bingo-dash resolves its board
   // from the single global bingo_settings pointer, which set_active_board only
   // moves for the owner — so it always serves the house board. Sub accounts must
@@ -922,7 +1115,7 @@ export function BingoDashAdmin() {
   // groups follow: subs see the main account's shared cards; the owner sees a
   // "Sub-account cards" group per sub account. Foreign cards are read-only —
   // placing one on a board creates an independent copy (copy-on-use).
-  const groupedLibraryAll = (() => {
+  const groupedLibraryAll = useMemo(() => {
     const byCategory = (list: BingoTask[]) => {
       const map = new Map<string, BingoTask[]>()
       const uncategorized: BingoTask[] = []
@@ -998,34 +1191,72 @@ export function BingoDashAdmin() {
       const keyOf = (t: BingoTask) =>
         `${t.title.trim().toLowerCase()}\u0000${(t.category ?? '').trim().toLowerCase()}`
       const flat: BingoTask[] = []
+      // Cards suppressed by the dedupe above, attributed to the card that was
+      // kept in their place. Without this the catalogue quietly showed one
+      // card where several exist and gave the user no way to tell. Keyed by
+      // the kept card's id so the render side needs no key logic of its own.
+      const hiddenByTaskId = new Map<string, number>()
+      const keptIdByKey = new Map<string, string>()
       for (const g of groups) {
         const mine: BingoTask[] = []
         for (const c of g.categories) {
           for (const t of c.tasks) {
-            if (claimed.has(keyOf(t))) continue
+            if (claimed.has(keyOf(t))) {
+              const keptId = keptIdByKey.get(keyOf(t))
+              if (keptId) hiddenByTaskId.set(keptId, (hiddenByTaskId.get(keptId) ?? 0) + 1)
+              continue
+            }
             mine.push(t)
           }
         }
         // Claim after the whole group, so duplicates inside one board survive.
-        for (const t of mine) claimed.add(keyOf(t))
+        for (const t of mine) {
+          claimed.add(keyOf(t))
+          if (!keptIdByKey.has(keyOf(t))) keptIdByKey.set(keyOf(t), t.id)
+        }
         flat.push(...mine)
       }
+      dupeHiddenRef.current = hiddenByTaskId
       if (flat.length === 0) return []
-      return [{
-        section: { id: LIBRARY_ALL_ID, name: 'Complete Library', foreign: false },
-        categories: byCategory(flat),
-        totalTasks: flat.length,
-      }]
+
+      // The owner writes everything, so a "mine vs theirs" split tells them
+      // nothing — they keep the single flat catalogue.
+      if (isOwner) {
+        return [{
+          section: { id: LIBRARY_ALL_ID, name: 'Complete Library', foreign: false },
+          categories: byCategory(flat),
+          totalTasks: flat.length,
+        }]
+      }
+
+      const own = flat.filter(t => isMineRow(t.owner_id))
+      const shared = flat.filter(t => !isMineRow(t.owner_id))
+      const out: typeof groups = []
+      if (own.length > 0) {
+        out.push({
+          section: { id: LIBRARY_OWN_ID, name: 'Own Library', foreign: false },
+          categories: byCategory(own),
+          totalTasks: own.length,
+        })
+      }
+      if (shared.length > 0) {
+        out.push({
+          section: { id: LIBRARY_ALL_ID, name: 'Main Library', foreign: true },
+          categories: byCategory(shared),
+          totalTasks: shared.length,
+        })
+      }
+      return out
     }
 
     return groups
-  })()
+  }, [tasks, myBoards, libraryCompartmentFilter, boardTasksForSection, isOwner, isMineRow, myOwnerValue, sections, accountEmails])
 
   // Every category present in the current library view, for the filter dropdown.
   // Declared-but-empty categories are included too: a category created via
   // "+ New Category" has no cards yet, and leaving it out made it look as
   // though the create had silently failed.
-  const libraryCategoryOptions = (() => {
+  const libraryCategoryOptions = useMemo(() => {
     const seen = new Map<string, string>()
     for (const g of groupedLibraryAll) for (const c of g.categories) if (!seen.has(c.key)) seen.set(c.key, c.label)
     const visibleSectionIds = new Set(
@@ -1038,7 +1269,7 @@ export function BingoDashAdmin() {
       if (!seen.has(c.name)) seen.set(c.name, c.name)
     }
     return [...seen.entries()].map(([key, label]) => ({ key, label })).sort((a, b) => a.label.localeCompare(b.label))
-  })()
+  }, [groupedLibraryAll, categories, libraryCompartmentFilter, myBoards])
 
   // True when the picked category exists but holds no cards yet — drives an
   // explanatory empty state instead of a blank library.
@@ -1048,7 +1279,7 @@ export function BingoDashAdmin() {
 
   // Category dropdown narrows every group to one category
   // (hunt challenge, physical challenge, …).
-  const groupedLibrary = (() => {
+  const groupedLibrary = useMemo(() => {
     const q = librarySearch.trim().toLowerCase()
     if (libraryCategoryFilter === 'all' && !q) return groupedLibraryAll
     const matches = (t: BingoTask) =>
@@ -1065,7 +1296,25 @@ export function BingoDashAdmin() {
         return { ...g, categories, totalTasks: categories.reduce((n, c) => n + c.tasks.length, 0) }
       })
       .filter(g => g.categories.length > 0)
-  })()
+  }, [groupedLibraryAll, libraryCategoryFilter, librarySearch])
+
+  useEffect(() => {
+    if (returnScrollDone.current) return
+    if (activeTab !== 'library' || loading || groupedLibrary.length === 0) return
+    let id: string | null = null
+    try { id = sessionStorage.getItem('bingo-admin-lib-return') } catch { /* private mode */ }
+    if (!id) { returnScrollDone.current = true; return }
+    // One shot: a later re-render must not yank the page back.
+    returnScrollDone.current = true
+    try { sessionStorage.removeItem('bingo-admin-lib-return') } catch { /* private mode */ }
+    // Scroll to the card by id rather than a saved pixel offset — the list
+    // length changes as cards are added, removed and filtered.
+    requestAnimationFrame(() => {
+      document.getElementById(`libcard-${id}`)
+        ?.scrollIntoView({ block: 'center', behavior: 'auto' })
+    })
+  }, [activeTab, loading, groupedLibrary])
+
 
   // How many cards the shared ("Complete Library") view covers, independent of
   // the current chip so the chip label never lies.
@@ -1073,7 +1322,7 @@ export function BingoDashAdmin() {
   // already claimed by an earlier board. Computed from the same board order the
   // grouping uses rather than read off the current view, so the chip stays
   // truthful while another compartment is selected.
-  const sharedLibraryCount = (() => {
+  const sharedLibraryCount = useMemo(() => {
     const key = (t: BingoTask) =>
       `${t.title.trim().toLowerCase()}\u0000${(t.category ?? '').trim().toLowerCase()}`
     const claimed = new Set<string>()
@@ -1100,7 +1349,7 @@ export function BingoDashAdmin() {
       }
     }
     return total
-  })()
+  }, [tasks, myBoards, isOwner, isMineRow, myOwnerValue, sections])
 
   // ── Data fetching ──────────────────────────────────────────────────────────
   // Two-stage, tenancy-scoped fetch (hub model):
@@ -1147,6 +1396,48 @@ export function BingoDashAdmin() {
         ? supabase.from('bingo_accounts').select('id, email').then(r => r.data ?? [])
         : Promise.resolve([] as { id: string; email: string | null }[]),
     ])
+    // Hero photo (photo_order 0) and the first instruction bullet of the first
+    // page — everything a card needs to be identifiable without opening it.
+    const loadedTaskIds = ((tasksRes.data ?? []) as BingoTask[]).map(t => t.id)
+    //
+    // The hero is the LOWEST photo_order, not necessarily order 0: photos are
+    // inserted with photo_order = current count, so deleting earlier ones
+    // leaves the survivor sitting at 1, 2, 3… Filtering on `= 0` silently
+    // dropped the hero for every card whose first photos had been removed.
+    // The same applies to instruction pages. So: fetch ordered, first wins.
+    const [photoRows, pageRows] = await Promise.all([
+      fetchSliceInChunks<{ task_id: string; photo_url: string; photo_order: number; position_x: number | null; position_y: number | null }>(
+        'bingo_task_photos', 'task_id', loadedTaskIds,
+        'task_id, photo_url, photo_order, position_x, position_y',
+      ),
+      fetchSliceInChunks<{ task_id: string; page_order: number; pointer_1: string | null; pointer_2: string | null }>(
+        'bingo_task_pages', 'task_id', loadedTaskIds,
+        'task_id, page_order, pointer_1, pointer_2',
+      ),
+    ])
+    const heroMap = new Map<string, { url: string; x: number | null; y: number | null; order: number }>()
+    for (const r of photoRows) {
+      if (!r.photo_url) continue
+      const seen = heroMap.get(r.task_id)
+      if (seen && seen.order <= r.photo_order) continue
+      heroMap.set(r.task_id, { url: r.photo_url, x: r.position_x, y: r.position_y, order: r.photo_order })
+    }
+    setHeroByTask(heroMap)
+
+    const bestPage = new Map<string, { order: number; line: string }>()
+    for (const r of pageRows) {
+      // pointer_1 is the headline instruction; fall back to the second if the
+      // first is blank, which happens on pages that lead with an example.
+      const line = (r.pointer_1 ?? '').trim() || (r.pointer_2 ?? '').trim()
+      if (!line) continue
+      const seen = bestPage.get(r.task_id)
+      if (seen && seen.order <= r.page_order) continue
+      bestPage.set(r.task_id, { order: r.page_order, line })
+    }
+    const blurbMap = new Map<string, string>()
+    for (const [taskId, v] of bestPage) blurbMap.set(taskId, v.line)
+    setBlurbByTask(blurbMap)
+
     const myTeamIds = teamsData.map(t => t.id)
     const [scansData, membersData, photoSubsData, duelsData] = await Promise.all([
       fetchInChunks<BingoScan>('bingo_scans', 'team_id', myTeamIds),
@@ -1245,7 +1536,7 @@ export function BingoDashAdmin() {
     const { data, error } = await supabase.from('bingo_categories')
       .insert({ section_id: sectionId, name, sort_order: maxOrder + 1 })
       .select().single()
-    if (error || !data) { alert('Failed to create category'); return null }
+    if (error || !data) { notify('Could not create the category.', 'error'); return null }
     setCategories(prev => [...prev, data])
     return data
   }
@@ -1270,7 +1561,7 @@ export function BingoDashAdmin() {
     const old = categories.find(c => c.id === id)
     if (!old || old.name === trimmed) return
     if (categories.some(c => c.section_id === sectionId && c.name === trimmed && c.id !== id)) {
-      alert(`Category "${trimmed}" already exists.`)
+      notify(`Category "${trimmed}" already exists.`, 'warn')
       return
     }
     // Update category name and cascade to all tasks in this section that reference it
@@ -1649,7 +1940,7 @@ export function BingoDashAdmin() {
       const copy = await copyTaskFull(task, { sectionId: currentSectionId })
       return copy.id
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Failed to copy card')
+      notify(err instanceof Error ? err.message : 'Could not copy the card.', 'error')
       return null
     }
   }
@@ -1668,7 +1959,7 @@ export function BingoDashAdmin() {
     const { data: created, error } = await supabase.from('bingo_board_cards')
       .insert({ section_id: currentSectionId, task_id: resolvedId, slot: target })
       .select().single()
-    if (error || !created) { alert('Failed to add card to board'); return }
+    if (error || !created) { notify('Could not add the card to the board.', 'error'); return }
     setBoardCards(prev => [...prev, created])
   }
 
@@ -1718,7 +2009,7 @@ export function BingoDashAdmin() {
     setTileTitle(task.title)
     setTileHex(task.hex_code)
     setTileCategory(task.category || '')
-    setTilePoints(task.points ?? 0)
+    setTilePoints(String(task.points ?? 0))
   }
 
   // The Move modal only edits title / category / points; type, colour and
@@ -1729,23 +2020,30 @@ export function BingoDashAdmin() {
     try {
       const updates: Partial<BingoTask> = {
         title: tileTitle.trim(),
-        category: tileCategory.trim(), points: tilePoints,
+        category: tileCategory.trim(),
+        points: roundPoints(Math.max(0, parseFloat(tilePoints) || 0)),
       }
       await supabase.from('bingo_tasks').update(updates).eq('id', editingTile.id)
       setTasks(prev => prev.map(t => t.id === editingTile.id ? { ...t, ...updates } : t))
       setEditingTile(null)
     } catch (err) {
-      alert('Failed to save: ' + (err instanceof Error ? err.message : 'Unknown error'))
+      notify('Could not save: ' + (err instanceof Error ? err.message : 'Unknown error'), 'error')
     } finally { setTileSaving(false) }
   }
 
   // Add a card from any section onto the current board's grid. Cards are
   // universal — this just creates a placement row, never a copy.
   const addCardFromLibrary = async (task: BingoTask) => {
-    if (!currentSectionId || gridTasks.length >= 25) return
+    // Every branch here used to return silently, so a click on a full board
+    // looked like it had worked.
+    if (!currentSectionId) { notify('Pick a board first, then add the card to it.', 'warn'); return }
     const firstEmpty = gridSlots.findIndex(s => s === null)
-    if (firstEmpty === -1) return
+    if (gridTasks.length >= 25 || firstEmpty === -1) {
+      notify(`${currentBoard?.name ?? 'This board'} is full — all 25 boxes are taken.`, 'warn')
+      return
+    }
     await insertIntoGrid(task.id, firstEmpty)
+    notify(`Added "${task.title}" to ${currentBoard?.name ?? 'the board'}.`)
   }
 
   const duplicateTask = async (task: BingoTask) => {
@@ -1754,7 +2052,7 @@ export function BingoDashAdmin() {
       // (clonedFrom null keeps it out of the "already copied" lookup).
       await copyTaskFull(task, { sectionId: task.section_id, title: `${task.title} (copy)`, clonedFrom: null })
     } catch {
-      alert('Failed to duplicate')
+      notify('Could not duplicate the card.', 'error')
     }
   }
 
@@ -1778,17 +2076,66 @@ export function BingoDashAdmin() {
   // nothing when the group belonged to another board.
   // Whole-number boards round on save. Doing it here rather than on the input
   // means a pasted value or a bulk edit cannot slip a decimal through.
-  const roundPoints = (n: number) =>
-    currentBoard?.decimal_points ? Math.round(n * 100) / 100 : Math.round(n)
+  const roundPoints = useCallback(
+    (n: number) => currentBoard?.decimal_points ? Math.round(n * 100) / 100 : Math.round(n),
+    [currentBoard],
+  )
 
-  const setBulkCategoryPoints = async (taskIds: string[], pointsRaw: number) => {
-    const points = roundPoints(pointsRaw)
-    if (taskIds.length === 0) return
-    const ids = new Set(taskIds)
-    setTasks(prev => prev.map(t => ids.has(t.id) ? { ...t, points } : t))
-    const { error } = await supabase.from('bingo_tasks').update({ points }).in('id', taskIds)
-    if (error) alert('Could not update points: ' + error.message)
-  }
+  // Bulk colour/points for a whole category, applied once on an explicit
+  // Apply rather than on every keystroke and drag of a colour picker — the old
+  // controls wrote to every card in the group on each onChange, with no count,
+  // no confirmation and no way back. Snapshots each card's previous value so
+  // the toast can offer a real undo.
+  const applyBulkToCategory = useCallback(async (
+    tasksInGroup: BingoTask[],
+    patch: { hex?: string; points?: number },
+  ) => {
+    const ids = tasksInGroup.map(t => t.id)
+    if (ids.length === 0) return
+    const next: { hex_code?: string; points?: number } = {}
+    if (patch.hex !== undefined) next.hex_code = patch.hex
+    if (patch.points !== undefined) next.points = roundPoints(patch.points)
+    if (Object.keys(next).length === 0) return
+
+    // Snapshot BEFORE the optimistic update, and only the fields being changed
+    // — restoring a field we never touched could clobber a concurrent edit.
+    const before = tasksInGroup.map(t => ({
+      id: t.id,
+      hex_code: t.hex_code,
+      points: t.points ?? 0,
+    }))
+
+    const idSet = new Set(ids)
+    setTasks(prev => prev.map(t => idSet.has(t.id) ? { ...t, ...next } : t))
+    const { error } = await supabase.from('bingo_tasks').update(next).in('id', ids)
+    if (error) { notify('Could not apply: ' + error.message, 'error'); return }
+
+    notify(`Updated ${ids.length} card${ids.length === 1 ? '' : 's'}.`, 'ok', {
+      label: 'Undo',
+      run: async () => {
+        // Cards in a group can have had different values, so restore by
+        // distinct previous value rather than one blanket update.
+        const buckets = new Map<string, { patch: { hex_code?: string; points?: number }; ids: string[] }>()
+        for (const b of before) {
+          const restore: { hex_code?: string; points?: number } = {}
+          if (patch.hex !== undefined) restore.hex_code = b.hex_code
+          if (patch.points !== undefined) restore.points = b.points
+          const key = JSON.stringify(restore)
+          const bucket = buckets.get(key) ?? { patch: restore, ids: [] }
+          bucket.ids.push(b.id)
+          buckets.set(key, bucket)
+        }
+        for (const bucket of buckets.values()) {
+          const bucketIds = new Set(bucket.ids)
+          setTasks(prev => prev.map(t => bucketIds.has(t.id) ? { ...t, ...bucket.patch } : t))
+          const { error: undoErr } = await supabase.from('bingo_tasks')
+            .update(bucket.patch).in('id', bucket.ids)
+          if (undoErr) { notify('Could not undo: ' + undoErr.message, 'error'); return }
+        }
+        notify(`Restored ${before.length} card${before.length === 1 ? '' : 's'}.`)
+      },
+    })
+  }, [roundPoints, notify])
 
   const setTaskPoints = async (taskId: string, pointsRaw: number) => {
     const points = roundPoints(pointsRaw)
@@ -1796,14 +2143,6 @@ export function BingoDashAdmin() {
     await supabase.from('bingo_tasks').update({ points }).eq('id', taskId)
   }
 
-
-  const setBulkCategoryColor = async (taskIds: string[], hex: string) => {
-    if (taskIds.length === 0) return
-    const ids = new Set(taskIds)
-    setTasks(prev => prev.map(t => ids.has(t.id) ? { ...t, hex_code: hex } : t))
-    const { error } = await supabase.from('bingo_tasks').update({ hex_code: hex }).in('id', taskIds)
-    if (error) alert('Could not update colour: ' + error.message)
-  }
 
   // ── Challenge actions ──────────────────────────────────────────────────────
   const createTask = async () => {
@@ -1830,7 +2169,7 @@ export function BingoDashAdmin() {
       setShowForm(false)
       await fetchAll()
     } catch (err) {
-      alert('Failed to create: ' + (err instanceof Error ? err.message : 'Unknown error'))
+      notify('Could not create: ' + (err instanceof Error ? err.message : 'Unknown error'), 'error')
     } finally { setFormSaving(false) }
   }
 
@@ -1838,12 +2177,16 @@ export function BingoDashAdmin() {
   // card editor, so name / category / points / type / instructions are all
   // filled in on one page. The editor discards the row if it's abandoned.
   const createBlankTaskAndOpen = async () => {
-    if (!currentSectionId) { alert('Select a board first, then add a challenge to it.'); return }
+    // Writes go to the compartment on screen, not the active board. Selecting
+    // a compartment chip is an explicit statement of where you are working;
+    // creating on a different board behind your back was indistinguishable
+    // from the card never being created.
+    if (!libraryWriteSectionId) { notify('Pick a board first, then add a challenge to it.', 'warn'); return }
     setFormSaving(true)
     try {
       const nextOrder = Math.max(25, scopedTasks.length + 25)
       const { data, error } = await supabase.from('bingo_tasks').insert({
-        section_id: currentSectionId,
+        section_id: libraryWriteSectionId,
         owner_id: myOwnerValue,
         title: 'Untitled challenge', color: 'Blue', hex_code: '#3B82F6',
         category: '', sort_order: nextOrder, points: 0,
@@ -1852,14 +2195,41 @@ export function BingoDashAdmin() {
       if (error || !data) throw error ?? new Error('No row returned')
       navigate(`/bingo-dash/admin/task/${data.id}?from=library&new=1`)
     } catch (err) {
-      alert('Failed to create: ' + (err instanceof Error ? err.message : 'Unknown error'))
+      notify('Failed to create: ' + (err instanceof Error ? err.message : 'Unknown error'), 'error')
       setFormSaving(false)
     }
   }
 
   const deleteTask = async (id: string, title: string) => {
     if (!confirm(`Delete "${title}"? All scans for this challenge will also be removed.`)) return
-    await supabase.from('bingo_tasks').delete().eq('id', id)
+    // Bundle membership first. bingo_bundle_items references bingo_tasks from
+    // BOTH bundle_id and activity_id, and the live constraint does not cascade
+    // (the schema file says it should — the database disagrees), so deleting
+    // either a bundle tile or one of its activities was rejected outright.
+    // Clearing the rows here is safe either way: they only record the
+    // grouping, never the cards themselves.
+    const { error: bundleErr } = await supabase.from('bingo_bundle_items')
+      .delete().or(`bundle_id.eq.${id},activity_id.eq.${id}`)
+    if (bundleErr) {
+      notify(`Could not unlink "${title}" from its bundle: ${bundleErr.message}`, 'error')
+      return
+    }
+    // .select() so we can tell a real delete from a silent no-op. Row-level
+    // security rejects a forbidden DELETE by matching ZERO rows rather than
+    // raising — so without this the card simply reappeared after the refetch
+    // with nothing said, which is indistinguishable from a broken button.
+    const { data, error } = await supabase.from('bingo_tasks').delete().eq('id', id).select('id')
+    if (error) { notify(`Could not delete "${title}": ${error.message}`, 'error'); return }
+    if (!data || data.length === 0) {
+      notify(
+        `"${title}" was not deleted — your account does not have permission to remove this card. ` +
+        'Cards owned by the main account can only be deleted by it.',
+        'error',
+      )
+      await fetchAll()
+      return
+    }
+    notify(`Deleted "${title}".`)
     await fetchAll()
   }
 
@@ -2302,9 +2672,10 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
   }
 
 
-  // Full card actions behind a three-dot menu. Every library card gets it —
-  // this account has write access to the shared library too — so Edit, QR,
-  // Copy, Move and Delete are always one click away.
+  // Full card actions behind a three-dot menu: Edit, QR, Copy, Move, Delete.
+  // Callers must only render this for cards the tenant can write — see the
+  // Complete Library call site, where a sub-account is shown Add-to-board
+  // alone for the owner's house cards.
   const renderCardMenu = (task: BingoTask) => (
     <div className="flex-shrink-0">
       <button
@@ -2312,6 +2683,7 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
           if (cardMenuId === task.id) { setCardMenuId(null); return }
           // The card clips its own overflow, so the panel is positioned
           // fixed against the button's viewport rect instead of absolutely.
+          cardMenuBtnRef.current = e.currentTarget as HTMLElement
           const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
           const openUp = r.bottom + 280 > window.innerHeight
           setCardMenuPos({
@@ -2348,7 +2720,7 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                            outlineOffset: 1 }} />
               ))}
             </div>
-            <button role="menuitem" onClick={() => { setCardMenuId(null); navigate(`/bingo-dash/admin/task/${task.id}?from=${activeTab}`) }}
+            <button role="menuitem" onClick={() => { setCardMenuId(null); openCardForEdit(task.id, activeTab) }}
               className="text-left px-2 py-1.5 rounded-lg text-xs font-bold a-text hover:a-surface-2">✎ Edit</button>
             <button role="menuitem" onClick={() => { setCardMenuId(null); setQrTask(task) }}
               className="text-left px-2 py-1.5 rounded-lg text-xs font-bold a-text hover:a-surface-2">▦ QR code</button>
@@ -2359,7 +2731,7 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
             <button role="menuitem" onClick={() => { setCardMenuId(null); duplicateTask(task) }}
               className="text-left px-2 py-1.5 rounded-lg text-xs font-bold a-text hover:a-surface-2">⎘ Duplicate</button>
             <button role="menuitem" onClick={() => { setCardMenuId(null); openTileEdit(task) }}
-              className="text-left px-2 py-1.5 rounded-lg text-xs font-bold a-text hover:a-surface-2">↦ Move</button>
+              className="text-left px-2 py-1.5 rounded-lg text-xs font-bold a-text hover:a-surface-2">✐ Quick edit</button>
             <button role="menuitem" onClick={() => { setCardMenuId(null); deleteTask(task.id, task.title) }}
               className="text-left px-2 py-1.5 rounded-lg text-xs font-bold text-red-400 hover:a-surface-2">🗑 Delete</button>
           </div>
@@ -3015,15 +3387,21 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
             <h2 className="text-xl font-bold a-text">Card Library</h2>
             <div className="flex flex-wrap items-center gap-2">
               <button onClick={() => { setShowLibNewCategory(!showLibNewCategory); setLibNewCategoryName('') }}
-                disabled={!currentSectionId}
-                title={currentSectionId ? 'Create a category in the current compartment' : 'Select a compartment first'}
+                disabled={!libraryWriteSectionId}
+                title={libraryWriteBoardName ? `Create a category in ${libraryWriteBoardName}` : 'Select a compartment first'}
                 className="px-4 py-2 border a-border a-surface-2 a-text rounded-lg hover:a-surface text-sm font-medium transition-colors disabled:opacity-40">
                 + New Category
               </button>
-              <button onClick={createBlankTaskAndOpen} disabled={formSaving}
+              <button onClick={createBlankTaskAndOpen} disabled={formSaving || !libraryWriteSectionId}
+                title={libraryWriteBoardName ? `Creates the card in ${libraryWriteBoardName}` : 'Pick a board first'}
                 className="px-4 py-2 bg-teal-600 a-text rounded-lg hover:bg-violet-700 text-sm font-medium transition-colors disabled:opacity-50">
                 {formSaving ? 'Creating…' : '+ Add Challenge'}
               </button>
+              {libraryWriteBoardName && (
+                <span className="text-[11px] a-text-3 font-bold w-full text-right sm:w-auto">
+                  New cards go to <span className="a-text-2">{libraryWriteBoardName}</span>
+                </span>
+              )}
             </div>
           </div>
 
@@ -3031,7 +3409,7 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
           {showLibNewCategory && (
             <div className="a-surface rounded-xl border a-border p-4 mb-4">
               <p className="text-xs a-text-2 mb-2">
-                New category in <span className="font-bold a-text-3">{sections.find(s => s.id === currentSectionId)?.name ?? '—'}</span>
+                New category in <span className="font-bold a-text-3">{libraryWriteBoardName ?? '—'}</span>
               </p>
               <div className="flex gap-2">
                 <input
@@ -3039,10 +3417,9 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                   value={libNewCategoryName}
                   onChange={e => setLibNewCategoryName(e.target.value)}
                   onKeyDown={async e => {
-                    if (e.key === 'Enter' && currentSectionId && libNewCategoryName.trim()) {
-                      const created = await createCategoryByName(currentSectionId, libNewCategoryName)
+                    if (e.key === 'Enter' && libraryWriteSectionId && libNewCategoryName.trim()) {
+                      const created = await createCategoryByName(libraryWriteSectionId, libNewCategoryName)
                       if (created) {
-                        setLibraryCompartmentFilter(currentSectionId)
                         setLibraryCategoryFilter(created.name)
                         setLibNewCategoryName(''); setShowLibNewCategory(false)
                       }
@@ -3055,15 +3432,14 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                 />
                 <button
                   onClick={async () => {
-                    if (!currentSectionId) return
-                    const created = await createCategoryByName(currentSectionId, libNewCategoryName)
+                    if (!libraryWriteSectionId) return
+                    const created = await createCategoryByName(libraryWriteSectionId, libNewCategoryName)
                     if (created) {
-                      setLibraryCompartmentFilter(currentSectionId)
                       setLibraryCategoryFilter(created.name)
                       setLibNewCategoryName(''); setShowLibNewCategory(false)
                     }
                   }}
-                  disabled={!libNewCategoryName.trim() || !currentSectionId}
+                  disabled={!libNewCategoryName.trim() || !libraryWriteSectionId}
                   className="px-4 py-2 bg-teal-600 a-text rounded-lg text-sm font-bold hover:bg-violet-700 disabled:opacity-40"
                 >
                   Create
@@ -3119,30 +3495,66 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
             </div>
           </div>
 
+          {/* The two modes list genuinely different things and nothing said so:
+              Complete Library is a catalogue of every card you own, while a
+              compartment lists only the cards PLACED on that board — so a card
+              you just created is invisible under its own chip until you place
+              it. */}
+          <p className="a-text-3 text-[11px] font-bold mb-3">
+            {libraryCompartmentFilter === 'all'
+              ? 'Every card you own, plus cards shared with you. Placing one copies it onto the current board.'
+              : `Cards placed on ${myBoards.find(b => b.id === libraryCompartmentFilter)?.name ?? 'this board'} — ${boardTasksForSection(libraryCompartmentFilter).length} of 25. Cards you own but have not placed here live in Complete Library.`}
+          </p>
+
           {/* Compartment > Category > Cards hierarchy */}
           {tasks.length === 0 ? (
             <p className="a-text-2 text-center py-8 a-surface rounded-xl border a-border">
               No challenges yet. Click "Add Challenge" to create one.
             </p>
           ) : groupedLibrary.length === 0 ? (
-            <p className="a-text-2 text-center py-8 a-surface rounded-xl border a-border">
-              {librarySearch.trim()
-                ? `No cards match “${librarySearch.trim()}”.`
-                : libraryFilterIsEmptyCategory
-                ? `“${libraryCategoryFilter}” has no cards yet — create a challenge and pick this category, or drag existing cards into it.`
-                : libraryCategoryFilter !== 'all'
-                ? 'No cards in this category.'
-                : libraryCompartmentFilter === 'all'
-                  ? 'No shared library cards yet — pick a compartment above to see its own cards.'
-                  : 'No cards in this compartment.'}
-            </p>
+            /* One empty state with an explicit precedence, replacing three
+               overlapping branches that could contradict each other. Each
+               dead end offers the way out of itself. */
+            <div className="a-text-2 text-center py-8 a-surface rounded-xl border a-border px-4">
+              {librarySearch.trim() ? (
+                <>
+                  <p>No cards match “{librarySearch.trim()}”.</p>
+                  <button onClick={() => setLibrarySearch('')}
+                    className="mt-2 px-3 py-1.5 rounded-lg border a-border a-surface-2 text-xs font-bold hover:a-surface">
+                    Clear search
+                  </button>
+                </>
+              ) : libraryFilterIsEmptyCategory ? (
+                <p>“{libraryCategoryFilter}” has no cards yet — create a challenge and pick this category.</p>
+              ) : libraryCategoryFilter !== 'all' ? (
+                <>
+                  <p>No cards in “{libraryCategoryFilter}” here.</p>
+                  <button onClick={() => setLibraryCategoryFilter('all')}
+                    className="mt-2 px-3 py-1.5 rounded-lg border a-border a-surface-2 text-xs font-bold hover:a-surface">
+                    Show all categories
+                  </button>
+                </>
+              ) : libraryCompartmentFilter === 'all' ? (
+                <p>No cards yet. Use “+ Add Challenge” to create one.</p>
+              ) : (
+                <>
+                  <p>Nothing placed on this board yet.</p>
+                  <button onClick={() => setLibraryCompartmentFilter('all')}
+                    className="mt-2 px-3 py-1.5 rounded-lg border a-border a-surface-2 text-xs font-bold hover:a-surface">
+                    Cards you own but haven’t placed here are in Complete Library →
+                  </button>
+                </>
+              )}
+            </div>
           ) : (
             <div className="flex flex-col gap-10">
               {groupedLibrary.map(({ section, categories: categoryGroups, totalTasks }) => (
                 <div key={section.id}>
-                  {/* Compartment header — omitted for the flat Complete
-                      Library group, which has no single board behind it. */}
-                  {section.id !== LIBRARY_ALL_ID && (
+                  {/* Compartment header — omitted only for the single flat
+                      Complete Library group, which has no board behind it and
+                      no sibling to be told apart from. The Own/Main split does
+                      need headings. */}
+                  {!(section.id === LIBRARY_ALL_ID && groupedLibrary.length === 1) && (
                   <div className="flex items-center gap-3 mb-3">
                     <div className="flex items-center gap-2">
                       <h2 className="text-base font-black a-text uppercase tracking-wider">{section.name}</h2>
@@ -3233,7 +3645,17 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                   {/* Categories within this compartment */}
                   <div className="flex flex-col gap-8">
                     {categoryGroups.length === 0 ? (
-                      <p className="a-text-2 text-sm pl-4">No cards in this compartment.</p>
+                      /* Reachable: with no search or category filter the
+                         unfiltered groups are returned as-is, so an empty
+                         board still produces a group with no categories.
+                         Same wording and same way out as the outer state. */
+                      <div className="pl-4">
+                        <p className="a-text-2 text-sm">Nothing placed on this board yet.</p>
+                        <button onClick={() => setLibraryCompartmentFilter('all')}
+                          className="mt-2 px-3 py-1.5 rounded-lg border a-border a-surface-2 text-xs font-bold hover:a-surface">
+                          Cards you own but haven’t placed here are in Complete Library →
+                        </button>
+                      </div>
                     ) : (
                       categoryGroups.map(group => (
                         <div key={group.key}>
@@ -3262,31 +3684,7 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                             <h3 className="text-xs font-black a-text-2 uppercase tracking-widest">{group.label}</h3>
                             <span className="text-xs a-text-2 font-medium">{group.tasks.length}</span>
                             <div className="flex-1 h-px a-surface-2" />
-                              <>
-                                <div className="flex items-center gap-1.5 flex-shrink-0 flex-wrap">
-                                  <span className="text-xs a-text-2">color for all:</span>
-                                  <input type="color" defaultValue={group.tasks[0]?.hex_code ?? '#3B82F6'}
-                                    key={section.id + group.key + '-color'}
-                                    className="w-7 h-7 rounded cursor-pointer border a-border"
-                                    onChange={e => setBulkCategoryColor(group.tasks.map(t => t.id), e.target.value)}
-                                    title={`Set color for all ${group.label} tasks`} />
-                                  <input type="text" defaultValue={group.tasks[0]?.hex_code ?? '#3B82F6'}
-                                    key={section.id + group.key + '-color-hex'}
-                                    className="w-20 px-1.5 py-0.5 text-xs border a-border a-surface-2 a-text rounded font-mono focus:outline-none focus:ring-1 focus:ring-teal-500"
-                                    onBlur={e => { const v = e.target.value.trim(); if (/^#[0-9a-fA-F]{6}$/.test(v)) setBulkCategoryColor(group.tasks.map(t => t.id), v) }}
-                                    onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
-                                    title={`Type an exact hex code for all ${group.label} tasks`} />
-                                </div>
-                                <div className="flex items-center gap-1.5 flex-shrink-0">
-                                  <span className="text-xs a-text-2">pts for all:</span>
-                                  <input type="number" min={0} defaultValue={group.tasks[0]?.points ?? 0}
-                                    key={section.id + group.key + '-pts'}
-                                    className="w-14 px-1.5 py-0.5 text-xs border a-border a-surface-2 a-text rounded text-center font-bold focus:outline-none focus:ring-1 focus:ring-teal-500"
-                                    onBlur={e => setBulkCategoryPoints(group.tasks.map(t => t.id), Math.max(0, parseFloat(e.target.value) || 0))}
-                                    onKeyDown={e => { if (e.key === 'Enter') setBulkCategoryPoints(group.tasks.map(t => t.id), Math.max(0, parseFloat((e.target as HTMLInputElement).value) || 0)) }}
-                                    title={`Set points for all ${group.label} tasks`} />
-                                </div>
-                              </>
+                              <BulkApplyPanel group={group} onApply={applyBulkToCategory} />
                           </div>
 
                           {/* Cards grid */}
@@ -3297,7 +3695,7 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                             {group.tasks.map(task => {
                               const ink = CARD_INK
                               return (
-                              <div key={task.id} className="rounded-2xl overflow-hidden flex flex-col transition-shadow"
+                              <div key={task.id} id={`libcard-${task.id}`} className="rounded-2xl overflow-hidden flex flex-col transition-shadow"
                                 style={{
                                   // Neutral card, colour as an accent. A solid
                                   // hex block fought the text for attention and
@@ -3310,10 +3708,58 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                                     animation: 'card-led 2.6s cubic-bezier(.22,1,.36,1) infinite',
                                   } : {}),
                                 }}>
+                                {/* A title alone rarely says what the game IS.
+                                    The hero photo is the card's own first
+                                    image; cards without one fall back to the
+                                    category icon players already see on the
+                                    board, so nothing ever renders blank. */}
+                                {(() => {
+                                  // An AI Team Building card's art is a fixed
+                                  // asset in public/aitb, not an uploaded
+                                  // photo, so it never appears in
+                                  // bingo_task_photos and fell through to the
+                                  // icon. Prefer an uploaded hero when there
+                                  // is one; otherwise fall back to the
+                                  // activity's own image.
+                                  const uploaded = heroByTask.get(task.id)
+                                  const aitbUrl = uploaded ? null : aitbHeroUrlByName(task.title)
+                                  const hero = uploaded ?? (aitbUrl ? { url: aitbUrl, x: null, y: null } : null)
+                                  if (hero) {
+                                    return (
+                                      <div className="relative w-full overflow-hidden" style={{ aspectRatio: '16 / 9', background: task.hex_code + '22' }}>
+                                        <img
+                                          src={hero.url}
+                                          alt=""
+                                          loading="lazy"
+                                          decoding="async"
+                                          className="w-full h-full object-cover"
+                                          // Respects the focal point set by dragging the hero photo
+                                          // in the card editor, so a crop never cuts off the subject.
+                                          style={{ objectPosition: `${hero.x ?? 50}% ${hero.y ?? 50}%` }}
+                                        />
+                                      </div>
+                                    )
+                                  }
+                                  return (
+                                    <div className="w-full flex items-center justify-center"
+                                      style={{ aspectRatio: '16 / 9', background: task.hex_code + '1f' }}>
+                                      <CategoryIcon category={task.category ?? ''} className="w-10 h-10 opacity-50" />
+                                    </div>
+                                  )
+                                })()}
                                 <div style={{ height: 5, background: task.hex_code }} />
                                 <div className="px-4 pt-4 pb-3 flex-1">
                                   <p className="text-xs font-bold uppercase tracking-widest mb-1" style={{ color: ink.mid }}>{task.color}</p>
                                   <h3 className="font-black text-lg leading-tight" style={{ color: ink.strong }}>{task.title}</h3>
+                                  {/* Layer 2: the card's opening instruction —
+                                      what a player is actually asked to DO,
+                                      which a photo cannot convey. */}
+                                  {blurbByTask.get(task.id) && (
+                                    <p className="mt-1 text-xs leading-snug line-clamp-2" style={{ color: ink.faint }}
+                                      title={blurbByTask.get(task.id)}>
+                                      {blurbByTask.get(task.id)}
+                                    </p>
+                                  )}
                                   {section.foreign && !isOwner ? (
                                     task.category && (
                                       <p className="mt-1.5 text-xs" style={{ color: ink.faint }}>📂 {task.category}</p>
@@ -3341,8 +3787,8 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                                   )}
                                   <div className="flex items-center gap-2 mt-2 flex-wrap">
                                     <p className="text-xs" style={{ color: ink.faint }}>
-                                      {scans.filter(s => s.task_id === task.id && s.completed).length} completed ·{' '}
-                                      {scans.filter(s => s.task_id === task.id).length} scanned
+                                      {scanStatsByTask.get(task.id)?.completed ?? 0} completed ·{' '}
+                                      {scanStatsByTask.get(task.id)?.scanned ?? 0} scanned
                                     </p>
                                     {section.foreign && !isOwner ? (
                                       (task.points ?? 0) > 0 && (
@@ -3353,7 +3799,7 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                                         <input
                                           type="number" min={0}
                                           defaultValue={task.points ?? 0}
-                                          key={task.id + '-pts'}
+                                          key={task.id + '-pts-' + (task.points ?? 0)}
                                           className="w-10 bg-transparent a-text text-[10px] font-black text-center focus:outline-none"
                                           onBlur={e => setTaskPoints(task.id, Math.max(0, parseFloat(e.target.value) || 0))}
                                           onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
@@ -3367,6 +3813,17 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                                     {(() => {
                                       const n = boardCountByTask.get(task.id) ?? 0
                                       return n > 0 ? `✓ On ${n} board${n > 1 ? 's' : ''}` : 'Not on any board'
+                                    })()}
+                                    {/* Complete Library collapses same-title
+                                        cards across boards. Saying so beats a
+                                        catalogue that silently under-reports. */}
+                                    {(() => {
+                                      const hidden = dupeHiddenRef.current.get(task.id) ?? 0
+                                      return hidden > 0 ? (
+                                        <span className="a-text-3" title="Same title and category on another board — shown once here">
+                                          {' '}· +{hidden} similar
+                                        </span>
+                                      ) : null
                                     })()}
                                   </p>
                                   {(!section.foreign || isOwner) && (
@@ -3402,7 +3859,7 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                                             : `${c.total} puzzle${c.total === 1 ? '' : 's'}${missing > 0 ? ` · ${missing} missing an image` : ' · all have images'}`}
                                         </p>
                                         <button
-                                          onClick={() => navigate(`/bingo-dash/admin/task/${task.id}?from=${activeTab}`)}
+                                          onClick={() => openCardForEdit(task.id, activeTab)}
                                           className="mt-1.5 w-full py-1.5 rounded-lg text-[11px] font-bold a-chip-btn transition-colors"
                                         >
                                           Edit puzzles →
@@ -3552,14 +4009,27 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                                 {libraryCompartmentFilter === 'all' ? (
                                   <div className="px-3 pb-3 flex items-start gap-1.5">
                                     <button onClick={() => addCardFromLibrary(task)}
-                                      disabled={gridTasks.length >= 25 && isMineRow(task.owner_id)}
+                                      disabled={!currentSectionId || gridTasks.length >= 25}
                                       className="flex-1 px-3 py-1.5 a-chip-btn rounded-lg text-xs font-bold transition-colors disabled:opacity-40"
-                                      title={isMineRow(task.owner_id)
-                                        ? 'Place this card on the current board'
-                                        : 'Copies this card into your board — the original stays untouched'}>
+                                      title={!currentSectionId
+                                        ? 'Pick a board first'
+                                        : gridTasks.length >= 25
+                                          ? `${currentBoard?.name ?? 'This board'} is full (25/25)`
+                                          : isMineRow(task.owner_id)
+                                            ? 'Place this card on the current board'
+                                            : 'Copies this card into your board — the original stays untouched'}>
                                       + Add to board
                                     </button>
-                                    {renderCardMenu(task)}
+                                    {/* Only for cards this tenant can actually
+                                        write. A sub-account browsing the shared
+                                        library sees house cards (owner_id null)
+                                        it has no write access to — RLS rejects
+                                        every action in this menu for those, so
+                                        offering Edit/Delete/Move just invites a
+                                        failure. They take a copy with "Add to
+                                        board" and edit that instead, leaving the
+                                        owner's original untouched. */}
+                                    {(isOwner || isMineRow(task.owner_id)) && renderCardMenu(task)}
                                   </div>
                                 ) : (
                                 <div className="px-3 pb-3 flex flex-wrap gap-1.5">
@@ -3585,7 +4055,7 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                                         : '○ Light'}
                                     </button>
                                   )}
-                                  <button onClick={() => navigate(`/bingo-dash/admin/task/${task.id}?from=library`)}
+                                  <button onClick={() => openCardForEdit(task.id, 'library')}
                                     className="px-3 py-1.5 a-chip-btn rounded-lg text-xs font-bold transition-colors">Edit</button>
                                   <button onClick={() => setQrTask(task)}
                                     className="px-3 py-1.5 a-chip-btn rounded-lg text-xs font-bold transition-colors">QR</button>
@@ -3598,7 +4068,7 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                                     title="Duplicate this card">⎘ Copy</button>
                                   <button onClick={() => openTileEdit(task)}
                                     className="px-3 py-1.5 a-chip-btn rounded-lg text-xs font-bold transition-colors"
-                                    title="Move to another section">Move</button>
+                                    title="Quick edit — title, category and points">Quick edit</button>
                                   <button onClick={() => deleteTask(task.id, task.title)}
                                     className="px-3 py-1.5 a-chip-danger transition-colors">Delete</button>
                                   {/* No ⋯ menu here: every one of its items is
@@ -4216,13 +4686,12 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                   editingCategoryId={editingCategoryId}
                   setEditingCategoryId={setEditingCategoryId}
                   categoryNamesFor={categoryNamesFor}
-                  scans={scans}
+                  scanStatsByTask={scanStatsByTask}
                   copiedId={copiedId}
                   boardCountByTask={boardCountByTask}
                   navigate={navigate}
                   saveCategoryInline={saveCategoryInline}
-                  setBulkCategoryColor={setBulkCategoryColor}
-                  setBulkCategoryPoints={setBulkCategoryPoints}
+                  applyBulkToCategory={applyBulkToCategory}
                   setTaskPoints={setTaskPoints}
                   renameCategoryByLabel={renameCategoryByLabel}
                   setQrTask={setQrTask}
@@ -4264,13 +4733,12 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                             editingCategoryId={editingCategoryId}
                             setEditingCategoryId={setEditingCategoryId}
                             categoryNamesFor={categoryNamesFor}
-                            scans={scans}
+                            scanStatsByTask={scanStatsByTask}
                             copiedId={copiedId}
                             boardCountByTask={boardCountByTask}
                             navigate={navigate}
                             saveCategoryInline={saveCategoryInline}
-                            setBulkCategoryColor={setBulkCategoryColor}
-                            setBulkCategoryPoints={setBulkCategoryPoints}
+                            applyBulkToCategory={applyBulkToCategory}
                             setTaskPoints={setTaskPoints}
                             renameCategoryByLabel={renameCategoryByLabel}
                             setQrTask={setQrTask}
@@ -5058,7 +5526,7 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                 <div className="w-24">
                   <label className="block text-sm font-medium a-text-3 mb-1">Points</label>
                   <input type="number" step="0.1" value={tilePoints} min={0}
-                    onChange={e => setTilePoints(Math.max(0, parseFloat(e.target.value) || 0))}
+                    onChange={e => setTilePoints(e.target.value)}
                     className="w-full px-3 py-2 rounded-lg border a-border focus:outline-none focus:ring-2 focus:ring-teal-500 text-center font-bold" />
                 </div>
               </div>
@@ -5741,6 +6209,31 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
         )
       })()}
       </div>
+
+      {toast && (
+        <div
+          role="status"
+          aria-live="polite"
+          onClick={() => setToast(null)}
+          className="fixed bottom-5 left-1/2 -translate-x-1/2 z-[80] px-4 py-2.5 rounded-xl text-sm font-bold shadow-lg cursor-pointer max-w-[90vw] flex items-center gap-3"
+          style={{
+            background: toast.tone === 'error' ? '#7f1d1d' : toast.tone === 'warn' ? '#78350f' : '#065f46',
+            color: '#fff',
+            border: '1px solid rgba(255,255,255,0.18)',
+          }}
+        >
+          <span>{toast.msg}</span>
+          {toast.action && (
+            <button
+              onClick={async (e) => { e.stopPropagation(); const act = toast.action!; setToast(null); await act.run() }}
+              className="px-2.5 py-1 rounded-lg text-xs font-black uppercase tracking-wider flex-shrink-0"
+              style={{ background: 'rgba(255,255,255,0.2)', color: '#fff' }}
+            >
+              {toast.action.label}
+            </button>
+          )}
+        </div>
+      )}
     </div>
   )
 }

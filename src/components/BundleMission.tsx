@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { supabase } from '../lib/supabase'
-import { AITB_POINTS, aitbSpeedBonus, aitbToolUrl, aitbToolCaption, type AitbActivity } from '../lib/aitbActivities'
+import { AITB_POINTS, aitbSpeedBonus, aitbToolUrl, aitbToolCaption, type AitbActivity, aitbHeroUrlById } from '../lib/aitbActivities'
 import { AitbMissionModule } from './AitbMissionModule'
 import { BonusBar } from './AitbBonusBar'
 
@@ -121,7 +121,7 @@ export function BundleMission({ activity, progress, teamId, bundleId, onBack, on
         {/* Scrollable region — everything except the pinned action. */}
         <div className="flex-1 overflow-y-auto overscroll-contain">
           <div className="relative">
-            <img src={`/aitb/hero${activity.id}.jpg`} alt="" className="w-full aspect-video object-cover" />
+            <img src={aitbHeroUrlById(activity.id) ?? ''} alt="" className="w-full aspect-video object-cover" />
             <div className="absolute inset-0 bg-gradient-to-t from-gray-950 via-gray-950/40 to-transparent" />
 
             <button onClick={onBack}

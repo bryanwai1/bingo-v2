@@ -150,6 +150,38 @@ export function aitbActivity(id: number) {
 }
 
 /** Match an imported bingo card to its activity by title. */
+/**
+ * Hero image in `public/aitb` for each activity, by id.
+ *
+ * Listed explicitly rather than derived from the name: `nerth-prompt-cups.jpg`
+ * is misspelled on disk, so slugifying "Nerf Prompt Cups" would silently 404 —
+ * and an image that quietly fails is worse than one that was never offered.
+ */
+const AITB_HERO_FILE: Readonly<Record<number, string>> = {
+  1: 'nerth-prompt-cups.jpg',
+  2: 'retro-game-speed-build.jpg',
+  3: 'rubber-band-castle.jpg',
+  4: 'resort-tree-app-sprint.jpg',
+  5: 'roulette-jingle-dance-off.jpg',
+  6: 'random-card-cinematic.jpg',
+  7: 'ping-pong-alphabet-pitch.jpg',
+  8: 'speed-edit-showdown.jpg',
+  9: 'found-object-animals.jpg',
+  10: 'resort-character-journey.jpg',
+}
+
+/** The hero image for an activity, or null if it has none. */
+export function aitbHeroUrlById(id: number): string | null {
+  const file = AITB_HERO_FILE[id]
+  return file ? `/aitb/${file}` : null
+}
+
+/** The hero image for a card whose title matches an AI Team Building activity. */
+export function aitbHeroUrlByName(name: string): string | null {
+  const a = aitbByName(name)
+  return a ? aitbHeroUrlById(a.id) : null
+}
+
 export function aitbByName(name: string) {
   const n = name.trim().toLowerCase()
   return AITB_ACTIVITIES.find(a => a.name.toLowerCase() === n)

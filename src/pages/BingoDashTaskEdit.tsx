@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useBingoTaskPages } from '../hooks/useBingoTaskPages'
@@ -41,16 +41,63 @@ export function BingoDashTaskEdit() {
   // so the editor opens ready to name it and discards it if left untouched.
   const isNew = searchParams.get('new') === '1'
   const [task, setTask] = useState<BingoTask | null>(null)
+  // ── Draft editing ──────────────────────────────────────────────────────────
+  // Every field on the card used to write to the database the moment it
+  // changed, so there was no way to try something and back out, and no signal
+  // that anything had been saved at all. Edits now accumulate here and are
+  // committed by one explicit Save.
+  //
+  // Only the card's OWN columns are buffered. Photos, instruction pages, links
+  // and draw options are separate records with their own add/remove controls
+  // (and, for photos, real uploads), so they still apply immediately.
+  const [pending, setPending] = useState<Partial<BingoTask>>({})
+  const [saving, setSaving] = useState(false)
+  // Whether anything has been committed yet. A new card that has been saved
+  // once is real content and must never be deleted by a later discard.
+  const [savedOnce, setSavedOnce] = useState(false)
+  const isDirty = Object.keys(pending).length > 0
+  const isDirtyRef = useRef(false)
+  isDirtyRef.current = isDirty
+
+  /** Record a change locally; it reaches the database on Save. */
+  const stage = useCallback((patch: Partial<BingoTask>) => {
+    setTask(prev => (prev ? { ...prev, ...patch } : prev))
+    setPending(prev => ({ ...prev, ...patch }))
+  }, [])
+
+  const [saveError, setSaveError] = useState('')
+  const saveNow = useCallback(async (): Promise<boolean> => {
+    if (!task || Object.keys(pending).length === 0) return true
+    setSaving(true)
+    const { error } = await supabase.from('bingo_tasks').update(pending).eq('id', task.id)
+    setSaving(false)
+    if (error) { setSaveError('Could not save: ' + error.message); return false }
+    setSaveError('')
+    setPending({})
+    setSavedOnce(true)
+    return true
+  }, [task, pending])
+
+  // Covers a refresh, a closed tab or a link out of the app — the in-app Back
+  // button is handled separately so it can offer to save rather than just warn.
+  useEffect(() => {
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (!isDirtyRef.current) return
+      e.preventDefault()
+      e.returnValue = ''
+    }
+    window.addEventListener('beforeunload', onBeforeUnload)
+    return () => window.removeEventListener('beforeunload', onBeforeUnload)
+  }, [])
+
   const { reload: reloadDraw } = useCardDrawConfig(taskId)
   // Card details row (category / points / type) — the fields the old inline
   // create form collected, now editable here.
   const [categoryRows, setCategoryRows] = useState<{ name: string; sort_order: number }[]>([])
   const [siblingCards, setSiblingCards] = useState<Pick<BingoTask, 'id' | 'title' | 'category' | 'color' | 'hex_code'>[]>([])
   const [pointsValue, setPointsValue] = useState('0')
-  const [detailsSaving, setDetailsSaving] = useState(false)
   const [editingTitle, setEditingTitle] = useState(false)
   const [titleValue, setTitleValue] = useState('')
-  const [titleSaving, setTitleSaving] = useState(false)
   const [previewMode, setPreviewMode] = useState(false)
   const [previewPage, setPreviewPage] = useState(0)
   const [carouselIdx, setCarouselIdx] = useState(0)
@@ -76,26 +123,21 @@ export function BingoDashTaskEdit() {
       : 'answer'
     setInputs(next)
     setTaskType(type as typeof taskType)
-    setTask(prev => (prev ? { ...prev, task_type: type as typeof prev.task_type, completion_inputs: next } : prev))
-    const patch: Record<string, unknown> = { task_type: type, completion_inputs: next }
+    const patch: Partial<BingoTask> = { task_type: type as BingoTask['task_type'], completion_inputs: next }
     // Dropping the typed answer clears the question with it.
     if (!next.answer) { patch.answer_question = null; patch.answer_text = null; patch.answer_min = null }
-    const { error } = await supabase.from('bingo_tasks').update(patch).eq('id', task.id)
-    if (error) alert('Failed to save: ' + error.message)
+    stage(patch)
   }
   const [answerQuestion, setAnswerQuestion] = useState('')
   const [answerText, setAnswerText] = useState('')
   // Number answer with a floor; '' = normal letter-box answer.
   const [answerMin, setAnswerMin] = useState('')
-  const [answerSaving, setAnswerSaving] = useState(false)
   const [completionWarning, setCompletionWarning] = useState('')
   // Chained cards: which card on this board has to be completed first.
   const [prereqId, setPrereqId] = useState<string>('')
   const [boardCards, setBoardCards] = useState<{ id: string; title: string }[]>([])
-  const [warningSaving, setWarningSaving] = useState(false)
   const [mapsUrl, setMapsUrl] = useState('')
   const [mapsLabel, setMapsLabel] = useState('')
-  const [mapsUrlSaving, setMapsUrlSaving] = useState(false)
   // AITB preview state — ephemeral, mirrors the demo's "nothing is saved"
   // approach, so previewing never writes into real team progress.
   const [previewAitbWords, setPreviewAitbWords] = useState<string[]>([])
@@ -152,11 +194,7 @@ export function BingoDashTaskEdit() {
       setTitleValue(task?.title || '')
       return
     }
-    setTitleSaving(true)
-    const { error } = await supabase.from('bingo_tasks').update({ title: titleValue.trim() }).eq('id', task.id)
-    setTitleSaving(false)
-    if (error) { alert('Failed to save title: ' + error.message); return }
-    setTask({ ...task, title: titleValue.trim() })
+    stage({ title: titleValue.trim() })
     setEditingTitle(false)
   }
 
@@ -172,11 +210,7 @@ export function BingoDashTaskEdit() {
 
   const saveDetails = async (patch: Partial<BingoTask>) => {
     if (!task) return
-    setDetailsSaving(true)
-    const { error } = await supabase.from('bingo_tasks').update(patch).eq('id', task.id)
-    setDetailsSaving(false)
-    if (error) { alert('Failed to save: ' + error.message); return }
-    setTask(prev => (prev ? { ...prev, ...patch } : prev))
+    stage(patch)
   }
 
   // A card takes its category's colour, so changing category re-colours it
@@ -226,20 +260,39 @@ export function BingoDashTaskEdit() {
 
   // Back from a fresh, still-blank card deletes it rather than leaving an
   // "Untitled challenge" behind in the library.
-  const handleBack = async () => {
-    if (isNew && task) {
-      const untouched = (task.title === 'Untitled challenge' || !task.title.trim()) && pages.length === 0 && photos.length === 0
-      if (untouched && window.confirm('Discard this empty challenge?')) {
-        const { error } = await supabase.from('bingo_tasks').delete().eq('id', task.id)
-        if (error) alert('Failed to discard: ' + error.message)
-      }
-    }
+  // Leaving with unsaved edits asks first, rather than dropping them silently.
+  const [leavePrompt, setLeavePrompt] = useState(false)
+
+  /**
+   * Remove a still-blank card created by "+ Add Challenge".
+   *
+   * Guarded on `savedOnce`, not on the title: the title shown may be a staged
+   * edit that never reached the database, and once Save has been pressed the
+   * card holds real work that must survive a later discard. Pages and photos
+   * write immediately, so either one means the card is no longer a placeholder.
+   */
+  const discardNewCard = async (askFirst: boolean) => {
+    if (!isNew || !task || savedOnce) return
+    if (pages.length > 0 || photos.length > 0) return
+    if (askFirst && !window.confirm('Discard this empty challenge?')) return
+    const { error } = await supabase.from('bingo_tasks').delete().eq('id', task.id)
+    if (error) setSaveError('Could not discard: ' + error.message)
+  }
+
+  const leaveNow = async (askBeforeDiscard: boolean) => {
+    // A fresh card that was never saved is a placeholder, not content — going
+    // back should not leave "Untitled challenge" behind in the library.
+    await discardNewCard(askBeforeDiscard)
     navigate(backPath)
+  }
+
+  const handleBack = async () => {
+    if (isDirty) { setLeavePrompt(true); return }
+    await leaveNow(true)
   }
 
   const handleAnswerSave = async () => {
     if (!task) return
-    setAnswerSaving(true)
     const cleanedAnswerText = answerText.split('\n').map(l => l.trim()).filter(Boolean).join('\n')
     // Gated on the answer INPUT, not the legacy task_type: a photo + answer
     // card is typed 'photo' and still has a question to keep.
@@ -250,11 +303,8 @@ export function BingoDashTaskEdit() {
       answer_min: inputs.answer && min != null && Number.isFinite(min) ? min : null,
       answer_text: inputs.answer && min == null ? cleanedAnswerText || null : null,
     }
-    const { error } = await supabase.from('bingo_tasks').update(payload).eq('id', task.id)
-    setAnswerSaving(false)
-    if (error) { alert('Failed to save: ' + error.message); return }
     setAnswerText(cleanedAnswerText)
-    setTask({ ...task, ...payload })
+    stage(payload)
   }
 
   const handleAddPage = async () => {
@@ -534,7 +584,6 @@ export function BingoDashTaskEdit() {
                   if (e.key === 'Enter') handleTitleSave()
                   if (e.key === 'Escape') { setEditingTitle(false); setTitleValue(task.title) }
                 }}
-                disabled={titleSaving}
                 className="text-xl font-bold text-gray-900 border-b-2 border-violet-500 outline-none bg-transparent px-1 min-w-0 w-64"
               />
             ) : (
@@ -549,19 +598,39 @@ export function BingoDashTaskEdit() {
             )}
             <span className="text-sm text-gray-400">{task.color}</span>
           </div>
-          <button
-            onClick={() => { setPreviewMode(true); setPreviewPage(0); setCarouselIdx(0); reloadPhotos() }}
-            className="px-4 py-2 bg-gray-900 text-white rounded-lg hover:bg-gray-700 text-sm transition-colors"
-          >
-            Preview
-          </button>
+          <div className="flex items-center gap-2">
+            <span className={`text-xs font-bold whitespace-nowrap ${isDirty ? 'text-amber-600' : 'text-green-600'}`}>
+              {isDirty ? '● Unsaved changes' : '✓ All changes saved'}
+            </span>
+            <button
+              onClick={() => { setPreviewMode(true); setPreviewPage(0); setCarouselIdx(0); reloadPhotos() }}
+              className="px-4 py-2 bg-gray-900 text-white rounded-lg hover:bg-gray-700 text-sm transition-colors"
+            >
+              Preview
+            </button>
+            <button
+              onClick={() => { void saveNow() }}
+              disabled={!isDirty || saving}
+              title={isDirty
+                ? 'Save your changes to this card'
+                : 'Nothing to save — photos, pages and links save on their own'}
+              className="px-5 py-2 bg-violet-600 text-white rounded-lg hover:bg-violet-700 text-sm font-bold transition-colors disabled:opacity-40"
+            >
+              {saving ? 'Saving…' : 'Save'}
+            </button>
+          </div>
         </div>
+        {saveError && (
+          <div className="max-w-4xl mx-auto mt-2 px-3 py-2 rounded-lg bg-red-50 border border-red-200 text-xs font-bold text-red-700">
+            {saveError}
+          </div>
+        )}
       </header>
 
       <main className="max-w-4xl mx-auto px-6 py-8">
         {isNew && (
           <div className="mb-6 px-4 py-3 rounded-xl bg-violet-50 border border-violet-200 text-sm text-violet-800">
-            <span className="font-bold">New challenge</span> — give it a name, pick a category, points and card type, then add instructions and photos below. Everything saves as you go.
+            <span className="font-bold">New challenge</span> — give it a name, pick a category, points and card type, then add instructions and photos below. Press <span className="font-bold">Save</span> when you are done; instructions, photos and links apply straight away.
           </div>
         )}
 
@@ -572,7 +641,7 @@ export function BingoDashTaskEdit() {
               <label className="block text-sm font-medium text-gray-600 mb-1">Category</label>
               <select
                 value={task.category ?? ''}
-                disabled={detailsSaving}
+                disabled={false}
                 onChange={e => {
                   if (e.target.value === '__new__') { handleNewCategory(); return }
                   handleCategoryChange(e.target.value)
@@ -589,7 +658,7 @@ export function BingoDashTaskEdit() {
               <input
                 type="number" step="0.1" min={0}
                 value={pointsValue}
-                disabled={detailsSaving}
+                disabled={false}
                 onChange={e => setPointsValue(e.target.value)}
                 onBlur={handlePointsSave}
                 onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
@@ -609,7 +678,7 @@ export function BingoDashTaskEdit() {
                     : task.task_type === value
                   return (
                     <button
-                      key={value} type="button" title={tip} disabled={detailsSaving}
+                      key={value} type="button" title={tip} disabled={false}
                       onClick={() => handleCardTypeChange(value)}
                       className={`flex-1 py-2 text-sm font-bold transition-colors ${active ? 'bg-violet-600 text-white' : 'bg-white text-gray-500 hover:bg-gray-50'}`}
                     >
@@ -656,7 +725,10 @@ export function BingoDashTaskEdit() {
         {activeTab === 'instructions' && (
           <>
             <div className="flex items-center justify-between mb-4">
-              <h2 className="text-lg font-bold text-gray-900">Instruction Pages ({pages.length})</h2>
+              <div>
+                <h2 className="text-lg font-bold text-gray-900">Instruction Pages ({pages.length})</h2>
+                <p className="text-xs text-green-600 font-semibold mt-0.5">✓ Pages save as you edit them</p>
+              </div>
               <button
                 onClick={handleAddPage}
                 className="px-4 py-2 bg-violet-600 text-white rounded-lg hover:bg-violet-700 text-sm transition-colors"
@@ -780,13 +852,7 @@ export function BingoDashTaskEdit() {
                 <input
                   type="checkbox"
                   checked={task.photo_multiple ?? false}
-                  onChange={async e => {
-                    const photo_multiple = e.target.checked
-                    setTask(prev => (prev ? { ...prev, photo_multiple } : prev))
-                    const { error } = await supabase.from('bingo_tasks')
-                      .update({ photo_multiple }).eq('id', task.id)
-                    if (error) alert('Failed to save: ' + error.message)
-                  }}
+                  onChange={e => stage({ photo_multiple: e.target.checked })}
                   className="mt-0.5"
                 />
                 <span>
@@ -867,10 +933,9 @@ export function BingoDashTaskEdit() {
 
             <button
               onClick={handleAnswerSave}
-              disabled={answerSaving}
-              className="px-6 py-2.5 bg-violet-600 text-white rounded-lg hover:bg-violet-700 text-sm font-bold transition-colors disabled:opacity-50"
+                            className="px-6 py-2.5 bg-violet-600 text-white rounded-lg hover:bg-violet-700 text-sm font-bold transition-colors disabled:opacity-50"
             >
-              {answerSaving ? 'Saving...' : 'Save Answer Settings'}
+              Apply answer settings
             </button>
           </div>
         )}
@@ -913,21 +978,13 @@ export function BingoDashTaskEdit() {
             className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-violet-500"
           />
           <button
-            onClick={async () => {
-              if (!task) return
-              setWarningSaving(true)
-              const { error } = await supabase.from('bingo_tasks').update({
-                completion_warning: completionWarning.trim() || null,
-                prerequisite_task_id: prereqId || null,
-              }).eq('id', task.id)
-              setWarningSaving(false)
-              if (error) { alert('Failed to save: ' + error.message); return }
-              setTask({ ...task, completion_warning: completionWarning.trim() || null, prerequisite_task_id: prereqId || null })
-            }}
-            disabled={warningSaving}
+            onClick={() => stage({
+              completion_warning: completionWarning.trim() || null,
+              prerequisite_task_id: prereqId || null,
+            })}
             className="mt-3 px-6 py-2.5 bg-violet-600 text-white rounded-lg hover:bg-violet-700 text-sm font-bold transition-colors disabled:opacity-50"
           >
-            {warningSaving ? 'Saving...' : 'Save Warning'}
+            Apply warning
           </button>
         </div>
 
@@ -952,20 +1009,13 @@ export function BingoDashTaskEdit() {
             className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-violet-500"
           />
           <button
-            onClick={async () => {
-              if (!task) return
-              setMapsUrlSaving(true)
-              const url = mapsUrl.trim() || null
-              const label = mapsLabel.trim() || null
-              const { error } = await supabase.from('bingo_tasks').update({ maps_url: url, maps_label: label }).eq('id', task.id)
-              setMapsUrlSaving(false)
-              if (error) { alert('Failed to save: ' + error.message); return }
-              setTask({ ...task, maps_url: url, maps_label: label })
-            }}
-            disabled={mapsUrlSaving}
+            onClick={() => stage({
+              maps_url: mapsUrl.trim() || null,
+              maps_label: mapsLabel.trim() || null,
+            })}
             className="mt-3 px-6 py-2.5 bg-violet-600 text-white rounded-lg hover:bg-violet-700 text-sm font-bold transition-colors disabled:opacity-50"
           >
-            {mapsUrlSaving ? 'Saving...' : 'Save Maps Link'}
+            Apply maps link
           </button>
         </div>
 
@@ -996,6 +1046,50 @@ export function BingoDashTaskEdit() {
           onSlotsChange={() => { void reloadDraw() }}
         />
       </main>
+
+      {/* Leaving with unsaved edits. Three ways out rather than a blunt
+          confirm: the common case is that you meant to save. */}
+      {leavePrompt && (
+        <div className="fixed inset-0 z-[90] bg-black/50 flex items-center justify-center px-4"
+          onClick={() => setLeavePrompt(false)}>
+          <div className="bg-white rounded-2xl p-6 w-full max-w-sm shadow-2xl"
+            onClick={e => e.stopPropagation()}>
+            <h2 className="text-lg font-black text-gray-900">Save your changes?</h2>
+            <p className="text-sm text-gray-600 mt-1.5">
+              You have unsaved edits to <span className="font-bold">{task.title}</span>.
+              {isNew && ' Discarding removes this new card.'}
+            </p>
+            {saveError && <p className="mt-2 text-xs font-bold text-red-600">{saveError}</p>}
+            <div className="mt-5 flex flex-col gap-2">
+              <button
+                onClick={async () => {
+                  const ok = await saveNow()
+                  if (!ok) return          // keep the dialog open so the error is visible
+                  setLeavePrompt(false)
+                  navigate(backPath)
+                }}
+                disabled={saving}
+                className="w-full py-2.5 rounded-xl bg-violet-600 text-white font-bold text-sm hover:bg-violet-700 disabled:opacity-50"
+              >
+                {saving ? 'Saving…' : 'Save and leave'}
+              </button>
+              <button
+                onClick={async () => { setLeavePrompt(false); setPending({}); await leaveNow(false) }}
+                disabled={saving}
+                className="w-full py-2.5 rounded-xl border border-gray-200 text-gray-700 font-bold text-sm hover:bg-gray-50 disabled:opacity-50"
+              >
+                Discard changes
+              </button>
+              <button
+                onClick={() => setLeavePrompt(false)}
+                className="w-full py-2 text-gray-500 font-bold text-sm hover:text-gray-700"
+              >
+                Keep editing
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

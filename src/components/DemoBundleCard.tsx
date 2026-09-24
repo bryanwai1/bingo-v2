@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { supabase } from '../lib/supabase'
-import { AITB_POINTS, aitbByName, aitbMaxPoints, aitbSpeedBonus, aitbToolUrl, aitbToolCaption, type AitbActivity } from '../lib/aitbActivities'
+import { AITB_POINTS, aitbByName, aitbMaxPoints, aitbSpeedBonus, aitbToolUrl, aitbToolCaption, type AitbActivity, aitbHeroUrlById } from '../lib/aitbActivities'
 import { BonusBar } from './AitbBonusBar'
 import { AitbMissionModule } from './AitbMissionModule'
 import type { BingoTask } from '../types/database'
@@ -89,7 +89,7 @@ function DemoBundleMission({ activity, progress, marshalPassword, onBack, onChan
       <div className="relative mx-auto flex h-full w-full max-w-[480px] flex-col bg-gray-950 text-white shadow-2xl">
         <div className="flex-1 overflow-y-auto overscroll-contain">
           <div className="relative">
-            <img src={`/aitb/hero${activity.id}.jpg`} alt="" className="w-full aspect-video object-cover" />
+            <img src={aitbHeroUrlById(activity.id) ?? ''} alt="" className="w-full aspect-video object-cover" />
             <div className="absolute inset-0 bg-gradient-to-t from-gray-950 via-gray-950/40 to-transparent" />
             <button onClick={onBack}
               className="absolute top-3 left-3 px-4 py-2 rounded-xl font-black text-sm backdrop-blur active:scale-95 transition-transform"

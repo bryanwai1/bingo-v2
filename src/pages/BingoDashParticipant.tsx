@@ -18,6 +18,7 @@ import { ParticleBackground } from '../components/ParticleBackground'
 import { TimeUpAlarm } from '../components/TimeUpAlarm'
 import { ContestCard } from '../components/ContestCard'
 import { SupportChat } from '../components/SupportChat'
+import { LanguageToggle } from '../components/LanguageToggle'
 import { SignSpliceCard } from '../components/SignSpliceCard'
 import { BreakoutHuntCard } from '../components/BreakoutHuntCard'
 import { useCardDrawConfig } from '../hooks/useCardDrawConfig'
@@ -858,6 +859,10 @@ export function BingoDashParticipant() {
             >
               ← Board
             </button>
+            {/* The task page is where a player actually reads instructions, so
+                the language switch belongs here too — not only on the board
+                they came from. */}
+            <LanguageToggle className="mt-1 flex-shrink-0" />
             <div>
               <p className="text-sm font-bold opacity-80 uppercase tracking-wider">
                 {isSnakeLadder

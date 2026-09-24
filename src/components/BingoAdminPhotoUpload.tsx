@@ -97,6 +97,9 @@ export function BingoAdminPhotoUpload({ taskId }: BingoAdminPhotoUploadProps) {
           <h3 className="font-bold text-gray-900">Photo Carousel</h3>
           <p className="text-xs text-gray-400 mt-0.5">
             Photos shown as carousel on participant view · Max 20 · Drag to set focal point
+            <span className="block text-green-600 font-semibold mt-0.5">
+              ✓ Photos save the moment they upload — the Save button above is for the card's own details.
+            </span>
           </p>
         </div>
         <div className="flex items-center gap-3">

@@ -10,6 +10,7 @@ import { TileFace } from '../components/BingoTileFace'
 import { IncomingDuelBanner } from '../components/ContestCard'
 import { MyQrButton } from '../components/MyQrButton'
 import { SupportChat } from '../components/SupportChat'
+import { LanguageToggle } from '../components/LanguageToggle'
 import { ForestWaitingScreen } from '../components/ForestWaitingScreen'
 import { WaitingTiger } from '../components/WaitingTiger'
 import { activeFaces, faceName, faceColor, normaliseFaceCount } from '../lib/cubeFaces'
@@ -100,6 +101,13 @@ function JoinScreen({ onJoin }: { onJoin: (teamId: string, password: string) => 
     <div className="min-h-screen bg-gray-950 flex flex-col items-center justify-center relative overflow-hidden px-4 py-8">
       <ParticleBackground />
 
+      {/* The join screen is the first thing a player sees, so the language
+          choice has to be reachable before they are in a team — not only on
+          the board afterwards. */}
+      <div className="absolute top-4 right-4 z-20">
+        <LanguageToggle />
+      </div>
+
       <div className="relative z-10 text-center mb-10 animate-slide-up">
         <div className="text-6xl mb-4">🎯</div>
         <h1 className="text-5xl font-black text-white tracking-tight">BINGO DASH</h1>
@@ -146,7 +154,11 @@ function JoinScreen({ onJoin }: { onJoin: (teamId: string, password: string) => 
                     }`}
                   >
                     <div className="flex items-center justify-between">
-                      <span>{group.name}</span>
+                      {/* A team name is an identifier, not prose. The page
+                          translator mangled these — "Group 5" came out as
+                          "Senarai Kandungan" and "Group 1" lost its number —
+                          which leaves a player unable to find their own team. */}
+                      <span translate="no">{group.name}</span>
                     </div>
                     {notReady && (
                       <span className="text-[10px] text-orange-400 font-bold uppercase tracking-wider">Not set up yet</span>
@@ -592,7 +604,7 @@ function BoardScreen({
         <div className="board-col flex items-start justify-between gap-3">
           <div>
             <p className="text-teal-400 text-[10px] font-black uppercase tracking-widest">Bingo Dash</p>
-            <h1 className="text-white text-xl font-black tracking-tight leading-tight">{team.name}</h1>
+            <h1 translate="no" className="text-white text-xl font-black tracking-tight leading-tight">{team.name}</h1>
             <div className="flex items-center gap-2 mt-0.5">
               <span className="text-green-400 text-xs font-bold">{completedCount}/{visibleTasks.length} completed</span>
               {lettersEarned && (
@@ -609,6 +621,10 @@ function BoardScreen({
           </div>
           <div className="flex flex-col items-end gap-2 flex-shrink-0 mt-1">
             <TimerDisplay settings={settings} />
+            {/* EN / BM. The page translator is already mounted app-wide in
+                App.tsx, so players were being served a translatable page with
+                no way to ask for it — the switch only existed in the admin. */}
+            <LanguageToggle />
             {inviteUrl && (
               <MyQrButton
                 label="Invite teammate"
