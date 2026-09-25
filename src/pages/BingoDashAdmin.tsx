@@ -3765,7 +3765,7 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                                       {blurbByTask.get(task.id)}
                                     </p>
                                   )}
-                                  {section.foreign && !isOwner && !isMineRow(task.owner_id) ? (
+                                  {section.foreign && !isOwner ? (
                                     task.category && (
                                       <p className="mt-1.5 text-xs" style={{ color: ink.faint }}>📂 {task.category}</p>
                                     )
@@ -3795,7 +3795,7 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                                       {scanStatsByTask.get(task.id)?.completed ?? 0} completed ·{' '}
                                       {scanStatsByTask.get(task.id)?.scanned ?? 0} scanned
                                     </p>
-                                    {section.foreign && !isOwner && !isMineRow(task.owner_id) ? (
+                                    {section.foreign && !isOwner ? (
                                       (task.points ?? 0) > 0 && (
                                         <span className="a-surface-2 a-text text-[10px] font-black rounded px-1.5 py-0.5">{task.points} pts</span>
                                       )
@@ -4025,16 +4025,15 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                                             : 'Copies this card into your board — the original stays untouched'}>
                                       + Add to board
                                     </button>
-                                    {/* Only for cards this tenant can actually
-                                        write. A sub-account browsing the shared
-                                        library sees house cards (owner_id null)
-                                        it has no write access to — RLS rejects
-                                        every action in this menu for those, so
-                                        offering Edit/Delete/Move just invites a
-                                        failure. They take a copy with "Add to
-                                        board" and edit that instead, leaving the
-                                        owner's original untouched. */}
-                                    {(isOwner || isMineRow(task.owner_id)) && renderCardMenu(task)}
+                                    {/* Main Library is browse-and-place only for
+                                        a non-owner: every card there shows just
+                                        "+ Add to board". That covers the main
+                                        account's house cards, which RLS would
+                                        reject edits to anyway, AND this
+                                        account's own cards, which are editable
+                                        from Own Library where they also appear.
+                                        One shelf to take from, one to edit in. */}
+                                    {(isOwner || !section.foreign) && renderCardMenu(task)}
                                   </div>
                                 ) : (
                                 <div className="px-3 pb-3 flex flex-wrap gap-1.5">
