@@ -3,6 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useBingoAuth } from '../hooks/useBingoAuth'
 import { ParticleBackground } from '../components/ParticleBackground'
+import { errText } from '../lib/errText'
 
 /**
  * Crew join page — `/bingo-dash/join-crew/:code`.
@@ -107,11 +108,14 @@ export function BingoDashJoinCrew() {
         p_pin: pin.trim(),
         p_name: name.trim() || null,
       })
-      if (rpcError) throw new Error(rpcError.message)
+      if (rpcError) throw rpcError
       await refreshAccount()
       navigate('/bingo-dash/admin', { replace: true })
     } catch (err) {
-      setError(friendlyError(err instanceof Error ? err.message : 'Could not join'))
+      // errText rather than the old `instanceof Error` re-wrap: a
+      // PostgrestError is a plain object, and friendlyError() matches on the
+      // text, so dropping `details`/`hint` lost the codes it looks for.
+      setError(friendlyError(errText(err)))
       setBusy(false)
     }
   }, [session, signInAnonymously, code, pin, name, refreshAccount, navigate])

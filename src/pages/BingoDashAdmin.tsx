@@ -1229,8 +1229,13 @@ export function BingoDashAdmin() {
         }]
       }
 
+      // Own Library is a shortcut to this account's own cards, not a silo.
+      // Main Library is the whole shared pool — INCLUDING this account's
+      // cards, which is what the owner sees too. Excluding them made a card
+      // a tenant admin had just created vanish from the shared library, as
+      // though it had not been added to the pool at all.
       const own = flat.filter(t => isMineRow(t.owner_id))
-      const shared = flat.filter(t => !isMineRow(t.owner_id))
+      const shared = flat
       const out: typeof groups = []
       if (own.length > 0) {
         out.push({
@@ -3760,7 +3765,7 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                                       {blurbByTask.get(task.id)}
                                     </p>
                                   )}
-                                  {section.foreign && !isOwner ? (
+                                  {section.foreign && !isOwner && !isMineRow(task.owner_id) ? (
                                     task.category && (
                                       <p className="mt-1.5 text-xs" style={{ color: ink.faint }}>📂 {task.category}</p>
                                     )
@@ -3790,7 +3795,7 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                                       {scanStatsByTask.get(task.id)?.completed ?? 0} completed ·{' '}
                                       {scanStatsByTask.get(task.id)?.scanned ?? 0} scanned
                                     </p>
-                                    {section.foreign && !isOwner ? (
+                                    {section.foreign && !isOwner && !isMineRow(task.owner_id) ? (
                                       (task.points ?? 0) > 0 && (
                                         <span className="a-surface-2 a-text text-[10px] font-black rounded px-1.5 py-0.5">{task.points} pts</span>
                                       )

@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useBingoAuth } from '../hooks/useBingoAuth'
 import { FacilitatorSessions } from '../components/FacilitatorSessions'
+import { errText } from '../lib/errText'
 import type { BingoAccount, BingoSection } from '../types/database'
 
 const STATUS_STYLES: Record<BingoAccount['status'], string> = {
@@ -133,14 +134,16 @@ export function BingoDashAccounts() {
       if (error) throw error
       setNotice(`Gave ${a.email ?? 'account'} a fresh copy of the template board.`)
     } catch (err) {
-      setNotice(err instanceof Error ? `Could not clone board: ${err.message}` : 'Could not clone board')
+      setNotice(`Could not clone board: ${errText(err)}`)
     } finally { setBusyId(null) }
   }
 
   const endFacilitatorAccess = async (a: BingoAccount) => {
     setBusyId(a.id)
     try {
-      await supabase.from('bingo_accounts').update({ access_expires_at: new Date().toISOString() }).eq('id', a.id)
+      const { error } = await supabase.from('bingo_accounts')
+        .update({ access_expires_at: new Date().toISOString() }).eq('id', a.id)
+      if (error) { setNotice(`Could not end access: ${errText(error)}`); return }
       await load()
     } finally { setBusyId(null) }
   }
@@ -148,7 +151,14 @@ export function BingoDashAccounts() {
   const removeFacilitator = async (a: BingoAccount) => {
     setBusyId(a.id)
     try {
-      await supabase.from('bingo_accounts').update({ facilitator_host: null, access_expires_at: null }).eq('id', a.id)
+      // facilitator_session_id must be cleared too. Leaving it set kept the
+      // row excluded from `standalone` below, so a removed facilitator became
+      // an approved account with no host, no expiry and no way to manage it
+      // from this page — while keeping its game flags.
+      const { error } = await supabase.from('bingo_accounts')
+        .update({ facilitator_host: null, access_expires_at: null, facilitator_session_id: null })
+        .eq('id', a.id)
+      if (error) { setNotice(`Could not remove facilitator: ${errText(error)}`); return }
       await load()
     } finally { setBusyId(null) }
   }

@@ -597,7 +597,15 @@ begin
     case
       when s.revoked                                        then 'revoked'
       when now() >= s.expires_at                            then 'expired'
-      when s.max_uses is not null and s.uses >= s.max_uses  then 'full'
+      -- 'full' only for someone NOT already on this pass. A facilitator who
+      -- is already attached has had their seat counted, so reporting 'full'
+      -- walled them out of their own session on any pass that hit its cap —
+      -- redeem_facilitator_session would have let them straight back in.
+      when s.max_uses is not null and s.uses >= s.max_uses
+           and not exists (select 1 from bingo_accounts a
+                            where a.id = auth.uid()
+                              and a.facilitator_session_id = s.id)
+                                                            then 'full'
       else 'ok'
     end;
 end;
@@ -724,6 +732,9 @@ grant execute on function public.create_event(text) to authenticated;
 grant execute on function public.my_event_ids()     to authenticated;
 grant execute on function public.shared_section_ids() to authenticated;
 grant execute on function public.import_library_pack(uuid, uuid) to authenticated;
+-- Called directly from the Accounts page ("Give default board"). Missing from
+-- this file until 2026-09-25, so the button failed for anyone but a superuser.
+grant execute on function public.admin_clone_template_for(uuid) to authenticated;
 -- anon needs the two join-flow functions: the join page reads the session
 -- before signing in, and supabase-js may still carry the anon role on the
 -- first call after an anonymous sign-in.
