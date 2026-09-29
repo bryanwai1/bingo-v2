@@ -7,6 +7,7 @@ import { useTaskLinks } from '../hooks/useTaskLinks'
 import { BingoAdminPhotoUpload } from '../components/BingoAdminPhotoUpload'
 import { SignSpliceAdminPanel } from '../components/SignSpliceAdminPanel'
 import { BreakoutHuntAdminPanel } from '../components/BreakoutHuntAdminPanel'
+import { TaskSampleEditor } from '../components/TaskSampleEditor'
 import { PageForm } from '../components/PageForm'
 import { InstructionPage } from '../components/InstructionPage'
 import { TaskLinksEditor } from '../components/TaskLinksEditor'
@@ -101,7 +102,7 @@ export function BingoDashTaskEdit() {
   const [previewMode, setPreviewMode] = useState(false)
   const [previewPage, setPreviewPage] = useState(0)
   const [carouselIdx, setCarouselIdx] = useState(0)
-  const [activeTab, setActiveTab] = useState<'instructions' | 'answer'>('instructions')
+  const [activeTab, setActiveTab] = useState<'instructions' | 'answer' | 'sample'>('instructions')
   // Answer tab state
   const [taskType, setTaskType] = useState<'standard' | 'answer' | 'photo' | 'video' | 'media'>('standard')
   const [inputs, setInputs] = useState<CompletionInputs>({})
@@ -719,6 +720,16 @@ export function BingoDashTaskEdit() {
             ✏️ Answer Input
             {taskType === 'answer' && <span className="ml-1.5 px-1.5 py-0.5 bg-green-100 text-green-700 text-xs rounded-full">ON</span>}
           </button>
+          <button
+            onClick={() => setActiveTab('sample')}
+            className={`px-5 py-3 text-sm font-bold border-b-2 transition-colors ${
+              activeTab === 'sample'
+                ? 'border-violet-600 text-violet-600'
+                : 'border-transparent text-gray-400 hover:text-gray-600'
+            }`}
+          >
+            🎬 Sample
+          </button>
         </div>
 
         {/* Instructions tab */}
@@ -761,6 +772,9 @@ export function BingoDashTaskEdit() {
             )}
           </>
         )}
+
+        {/* Sample tab */}
+        {activeTab === 'sample' && <TaskSampleEditor taskId={task.id} />}
 
         {/* Answer tab */}
         {activeTab === 'answer' && (

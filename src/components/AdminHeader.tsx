@@ -40,9 +40,12 @@ function Menu({ label, icon, children }: { label: string; icon: string; children
         title={label}
       >
         <span className="text-base leading-none">{icon}</span>
-        {/* Icon only on a phone — three labelled menus plus the join button
-            do not fit beside the title. */}
-        <span className="hidden sm:inline">{label}</span>
+        {/* Icon only until there is genuinely room for words. Three labelled
+            menus plus the Join button and the counts pill overflowed the bar
+            from ~640px to ~1100px, crushing the title to nothing and pushing
+            "Control Hub" onto its own line under the other controls. Labels
+            now wait for `lg`, where the sidebar also appears. */}
+        <span className="hidden lg:inline max-w-[12ch] truncate">{label}</span>
         <span className={`text-[10px] transition-transform ${open ? 'rotate-180' : ''}`}>▾</span>
       </button>
 

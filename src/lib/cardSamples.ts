@@ -351,6 +351,10 @@ export function sampleFor(cardTitle: string | null | undefined): CardSample | nu
   if (!cardTitle) return null
   // A board's own copy is titled "Match Cut (Mall Hunt)"; the sample is the
   // same, so the bracketed board tag is ignored.
+  // These samples were shot in a mall, so another hunt's copy (e.g. "(Melaka
+  // Hunt)") gets none rather than the wrong venue — it uploads its own.
+  const tag = cardTitle.match(/\(([^)]*)\)\s*$/)?.[1]
+  if (tag && tag !== 'Mall Hunt') return null
   const base = cardTitle.replace(/\s*\([^)]*\)\s*$/, '').trim()
   return CARD_SAMPLES.find(s => s.card === base) ?? null
 }

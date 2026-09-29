@@ -1891,10 +1891,11 @@ export function BingoDashAdmin() {
   // this account's compartments. Used for copy-on-use (placing another
   // account's card) and for manual duplication.
   const copyTaskFull = async (task: BingoTask, opts: { sectionId: string; title?: string; clonedFrom?: string | null }): Promise<BingoTask> => {
-    const [pagesRes, photosRes, linksRes] = await Promise.all([
+    const [pagesRes, photosRes, linksRes, samplesRes] = await Promise.all([
       supabase.from('bingo_task_pages').select('*').eq('task_id', task.id).order('page_order'),
       supabase.from('bingo_task_photos').select('*').eq('task_id', task.id).order('photo_order'),
       supabase.from('bingo_task_links').select('*').eq('task_id', task.id).order('sort_order'),
+      supabase.from('bingo_task_samples').select('*').eq('task_id', task.id).order('sort_order'),
     ])
     const { data: created, error } = await supabase.from('bingo_tasks').insert({
       section_id: opts.sectionId,
@@ -1927,6 +1928,7 @@ export function BingoDashAdmin() {
       pagesRes.data?.length ? supabase.from('bingo_task_pages').insert(reparent(pagesRes.data)) : Promise.resolve(),
       photosRes.data?.length ? supabase.from('bingo_task_photos').insert(reparent(photosRes.data)) : Promise.resolve(),
       linksRes.data?.length ? supabase.from('bingo_task_links').insert(reparent(linksRes.data)) : Promise.resolve(),
+      samplesRes.data?.length ? supabase.from('bingo_task_samples').insert(reparent(samplesRes.data)) : Promise.resolve(),
     ])
     setTasks(prev => [...prev, created])
     return created as BingoTask
@@ -2773,6 +2775,11 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
       <div className="flex-1 min-w-0">
       {/* Header */}
       <header className="sticky top-0 z-40 border-b a-border a-surface shadow-sm">
+        {/* No overflow-hidden here: the Open/Manage/account dropdowns are
+            absolutely positioned inside this row, and clipping the row clips
+            them shut. Overflow is prevented by the parts that can actually
+            grow instead — the title truncates, the action labels wait for
+            `lg`, and long menu labels are capped. */}
         <div className="max-w-6xl mx-auto px-3 sm:px-6 py-3 sm:py-4 flex items-center justify-between gap-2">
           <div className="flex items-center gap-2 sm:gap-3 min-w-0">
             {/* Phone only: opens the navigation drawer. */}
@@ -2785,14 +2792,14 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
             </button>
             <button onClick={() => navigate('/')} className="a-text-3 hover:a-text-2 transition-colors hidden sm:block">←</button>
             <div className="min-w-0">
-              <h1 className="text-lg sm:text-xl font-black a-text tracking-tight truncate">Bingo Dash <span className="text-teal-500">Admin</span></h1>
-              <p className="text-[10px] a-text-3 uppercase tracking-widest font-bold hidden sm:block">Control Hub</p>
+              <h1 className="text-base sm:text-xl font-black a-text tracking-tight truncate">Bingo Dash <span className="text-teal-500">Admin</span></h1>
+              <p className="text-[10px] a-text-3 uppercase tracking-widest font-bold hidden sm:block truncate">Control Hub</p>
             </div>
           </div>
-          <div className="flex items-center gap-1 sm:gap-1.5 flex-shrink-0">
+          <div className="flex items-center gap-1 sm:gap-1.5 flex-shrink-0 min-w-0">
             {/* Counts stay visible — they are the quickest sanity check that
                 the right board is selected before you start a game. */}
-            <div className="hidden md:flex items-center gap-2.5 px-3 py-1.5 rounded-xl a-surface-2 border a-border mr-2">
+            <div className="hidden xl:flex items-center gap-2.5 px-3 py-1.5 rounded-xl a-surface-2 border a-border mr-2">
               <span className="text-sm font-black text-teal-600">{scopedTasks.length}</span>
               <span className="text-[10px] a-text-3 uppercase tracking-wider">cards</span>
               <span className="w-px h-3.5 a-surface/10" />
@@ -2807,7 +2814,7 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
               className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-black text-gray-950 bg-emerald-400 hover:bg-emerald-300 active:scale-95 transition-all shadow-lg shadow-emerald-500/20"
             >
               <span className="text-base leading-none">📱</span>
-              <span className="hidden sm:inline">Join Link</span>
+              <span className="hidden lg:inline">Join Link</span>
             </button>
 
             <Menu label="Open" icon="🖥">
@@ -4837,14 +4844,14 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                   )}
                 </div>
                 {sectionTeams.length > 0 && (<div className="rounded-xl border a-border overflow-x-auto">
-                  <table className="w-full min-w-[760px] text-sm">
+                  <table className="w-full min-w-[1040px] text-sm">
                     <thead>
                       <tr className="border-b a-border a-surface-2">
                         <th className="text-left px-3 py-2.5 font-bold a-text-3 uppercase tracking-wide text-[11px] w-14">Photo</th>
-                        <th className="text-left px-3 py-2.5 font-bold a-text-3 uppercase tracking-wide text-[11px]">Group</th>
+                        <th className="text-left px-3 py-2.5 font-bold a-text-3 uppercase tracking-wide text-[11px] min-w-[180px]">Group</th>
                         <th className="text-left px-3 py-2.5 font-bold a-text-3 uppercase tracking-wide text-[11px] w-20">PWD</th>
                         <th className="text-left px-3 py-2.5 font-bold a-text-3 uppercase tracking-wide text-[11px] w-28">Members</th>
-                        <th className="text-left px-3 py-2.5 font-bold a-text-3 uppercase tracking-wide text-[11px]">Board</th>
+                        <th className="text-left px-3 py-2.5 font-bold a-text-3 uppercase tracking-wide text-[11px] min-w-[140px]">Board</th>
                         <th className="text-left px-3 py-2.5 font-bold a-text-3 uppercase tracking-wide text-[11px] w-36">Progress</th>
                         <th className="text-left px-3 py-2.5 font-bold a-text-3 uppercase tracking-wide text-[11px] w-16" title="Bonus points from other games">Bonus</th>
                         <th className="text-right px-3 py-2.5 font-bold a-text-3 uppercase tracking-wide text-[11px] w-36">Actions</th>

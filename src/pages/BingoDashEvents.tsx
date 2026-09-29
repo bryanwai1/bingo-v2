@@ -38,7 +38,7 @@ const fmtPts = (n: number) => {
 }
 
 export function BingoDashEvents() {
-  const { account } = useBingoAuth()
+  const { account, isOwner, workingOwnerValue } = useBingoAuth()
   const [events, setEvents] = useState<EventRow[]>([])
   const [active, setActive] = useState<string | null>(null)
   const [scores, setScores] = useState<Score[]>([])
@@ -60,22 +60,37 @@ export function BingoDashEvents() {
   // which made the callback identity change on every event switch and refetch
   // the whole list each time. The guard uses the functional form instead.
   const loadEvents = useCallback(async () => {
-    const { data, error } = await supabase.from('bingo_events')
-      .select('*').order('created_at', { ascending: false })
+    // Scoped here rather than by RLS: this database runs one blanket policy
+    // per table, so an unfiltered read hands back every tenant's events. You
+    // should only see events you started or were invited into.
+    const [{ data, error }, { data: mine }] = await Promise.all([
+      supabase.from('bingo_events').select('*').order('created_at', { ascending: false }),
+      supabase.from('bingo_event_members').select('event_id').eq('account_id', account?.id ?? ''),
+    ])
     if (error) { say(`Could not load events: ${errText(error)}`, true); return }
-    const rows = (data as EventRow[]) ?? []
+    const joined = new Set((mine ?? []).map(r => r.event_id as string))
+    const rows = ((data as EventRow[]) ?? [])
+      .filter(e => isOwner || e.created_by === account?.id || joined.has(e.id))
     setEvents(rows)
     setActive(prev => {
       if (prev && rows.some(r => r.id === prev)) return prev
       return rows.find(r => !r.archived)?.id ?? null
     })
-  }, [])
+  }, [account?.id, isOwner])
 
   const loadBoards = useCallback(async () => {
     const { data, error } = await supabase.from('bingo_sections').select('*').order('sort_order')
     if (error) { say(`Could not load boards: ${errText(error)}`, true); return }
-    setMyBoards((data as BingoSection[]) ?? [])
-  }, [])
+    // Scope to boards this account actually owns. `bingo_sections` is readable
+    // by everyone (its select policy is `using (true)`, so every board can be
+    // seen for player/projector links), which meant a tenant admin was offered
+    // the main account's boards — and every other tenant's — to contribute to
+    // a shared event. Only the owner works across tenants.
+    const all = (data as BingoSection[]) ?? []
+    // The owner keeps full reach across every tenant; everyone else is limited
+    // to boards they actually own.
+    setMyBoards(isOwner ? all : all.filter(s => (s.owner_id ?? null) === workingOwnerValue))
+  }, [isOwner, workingOwnerValue])
 
   const loadDetail = useCallback(async (eventId: string) => {
     const [{ data: sc }, { data: eb }, { data: mem }] = await Promise.all([
@@ -235,7 +250,7 @@ export function BingoDashEvents() {
   const activeEvent = events.find(e => e.id === active) ?? null
   const visible = events.filter(e => e.archived === showArchived)
   const archivedCount = events.filter(e => e.archived).length
-  const mine = (t: string | null) => t === account?.id || (account?.role === 'owner' && t === null)
+  const mine = (t: string | null) => (t ?? null) === workingOwnerValue || (isOwner && t === null)
   const iCreated = !!activeEvent && activeEvent.created_by === account?.id
   const anyLineBonus = scores.some(r => Number(r.line_bonus) > 0)
   // The projector hides the facilitator's manual bonus unless "Total after

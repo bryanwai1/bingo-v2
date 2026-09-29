@@ -23,7 +23,15 @@ create table public.bingo_award_configs (
   holding_title             text,
   main_title                text,
   main_subtitle             text,
-  main_tagline              text
+  main_tagline              text,
+
+  -- Award place slides (tracked: scoreboard/20260927_award_place_slides.sql).
+  -- image_url predates them and was unread until they reclaimed it as the
+  -- photo applied to all five places; slide_photos overrides it per slide id.
+  award_slogan              text,
+  -- Main slide background (tracked: scoreboard/20260927_award_main_bg.sql).
+  main_bg                   text,
+  slide_photos              jsonb not null default '{}'::jsonb
 );
 
 alter table public.bingo_award_configs enable row level security;

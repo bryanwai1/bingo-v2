@@ -7,25 +7,14 @@ import { ParticleBackground } from '../components/ParticleBackground'
 import {
   buildAwardSlides,
   normalizeSlideOrder,
+  groupLabel,
+  mainBackground,
+  type PlaceKind,
+  DEFAULT_PRIZE_COUNTS,
   type AwardSlideDescriptor,
 } from '../lib/awardSlides'
-import { duelBonusByTeam } from '../hooks/useBingoDuels'
 import type { BingoSection, BingoTeam, BingoScan, BingoTask, BingoAwardConfig, BingoDuel } from '../types/database'
-import { scoreWithBingoLines } from '../lib/bingoLines'
-
-const BINGO_LINES: number[][] = [
-  [0, 1, 2, 3, 4], [5, 6, 7, 8, 9], [10, 11, 12, 13, 14], [15, 16, 17, 18, 19], [20, 21, 22, 23, 24],
-  [0, 5, 10, 15, 20], [1, 6, 11, 16, 21], [2, 7, 12, 17, 22], [3, 8, 13, 18, 23], [4, 9, 14, 19, 24],
-  [0, 6, 12, 18, 24], [4, 8, 12, 16, 20],
-]
-
-const DEFAULT_COUNTS = {
-  consolation_count: 0,
-  consolation_group_count: 2,
-  third_count: 1,
-  second_count: 1,
-  first_count: 1,
-}
+import { rankTeams, formatScore, type TeamScore, type BoardTask } from '../lib/teamScore'
 
 export function BingoDashAwardSlides() {
   const { sectionSlug } = useParams<{ sectionSlug?: string }>()
@@ -115,16 +104,11 @@ function SectionPicker() {
 }
 
 // ── Slide show ───────────────────────────────────────────────────────────
-type RankedTeam = {
-  team: BingoTeam
-  basePoints: number
-  bonusPoints: number
-  total: number
-  bingos: number
-  tasksDone: number
-  /** When this team last scored; earlier wins a tie. Infinity = never scored. */
-  reachedAt: number
-}
+// The ceremony ranks on the SHARED score (src/lib/teamScore.ts). It used to
+// carry its own copy, which had drifted from the projector's — no tiebreak,
+// no duel time in the tie-break, and its own duplicated line table. The room
+// could therefore watch one winner on the board and see another crowned.
+type RankedTeam = TeamScore
 
 function AwardShow({ sectionSlug }: { sectionSlug: string }) {
   const navigate = useNavigate()
@@ -176,85 +160,13 @@ function AwardShow({ sectionSlug }: { sectionSlug: string }) {
     return () => { cancelled = true }
   }, [sectionSlug])
 
-  const ranked: RankedTeam[] = useMemo(() => {
-    const duelBonuses = duelBonusByTeam(duels)
-    if (!teams.length || !gridTasks.length) {
-      return teams
-        .map<RankedTeam>(team => ({
-          team,
-          basePoints: 0,
-          bonusPoints: team.bonus_points ?? 0,
-          total: team.bonus_points ?? 0,
-          bingos: 0,
-          tasksDone: 0,
-          reachedAt: Infinity,
-        }))
-        .sort(rankCompare)
-    }
-    const slots: (BingoTask | null)[] = Array(25).fill(null)
-    gridTasks.forEach(t => { if (t.sort_order >= 0 && t.sort_order < 25) slots[t.sort_order] = t })
-    const gridTaskIds = new Set(gridTasks.map(t => t.id))
-    const computed: RankedTeam[] = teams.map(team => {
-      const teamScans = scans.filter(sc => sc.team_id === team.id)
-      // A card placed in several boxes on this board completes per box
-      // (scan.board_card_id); scans from before that column existed have
-      // none and still count toward every box sharing their task_id — see
-      // supabase/scan-completion/20260910_scan_board_card_id.sql.
-      const completedPlacementIds = new Set(
-        teamScans.filter(sc => sc.completed && sc.board_card_id).map(sc => sc.board_card_id as string),
-      )
-      const legacyCompletedTaskIds = new Set(
-        teamScans.filter(sc => sc.completed && !sc.board_card_id && gridTaskIds.has(sc.task_id)).map(sc => sc.task_id),
-      )
-      const completedPlacements = gridTasks.filter(t =>
-        (t.placement_id && completedPlacementIds.has(t.placement_id)) || legacyCompletedTaskIds.has(t.id),
-      )
-      const completedIds = new Set(completedPlacements.map(t => t.placement_id ?? t.id))
-      const bingos = BINGO_LINES.filter(line => line.every(i => {
-        const t = slots[i]
-        return t && completedIds.has(t.placement_id ?? t.id)
-      })).length
-      // Tile points replayed in completion order so each bingo line lifts the
-      // total standing at that moment, then contest bonuses added on top — a
-      // winning defender has no tile, so the duel bonus is the only record of
-      // their win and is never scaled.
-      const completedAt = new Map<string, number>()
-      for (const sc of teamScans) {
-        if (!sc.completed) continue
-        const when = sc.completed_at ? Date.parse(sc.completed_at) : 0
-        const key = sc.board_card_id ?? sc.task_id
-        completedAt.set(key, Math.min(completedAt.get(key) ?? Infinity, when))
-      }
-      const basePoints = scoreWithBingoLines(
-        completedPlacements.map(t => ({
-          id: t.placement_id ?? t.id,
-          points: t.points ?? 0,
-          at: completedAt.get(t.placement_id ?? '') ?? completedAt.get(t.id) ?? 0,
-        })),
-        slots.map(t => t ? { ...t, id: t.placement_id ?? t.id } : null),
-      ).total + (duelBonuses.get(team.id) ?? 0)
-      const bonusPoints = team.bonus_points ?? 0
-      const reachedAt = teamScans.reduce(
-        (latest, sc) => (sc.completed && gridTaskIds.has(sc.task_id) && sc.completed_at)
-          ? Math.max(latest, Date.parse(sc.completed_at)) : latest,
-        0,
-      )
-      return {
-        team,
-        basePoints,
-        bonusPoints,
-        total: basePoints + bonusPoints,
-        bingos,
-        tasksDone: completedIds.size,
-        reachedAt: reachedAt || Infinity,
-      }
-    })
-    computed.sort(rankCompare)
-    return computed
-  }, [teams, scans, gridTasks, duels])
+  const ranked: RankedTeam[] = useMemo(
+    () => rankTeams({ teams, scans, boardTasks: gridTasks as BoardTask[], duels }),
+    [teams, scans, gridTasks, duels],
+  )
 
   const slides: AwardSlideDescriptor[] = useMemo(() => {
-    const counts = config ?? DEFAULT_COUNTS
+    const counts = config ?? DEFAULT_PRIZE_COUNTS
     const order = normalizeSlideOrder(config?.slide_order ?? null, counts)
     return buildAwardSlides(order)
   }, [config])
@@ -320,7 +232,9 @@ function AwardShow({ sectionSlug }: { sectionSlug: string }) {
   const isHsbcSlide = current.kind === 'main' || current.kind === 'closing'
   const slideStyle = isHsbcSlide
     ? {
-        background: 'linear-gradient(135deg, #DB0011 0%, #8B0009 100%)',
+        background: current.kind === 'main'
+          ? mainBackground(config?.main_bg)
+          : mainBackground(null),
         fontFamily: `-apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif`,
       }
     : {
@@ -342,6 +256,7 @@ function AwardShow({ sectionSlug }: { sectionSlug: string }) {
         config={config}
         teams={teams}
         ranked={ranked}
+        decimals={!!section.decimal_points}
       />
 
       {/* Top nav */}
@@ -479,18 +394,6 @@ function AwardShow({ sectionSlug }: { sectionSlug: string }) {
 }
 
 // Sort: higher total first, then more bingos, then more tasks done, then name asc
-function rankCompare(a: RankedTeam, b: RankedTeam): number {
-  return (
-    b.total - a.total ||
-    b.bingos - a.bingos ||
-    b.tasksDone - a.tasksDone ||
-    // Dead heat on score: the team that got there first ranks higher. Falling
-    // through to the name here ranked a genuine tie alphabetically, which is
-    // what let a later finisher take the higher award.
-    a.reachedAt - b.reachedAt ||
-    a.team.name.localeCompare(b.team.name)
-  )
-}
 
 // ── Single slide renderer ─────────────────────────────────────────────────
 const TIER = {
@@ -557,7 +460,7 @@ function tierTitle(kind: 'consolation' | 'third' | 'second' | 'first', rank: num
 }
 
 function AwardSlideRenderer({
-  slideIdx, descriptor, teamsForSlide, config, teams, ranked,
+  slideIdx, descriptor, teamsForSlide, config, teams, ranked, decimals,
 }: {
   slideIdx: number
   descriptor: AwardSlideDescriptor
@@ -565,12 +468,14 @@ function AwardSlideRenderer({
   config: BingoAwardConfig | null
   teams: BingoTeam[]
   ranked: RankedTeam[]
+  /** Board's points format — the score carries a tiebreak fraction. */
+  decimals: boolean
 }) {
   if (descriptor.kind === 'main') return <MainSlide slideIdx={slideIdx} config={config} />
   if (descriptor.kind === 'intro') return <IntroSlide slideIdx={slideIdx} />
   if (descriptor.kind === 'holding') return <HoldingSlide slideIdx={slideIdx} />
   if (descriptor.kind === 'lineup') return <LineupSlide slideIdx={slideIdx} teams={teams} />
-  if (descriptor.kind === 'scoreboard') return <ScoreboardSlide slideIdx={slideIdx} ranked={ranked} />
+  if (descriptor.kind === 'scoreboard') return <ScoreboardSlide slideIdx={slideIdx} ranked={ranked} decimals={decimals} />
   if (descriptor.kind === 'closing') return <ClosingSlide slideIdx={slideIdx} config={config} />
   if (descriptor.kind === 'consolation_group') {
     return (
@@ -578,6 +483,20 @@ function AwardSlideRenderer({
         slideIdx={slideIdx}
         descriptor={descriptor}
         teamsForSlide={teamsForSlide}
+        decimals={decimals}
+      />
+    )
+  }
+  // The five places use the new PlaceSlide design; `consolation` keeps the
+  // medal-ring PrizeSlide, which still suits honorable mentions.
+  if (descriptor.kind !== 'consolation') {
+    return (
+      <PlaceSlide
+        slideIdx={slideIdx}
+        descriptor={descriptor}
+        config={config}
+        decimals={decimals}
+        ranked={teamsForSlide[0] ?? null}
       />
     )
   }
@@ -585,6 +504,7 @@ function AwardSlideRenderer({
     <PrizeSlide
       slideIdx={slideIdx}
       descriptor={descriptor}
+      decimals={decimals}
       ranked={teamsForSlide[0] ?? null}
     />
   )
@@ -875,7 +795,7 @@ function LineupSlide({ slideIdx, teams }: { slideIdx: number; teams: BingoTeam[]
 }
 
 // ── Scoreboard slide: full ranked list of every team ──────────────────────
-function ScoreboardSlide({ slideIdx, ranked }: { slideIdx: number; ranked: RankedTeam[] }) {
+function ScoreboardSlide({ slideIdx, ranked, decimals }: { slideIdx: number; ranked: RankedTeam[]; decimals: boolean }) {
   const count = ranked.length
   const cols = count <= 8 ? 1 : 2
   const rows = Math.max(1, Math.ceil(count / cols))
@@ -977,7 +897,7 @@ function ScoreboardSlide({ slideIdx, ranked }: { slideIdx: number; ranked: Ranke
                   textShadow: isPodium ? '0 0 18px rgba(253,224,71,0.5)' : 'none',
                 }}
               >
-                {r.total.toLocaleString()}
+                {formatScore(r.total, decimals)}
                 <span className="text-white/50 font-light text-[0.6em] ml-1.5">pts</span>
               </p>
             </div>
@@ -1095,11 +1015,12 @@ function ClosingSlide({ slideIdx, config }: { slideIdx: number; config: BingoAwa
 
 // ── Prize slide (consolation/third/second/first) ──────────────────────────
 function PrizeSlide({
-  slideIdx, descriptor, ranked,
+  slideIdx, descriptor, ranked, decimals,
 }: {
   slideIdx: number
   descriptor: AwardSlideDescriptor
   ranked: RankedTeam | null
+  decimals: boolean
 }) {
   const kind = descriptor.kind as 'consolation' | 'third' | 'second' | 'first'
   const cfg = TIER[kind]
@@ -1222,7 +1143,7 @@ function PrizeSlide({
                 letterSpacing: '0.02em',
               }}
             >
-              {ranked!.total.toLocaleString()} <span className="text-white/70 font-light">pts</span>
+              {formatScore(ranked!.total, decimals)} <span className="text-white/70 font-light">pts</span>
             </p>
           </div>
         </>
@@ -1238,13 +1159,182 @@ function PrizeSlide({
   )
 }
 
+// ── Place slides: 1st - 5th ──────────────────────────────────
+//
+// The five place slides ARE the artwork in public/award/<n>-place.png: a
+// finished 1672x941 composition with four empty slots. So this renders the
+// image and drops four values into it - no headline, laurels, stat boxes,
+// spotlight or confetti are drawn in code, because the PNG already has them.
+//
+// The slots are measured from the artwork's own pixels and are identical in
+// all five files, so one table serves every place. Everything is authored in
+// those same artwork pixels and the whole canvas is scaled to fit, so a
+// laptop and the ballroom projector show the same composition at different
+// sizes rather than a reflowed one.
+
+const CANVAS_W = 1672
+const CANVAS_H = 941
+
+/**
+ * Slot rectangles in artwork pixels. Measured from the PNG, not eyeballed.
+ *
+ * The artwork ships with placeholder content baked in ("00", "0000",
+ * "YOUR TEAM PHOTO HERE"), so a value slot must COVER its panel rather than
+ * just draw on top of it - hence `fill`, sampled from the panel's interior.
+ * Each panel is flat to within two levels, so a solid colour is invisible.
+ */
+const SLOTS = {
+  photo:  { left: 118, top: 312, width: 683, height: 438 },
+  group:  { left: 871, top: 550, width: 295, height: 106, fill: 'rgb(233,232,237)', radius: 14 },
+  points: { left: 1217, top: 550, width: 371, height: 106, fill: 'rgb(249,229,221)', radius: 14 },
+  slogan: { left: 917, top: 736, width: 623, height: 70, fill: 'rgb(254,247,230)', radius: 10 },
+}
+
+/** The artwork's own numeral colour, sampled from the placeholder digits. */
+const INK = '#05132c'
+
+/** Numerals do not inherit the ceremony's serif stack: 'Cinzel' is not loaded
+ *  anywhere, so it resolves to Georgia on some machines and not others. */
+const NUM_FONT = `system-ui, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif`
+
+const PLACE_FILE: Record<PlaceKind, string> = {
+  first: '1', second: '2', third: '3', fourth: '4', fifth: '5',
+}
+
+function SlideCanvas({ children }: { children: React.ReactNode }) {
+  const [scale, setScale] = useState(1)
+  useEffect(() => {
+    const fit = () =>
+      setScale(Math.min(window.innerWidth / CANVAS_W, window.innerHeight / CANVAS_H))
+    fit()
+    window.addEventListener('resize', fit)
+    return () => window.removeEventListener('resize', fit)
+  }, [])
+  return (
+    <div className="absolute inset-0 overflow-hidden flex items-center justify-center bg-black">
+      <div
+        style={{
+          width: CANVAS_W,
+          height: CANVAS_H,
+          flex: '0 0 auto',
+          position: 'relative',
+          transform: `scale(${scale})`,
+          transformOrigin: 'center',
+        }}
+      >
+        {children}
+      </div>
+    </div>
+  )
+}
+
+/**
+ * Photo precedence: per-place override -> the shared award photo -> the team's
+ * own photo. With none of those we render nothing and the artwork's own
+ * "YOUR TEAM PHOTO HERE" panel shows through, which is already a deliberate
+ * placeholder - no code-drawn fallback needed.
+ */
+function placePhoto(
+  config: BingoAwardConfig | null,
+  slideId: string,
+  team: BingoTeam | null | undefined,
+): string | null {
+  const overrides = config?.slide_photos ?? {}
+  return overrides[slideId] || config?.image_url || team?.photo_url || null
+}
+
+/** Shrinks to stay on one line: a wrapped numeral in a fixed slot looks
+ *  broken. 0.62 approximates the digit advance of NUM_FONT at weight 900. */
+function fitText(value: string, slotWidth: number, max: number): number {
+  return Math.max(18, Math.min(max, Math.floor((slotWidth - 24) / (value.length * 0.62))))
+}
+
+function SlotText({
+  slot, value, max, weight = 900,
+}: {
+  slot: { left: number; top: number; width: number; height: number; fill: string; radius: number }
+  value: string
+  max: number
+  weight?: number
+}) {
+  const { fill, radius, ...rect } = slot
+  return (
+    <div
+      style={{
+        position: 'absolute',
+        ...rect,
+        background: fill,
+        borderRadius: radius,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        fontFamily: NUM_FONT,
+        fontWeight: weight,
+        color: INK,
+        fontSize: fitText(value, slot.width, max),
+        lineHeight: 1,
+        whiteSpace: 'nowrap',
+        letterSpacing: '-0.01em',
+      }}
+    >
+      {value}
+    </div>
+  )
+}
+
+function PlaceSlide({
+  slideIdx, descriptor, ranked, config, decimals,
+}: {
+  slideIdx: number
+  descriptor: AwardSlideDescriptor
+  ranked: RankedTeam | null
+  config: BingoAwardConfig | null
+  decimals: boolean
+}) {
+  const kind = descriptor.kind as PlaceKind
+  const team = ranked?.team
+  const photo = placePhoto(config, descriptor.id, team)
+  const slogan = config?.award_slogan?.trim() || ''
+
+  return (
+    <div key={slideIdx} className="absolute inset-0 award-slide-enter">
+      <SlideCanvas>
+        <img
+          src={`/award/${PLACE_FILE[kind]}-place.png`}
+          alt=""
+          style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }}
+        />
+
+        {photo && (
+          <img
+            src={photo}
+            alt={team?.name ?? ''}
+            style={{ position: 'absolute', ...SLOTS.photo, objectFit: 'cover' }}
+          />
+        )}
+
+        {team && <SlotText slot={SLOTS.group} value={groupLabel(team.name)} max={88} />}
+        {team && (
+          <SlotText
+            slot={SLOTS.points}
+            value={formatScore(ranked!.total, decimals)}
+            max={88}
+          />
+        )}
+        {slogan && <SlotText slot={SLOTS.slogan} value={slogan} max={38} weight={800} />}
+      </SlideCanvas>
+    </div>
+  )
+}
+
 // ── Consolation group slide (3 teams revealed together) ──────────────────
 function ConsolationGroupSlide({
-  slideIdx, descriptor, teamsForSlide,
+  slideIdx, descriptor, teamsForSlide, decimals,
 }: {
   slideIdx: number
   descriptor: AwardSlideDescriptor
   teamsForSlide: RankedTeam[]
+  decimals: boolean
 }) {
   const cfg = TIER.consolation
   const ranks = descriptor.teamRanks ?? []
@@ -1358,7 +1448,7 @@ function ConsolationGroupSlide({
                     letterSpacing: '0.02em',
                   }}
                 >
-                  {entry.team.total.toLocaleString()} <span className="text-white/70 font-light text-base">pts</span>
+                  {formatScore(entry.team.total, decimals)} <span className="text-white/70 font-light text-base">pts</span>
                 </p>
               )}
             </div>

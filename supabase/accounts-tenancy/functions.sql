@@ -343,10 +343,10 @@ begin
 
   -- Award slides config (one row per board, if the template has one).
   insert into bingo_award_configs
-        (section_id, total_points, image_url,
+        (section_id, total_points, image_url, award_slogan, slide_photos, main_bg,
          consolation_count, consolation_group_count, third_count, second_count, first_count,
          slide_order, slide_points, holding_title, main_title, main_subtitle, main_tagline)
-  select new_section, total_points, image_url,
+  select new_section, total_points, image_url, award_slogan, slide_photos, main_bg,
          consolation_count, consolation_group_count, third_count, second_count, first_count,
          slide_order, slide_points, holding_title, main_title, main_subtitle, main_tagline
     from bingo_award_configs

@@ -258,7 +258,18 @@ export interface BingoAwardConfig {
   id: string
   section_id: string
   total_points: number
+  /** Place slides: the photo applied to all of 1st-5th unless overridden. */
   image_url: string | null
+  /** Shared slogan shown on every place slide. Null until an admin sets one. */
+  award_slogan?: string | null
+  /** Main slide background, as #rrggbb. Null keeps the HSBC red. */
+  main_bg?: string | null
+  /**
+   * Per-place photo overrides keyed by slide id ("first:0"), beating
+   * `image_url`. Optional and always read as `?? {}` so a database without the
+   * 20260927 migration shows no overrides instead of failing mid-ceremony.
+   */
+  slide_photos?: Record<string, string> | null
   consolation_count: number
   consolation_group_count: number
   third_count: number

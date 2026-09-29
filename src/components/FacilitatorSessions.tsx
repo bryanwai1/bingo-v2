@@ -49,7 +49,7 @@ function CopyButton({ text, label }: { text: string; label: string }) {
 }
 
 export function FacilitatorSessions() {
-  const { account: me } = useBingoAuth()
+  const { account: me, isOwner } = useBingoAuth()
   const [sessions, setSessions] = useState<BingoFacilitatorSession[]>([])
   const [accounts, setAccounts] = useState<BingoAccount[]>([])
   const [loading, setLoading] = useState(true)
@@ -62,16 +62,21 @@ export function FacilitatorSessions() {
   const [creating, setCreating] = useState(false)
 
   const load = useCallback(async () => {
-    // RLS does the scoping for us: the owner reads every pass and every
-    // account, a lead reads only their own passes and the crew sitting on them.
+    // The scoping is done HERE, not by RLS. The documented per-tenant policies
+    // are not what this database runs (one blanket policy per table), so an
+    // unfiltered read returns every account's passes to whoever asks. A lead
+    // must only ever see the passes they host.
     const [sessionsRes, accountsRes] = await Promise.all([
       supabase.from('bingo_facilitator_sessions').select('*').order('created_at', { ascending: false }),
       supabase.from('bingo_accounts').select('*'),
     ])
-    if (sessionsRes.data) setSessions(sessionsRes.data as BingoFacilitatorSession[])
+    if (sessionsRes.data) {
+      const all = sessionsRes.data as BingoFacilitatorSession[]
+      setSessions(isOwner ? all : all.filter(x => x.host_id === me?.id))
+    }
     if (accountsRes.data) setAccounts(accountsRes.data as BingoAccount[])
     setLoading(false)
-  }, [])
+  }, [isOwner, me?.id])
 
   useEffect(() => {
     load()
@@ -86,10 +91,17 @@ export function FacilitatorSessions() {
     return () => { supabase.removeChannel(channel) }
   }, [load])
 
-  // Whose boards a pass can point at. For a lead this resolves to just
-  // themselves, which hides the picker below.
-  const hostOptions = accounts.filter(a =>
-    a.role === 'owner' || (a.status === 'approved' && !a.facilitator_host))
+  // Whose boards a pass can point at.
+  //
+  // ONLY the owner may issue a pass for another tenant — create_facilitator_session
+  // enforces that server-side, so offering a lead anyone else's account was an
+  // invitation to a guaranteed failure, and it leaked the other accounts'
+  // email addresses into the dropdown. The comment this replaces claimed RLS
+  // scoped the account list; on this database it does not (a single blanket
+  // policy per table), so the scoping is done here.
+  const hostOptions = isOwner
+    ? accounts.filter(a => a.role === 'owner' || (a.status === 'approved' && !a.facilitator_host))
+    : accounts.filter(a => a.id === me?.id)
 
   const createSession = async () => {
     setCreating(true)
@@ -245,11 +257,16 @@ export function FacilitatorSessions() {
           <select value={newHost || me?.id || ''} onChange={e => setNewHost(e.target.value)}
             title="Whose boards this crew works on"
             className="px-3 py-2 rounded-xl a-surface border-2 a-border a-text text-sm focus:border-[color:var(--a-brand)] outline-none transition-colors">
-            {hostOptions.map(h => (
-              <option key={h.id} value={h.id}>
-                {h.id === me?.id ? 'My boards' : h.email ?? h.id}
-              </option>
-            ))}
+            {hostOptions.map(h => {
+              const sameEmail = hostOptions.filter(o => o.email && o.email === h.email).length > 1
+              return (
+                <option key={h.id} value={h.id}>
+                  {h.id === me?.id
+                    ? 'My boards'
+                    : `${h.email ?? h.id}${sameEmail ? ` (${h.id.slice(0, 6)})` : ''}`}
+                </option>
+              )
+            })}
           </select>
         )}
         <button onClick={createSession} disabled={creating}

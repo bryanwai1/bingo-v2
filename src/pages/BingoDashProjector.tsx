@@ -2,9 +2,9 @@ import { useCallback, useEffect, useState, useLayoutEffect, useRef } from 'react
 import { useParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { ParticleBackground } from '../components/ParticleBackground'
+import { useFullscreen } from '../hooks/useFullscreen'
 import { getScoreboardTheme } from '../lib/scoreboardThemes'
-import { buildBingoSlots, scoreWithBingoLines } from '../lib/bingoLines'
-import { duelBonusByTeam } from '../hooks/useBingoDuels'
+import { scoreTeams, compareTeamScores, formatScore, type TeamScore, type BoardTask } from '../lib/teamScore'
 import type { BingoTask, BingoTeam, BingoScan, BingoSettings, BingoSection, BingoBoardCard, BingoDuel } from '../types/database'
 
 function formatTime(totalSeconds: number): string {
@@ -14,25 +14,153 @@ function formatTime(totalSeconds: number): string {
   return `${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`
 }
 
-type Row = {
-  team: BingoTeam
-  /** Tile points + contest bonuses won in duels — everything earned in play. */
-  points: number
-  /** Contest bonus alone, so the board can show where a duel win landed. */
-  duelBonus: number
-  /** Manual bonus the admin adds during the award ceremony. */
-  bonus: number
-  bingos: number
-  tilePoints: number
-  lineBonus: number
-  tasksDone: number
-  /**
-   * When this team last scored — the moment they reached their current total.
-   * Ties are broken in favour of whoever got there first, so a team that
-   * matches the leader later does not leapfrog them. Infinity = never scored.
-   */
-  reachedAt: number
+// ── Fit-to-screen ──────────────────────────────────────────────────────────
+//
+// The board used to grow past the bottom of the screen, putting the lowest
+// ranks below the fold where a room watching a projector can never see them.
+// Rather than a second set of responsive font sizes to keep in step with the
+// first, the existing rows are authored at a fixed width and the whole board
+// is scaled to the space available.
+
+/**
+ * A column is authored within a RANGE, not at one fixed width.
+ *
+ * The board is scaled, so "wider canvas" and "smaller text" are the same
+ * thing: rendered width = canvas width x scale. Pinning the rendered width to
+ * the screen and solving for the canvas therefore turns spare horizontal space
+ * directly into type size, and makes sideways scrolling impossible.
+ *
+ * COL_MIN is where the row runs out of room. The stat columns are sized from
+ * measured text, not guessed:
+ *   - points 200: "12,883.0" is 198px at 48px/900, and the bonus breakdown
+ *     line under it is 219px - this column has NO slack and must not shrink.
+ *   - lines 130: "12" plus the smaller "/12" is ~92px, header 91px.
+ *   - tasks 130: three digits 81px, "COMPLETED" 81px.
+ * That leaves 652px spoken for (540 fixed + 64 gaps + 48 padding), so 900
+ * still gives the team name ~248px. COL_MAX is where extra width stops buying
+ * anything and just reopens the gap between the name and the points, since
+ * 1fr swallows all of it.
+ */
+const COL_MIN = 900
+const COL_MAX = 1150
+const COL_GAP = 40
+/**
+ * Two columns once one would squeeze the text, and only where there is room.
+ *
+ * Keyed on row COUNT, never on the resulting scale - choosing columns by scale
+ * would feed back into the scale that chose them.
+ *
+ * The number is measured, not guessed. Two columns halve the rows but double
+ * the width each one needs, and the width cap is the binding one: at 1080p two
+ * columns top out at 1840/2040 = 0.90 while one column is bound by height (row
+ * pitch 124px). One column wins until eight rows, where 0.90 beats 0.72.
+ * Ceiling: on shorter viewports the crossover arrives a row earlier; not worth
+ * predicting both layouts to chase.
+ */
+const TWO_COL_FROM = 8
+const TWO_COL_MIN_WIDTH = 1024
+
+/**
+ * In-page zoom, which scales only the board - the browser's own zoom would
+ * resize the whole Chrome UI with it.
+ *
+ * 100% is the auto-fit: the largest the board can be with every group on one
+ * screen and nothing overlapping. It is a genuine ceiling, not a chosen
+ * number - past it the row would have to be wider than the screen - so zoom
+ * runs downwards from it rather than up.
+ */
+const ZOOM_MIN = 0.5
+const ZOOM_MAX = 1
+const ZOOM_STEP = 0.1
+const ZOOM_KEY = 'bingo-projector-zoom'
+
+function loadZoom(): number {
+  // Private mode and blocked site data both throw here; a projector that
+  // refuses to render because it cannot read a preference would be worse than
+  // one that forgets it.
+  try {
+    const v = Number(localStorage.getItem(ZOOM_KEY))
+    if (Number.isFinite(v) && v >= ZOOM_MIN && v <= ZOOM_MAX) return v
+  } catch { /* fall through to the default */ }
+  return 1
 }
+/**
+ * Makes the board as large as it can be while every group stays on screen and
+ * nothing scrolls.
+ *
+ * The scale magnifies the TEXT, not the column: rendered width is pinned to
+ * the screen, so a bigger scale is met by a correspondingly NARROWER canvas
+ * (canvas = available / k). The column keeps its place on screen and the type
+ * inside it grows. A plain uniform scale would instead widen the whole row
+ * until it ran off the side.
+ *
+ * k is capped by two things, and only these:
+ *   - height: every row must fit, so k <= availableHeight / contentHeight
+ *   - the row's own minimum width: k <= availableWidth / minCanvas
+ * Both are hard limits, so `zoom` only ever scales DOWN from the fit.
+ */
+function FitBoard({
+  canvasMin, canvasMax, zoom, children,
+}: {
+  canvasMin: number
+  canvasMax: number
+  zoom: number
+  children: React.ReactNode
+}) {
+  const outer = useRef<HTMLDivElement>(null)
+  const inner = useRef<HTMLDivElement>(null)
+  const [nat, setNat] = useState({ w: canvasMin, h: 0 })
+  const [fit, setFit] = useState(1)
+  const [canvasWidth, setCanvasWidth] = useState(canvasMax)
+
+  useLayoutEffect(() => {
+    const measure = () => {
+      const o = outer.current, i = inner.current
+      if (!o || !i) return
+      // offsetWidth/Height are the UNSCALED box - transforms do not affect
+      // them, which is what makes measuring inside a scaled element work.
+      const w = i.offsetWidth, h = i.offsetHeight
+      if (!w || !h) return
+      // Only write when something actually moved: these setters re-render,
+      // and this effect runs after layout, so an unconditional write is an
+      // infinite loop.
+      setNat(prev => (prev.w === w && prev.h === h ? prev : { w, h }))
+      // Row height comes from the type, not the width, so contentHeight is
+      // effectively independent of the canvas width being solved for here -
+      // there is no circular dependency to converge.
+      const next = Math.min(o.clientHeight / h, o.clientWidth / canvasMin)
+      setFit(prev => (Math.abs(prev - next) < 0.001 ? prev : next))
+      // Pin the rendered width to the screen, within the column's range.
+      const want = Math.min(canvasMax, Math.max(canvasMin, o.clientWidth / (next * zoom)))
+      setCanvasWidth(prev => (Math.abs(prev - want) < 1 ? prev : want))
+    }
+    measure()
+    window.addEventListener('resize', measure)
+    return () => window.removeEventListener('resize', measure)
+  }, [canvasWidth, canvasMin, canvasMax, zoom, children])
+
+  const k = fit * zoom
+
+  return (
+    <div ref={outer} className="flex-1 min-h-0 overflow-hidden flex">
+      {/* transform scales painting but not layout, so this box carries the
+          scaled size - it is what centring and the parent's sizing see. */}
+      <div style={{ width: nat.w * k, height: nat.h * k, margin: 'auto', flexShrink: 0 }}>
+        <div
+          ref={inner}
+          style={{ width: canvasWidth, transform: `scale(${k})`, transformOrigin: 'top left' }}
+        >
+          {children}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// The projector's row IS the shared score — see src/lib/teamScore.ts. It used
+// to compute its own, and the award ceremony computed a second, subtly
+// different one.
+type Row = TeamScore
 
 export function BingoDashProjector() {
   // Optional /bingo-dash/projector/:sectionSlug — pins the projector to one
@@ -49,6 +177,22 @@ export function BingoDashProjector() {
   const [timerDisplay, setTimerDisplay] = useState('00:00')
   const [timerRunning, setTimerRunning] = useState(false)
   const [showBonus, setShowBonus] = useState(false)
+  // Only used to decide whether to scale at all, and how many columns - the
+  // fit factor itself is measured inside FitBoard.
+  const [viewportWidth, setViewportWidth] = useState(() => window.innerWidth)
+  useEffect(() => {
+    const onResize = () => setViewportWidth(window.innerWidth)
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [])
+  const [zoom, setZoom] = useState(loadZoom)
+  const { isFullscreen, toggle: toggleFullscreen } = useFullscreen()
+
+  const setZoomPersisted = useCallback((next: number) => {
+    const v = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, Math.round(next * 10) / 10))
+    setZoom(v)
+    try { localStorage.setItem(ZOOM_KEY, String(v)) } catch { /* best-effort */ }
+  }, [])
   // Live-status readout, so "is it updating?" can be answered from across
   // the room: realtime channel state and when data was last fetched.
   const [liveState, setLiveState] = useState<'connecting' | 'live' | 'offline'>('connecting')
@@ -161,110 +305,21 @@ export function BingoDashProjector() {
     .filter(bc => tasks.some(x => x.id === bc.task_id))
     .map(bc => ({ ...tasks.find(x => x.id === bc.task_id)!, sort_order: bc.slot, in_grid: true, placement_id: bc.id }))
     .sort((a, b) => a.sort_order - b.sort_order)
-  const slots = buildBingoSlots(gridTasks)
-  // completedBingoLines checks slot.id against completedIds; feed it the
-  // placement id (falling back to task id for pre-fix rows with none) so
-  // line detection is per box, matching completedIds below.
-  const lineSlots = slots.map(t => t ? { ...t, id: t.placement_id ?? t.id } : null)
-
-
-
-  // Contest bonuses won in duels. A winning DEFENDER has no tile to hang points
-  // on, so this is the only place their win shows up.
-  const duelBonuses = duelBonusByTeam(duels)
-
-  const rows: Row[] = sectionTeams.map(team => {
-    const teamScans = scans.filter(s => s.team_id === team.id)
-    const gridTaskIds = new Set(gridTasks.map(t => t.id))
-    // A completed scan counts toward the box it was recorded against
-    // (board_card_id); scans from before that column existed have none, and
-    // still count toward every box sharing their task_id (today's behavior
-    // for that legacy data only — see the migration note above).
-    const completedPlacementIds = new Set(
-      teamScans.filter(s => s.completed && s.board_card_id).map(s => s.board_card_id as string),
-    )
-    const legacyCompletedTaskIds = new Set(
-      teamScans.filter(s => s.completed && !s.board_card_id && gridTaskIds.has(s.task_id)).map(s => s.task_id),
-    )
-    const completedIds = new Set(
-      gridTasks
-        .filter(t => (t.placement_id && completedPlacementIds.has(t.placement_id)) || legacyCompletedTaskIds.has(t.id))
-        .map(t => t.placement_id ?? t.id),
-    )
-    const duelBonus = duelBonuses.get(team.id) ?? 0
-    // When each box was crossed off, so the line multipliers can be applied in
-    // the order they were actually earned — a line lifts the total standing at
-    // that moment, not the final one.
-    const completedAt = new Map<string, number>()
-    for (const sc of teamScans) {
-      if (!sc.completed) continue
-      const when = sc.completed_at ? Date.parse(sc.completed_at) : 0
-      const key = sc.board_card_id ?? sc.task_id
-      completedAt.set(key, Math.min(completedAt.get(key) ?? Infinity, when))
-    }
-    const { total: scaledTilePoints, tilePoints, lineBonus, bingos } = scoreWithBingoLines(
-      gridTasks
-        .filter(t => completedIds.has(t.placement_id ?? t.id))
-        .map(t => ({
-          id: t.placement_id ?? t.id,
-          points: t.points ?? 0,
-          at: completedAt.get(t.placement_id ?? '') ?? completedAt.get(t.id) ?? 0,
-        })),
-      lineSlots,
-    )
-    const tasksDone = completedIds.size
-    const bonus = team.bonus_points ?? 0
-    const lastScan = teamScans.reduce((latest, s) => {
-      if (!s.completed || !gridTaskIds.has(s.task_id) || !s.completed_at) return latest
-      return Math.max(latest, Date.parse(s.completed_at))
-    }, 0)
-    // A duel win is a scoring moment too, so it counts for tie-breaking.
-    const lastDuel = duels.reduce((latest, d) => {
-      if (d.winner_team_id !== team.id || !d.resolved_at) return latest
-      return Math.max(latest, Date.parse(d.resolved_at))
-    }, 0)
-    const reachedAt = Math.max(lastScan, lastDuel)
-    return {
-      team,
-      // A hidden hundredth per team, distinct across the board, so two teams
-      // on the same cards cannot tie. Added to the total rather than per scan:
-      // per scan it would grow with card count and become a volume bonus.
-      points: scaledTilePoints + duelBonus + Number(team.tiebreak ?? 0),
-      tilePoints,
-      lineBonus,
-      duelBonus,
-      bonus,
-      bingos,
-      tasksDone,
-      reachedAt: reachedAt || Infinity,
-    }
+  // Scoring lives in src/lib/teamScore.ts so the projector and the award
+  // ceremony can never disagree about who won.
+  const rows: Row[] = scoreTeams({
+    teams: sectionTeams,
+    scans,
+    boardTasks: gridTasks as BoardTask[],
+    duels,
   })
 
-  // When the "Total after Bonus" view is on, rank by Bingo points + manual bonus points.
-  // Postgres numeric can arrive over PostgREST as a string, and "100.5" + "0"
-  // concatenates instead of adding. Coerce before any arithmetic.
-  const num = (v: unknown) => Number(v ?? 0) || 0
-  const scoreOf = (r: Row) => showBonus ? num(r.points) + num(r.bonus) : num(r.points)
-
-  // Whole numbers unless the board opted into decimals, and trailing zeros are
-  // dropped either way — 300.50 reads slower than 300.5 from the back of a room.
+  // "Total after Bonus" is a DISPLAY choice — the score itself always carries
+  // the manual bonus. Both the figure shown and the ordering follow the toggle.
+  const scoreOf = (r: Row) => (showBonus ? r.total : r.basePoints)
   const decimals = !!activeSection?.decimal_points
-  const fmt = (v: unknown) => {
-    const n = num(v)
-    if (!decimals) return Math.round(n).toLocaleString()
-    // Always one decimal in decimal mode: every team carries a tiebreak
-    // tenth, so a bare 300 next to 300.5 would look like a missing digit.
-    return n.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 })
-  }
-  rows.sort((a, b) => {
-    if (scoreOf(b) !== scoreOf(a)) return scoreOf(b) - scoreOf(a)
-    if (b.bingos !== a.bingos) return b.bingos - a.bingos
-    if (b.tasksDone !== a.tasksDone) return b.tasksDone - a.tasksDone
-    // Dead heat on every score component: first to get there stays ahead.
-    // Without this the order fell back to the team list, so a team matching
-    // the leader later could appear above them.
-    return a.reachedAt - b.reachedAt
-  })
+  const fmt = (v: unknown) => formatScore(v, decimals)
+  rows.sort((a, b) => compareTeamScores(a, b, { includeBonus: showBonus }))
 
   // Per-board skin. A hotel room with windows needs 'daylight' or the
   // projected scoreboard is unreadable; a dim AV suite wants 'midnight'.
@@ -277,17 +332,25 @@ export function BingoDashProjector() {
   // contents where it already sits, so an overtake happens silently. That is
   // the one moment a scoreboard on a wall exists for.
   //
-  // FLIP: remember each row's screen position, let the re-sort happen, then
-  // transform every row back to where it was and release it. The browser
-  // animates the release. useLayoutEffect runs before paint, so the room never
-  // sees the intermediate state.
+  // FLIP: remember each row's position, let the re-sort happen, then transform
+  // every row back to where it was and release it. The browser animates the
+  // release. useLayoutEffect runs before paint, so the room never sees the
+  // intermediate state.
+  //
+  // Positions are read with offsetTop, NOT getBoundingClientRect: the board
+  // sits inside a scaled box, and screen coordinates shift whenever that scale
+  // changes (resize, zoom, fullscreen). The effect would read that as every
+  // team changing rank at once and fling the rows off-screen - and because the
+  // next measurement starts from where it flung them, each pass amplified the
+  // last. offsetTop is layout-relative and an ancestor's transform cannot
+  // affect it, so a shift here always means a real rank change.
   const rowEls = useRef(new Map<string, HTMLDivElement>())
   const lastTop = useRef(new Map<string, number>())
 
   useLayoutEffect(() => {
     const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches
     const now = new Map<string, number>()
-    rowEls.current.forEach((el, id) => { if (el) now.set(id, el.getBoundingClientRect().top) })
+    rowEls.current.forEach((el, id) => { if (el) now.set(id, el.offsetTop) })
 
     if (!reduced) {
       now.forEach((top, id) => {
@@ -313,67 +376,34 @@ export function BingoDashProjector() {
     lastTop.current = now
   }, [rows])
 
-  return (
-    <div className={`min-h-screen relative overflow-hidden ${theme.bg}`}>
-      {theme.ambient && <ParticleBackground />}
+  // Scaling only makes sense where a full-width column can actually fit.
+  const fitEnabled = viewportWidth >= TWO_COL_MIN_WIDTH
 
-      {/* Header */}
-      <header className="relative z-10 px-3 pt-5 pb-4 sm:px-6 sm:pt-8 lg:px-10 lg:pt-10 lg:pb-6">
-        <div className="max-w-[1600px] mx-auto flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-6">
-          <div className="min-w-0">
-            <p className={`text-[10px] sm:text-sm font-black uppercase tracking-[0.3em] ${theme.accent}`}>Bingo Dash</p>
-            <h1 className={`text-3xl sm:text-5xl lg:text-6xl font-black tracking-tight mt-1 ${theme.heading}`}>Scoreboard</h1>
-            {activeSection && (
-              <p className={`text-base sm:text-xl font-bold mt-1 sm:mt-2 truncate ${theme.muted}`}>{activeSection.name}</p>
-            )}
-          </div>
-          <div className="flex flex-col items-start gap-1.5 sm:items-end sm:gap-2 flex-shrink-0">
-            {activeSection && (activeSection.timer_end_at || activeSection.timer_seconds > 0) && (
-              <div
-                className={`px-3 py-2 sm:px-6 sm:py-3 rounded-xl sm:rounded-2xl font-black text-2xl sm:text-4xl tabular-nums transition-colors ${
-                  timerRunning ? `bg-white/10 ${theme.heading}` : `bg-white/5 ${theme.muted}`
-                }`}
-              >
-                <span className={`mr-2 sm:mr-3 text-base sm:text-2xl ${timerRunning ? theme.positive : theme.muted}`}>
-                  {timerRunning ? '●' : '■'}
-                </span>
-                {timerDisplay}
-              </div>
-            )}
-            <p className={`${theme.muted} text-xs sm:text-sm font-bold`}>{sectionTeams.length} teams competing</p>
-            <p className={`${theme.muted} text-[11px] sm:text-xs font-bold flex items-center gap-1.5`} title="Realtime connection and last data refresh">
-              <span className={`w-2 h-2 rounded-full flex-shrink-0 ${liveState === 'live' ? 'bg-green-400 animate-pulse' : liveState === 'offline' ? 'bg-red-400' : 'bg-amber-400'}`} />
-              {liveState === 'live' ? 'Live' : liveState === 'offline' ? 'Reconnecting' : 'Connecting'}
-              {lastSync > 0 && <span className="opacity-60">· synced {Math.max(0, Math.round((nowTick - lastSync) / 1000))}s ago</span>}
-            </p>
-            <button
-              onClick={() => setShowBonus(v => !v)}
-              className={`px-3 py-2 sm:px-5 sm:py-2.5 rounded-xl text-xs sm:text-sm font-black uppercase tracking-wider transition-all ${
-                showBonus
-                  ? 'bg-amber-400 text-gray-950 shadow-lg shadow-amber-500/30'
-                  : 'bg-white/10 text-amber-300 border border-amber-700/50 hover:bg-white/15'
-              }`}
-            >
-              {showBonus ? '✓ Total after Bonus' : '＋ Total after Bonus'}
-            </button>
-          </div>
-        </div>
-      </header>
+  // Every group is on screen at once - that is the point of the board, so the
+  // layout never pages or scrolls. Two even columns once a single one would
+  // squeeze the text; ranks stay in reading order down the left, then right.
+  const ranked = rows.map((row, i) => ({ row, rank: i + 1 }))
+  const columns = fitEnabled && ranked.length >= TWO_COL_FROM
+    ? [ranked.slice(0, Math.ceil(ranked.length / 2)), ranked.slice(Math.ceil(ranked.length / 2))]
+    : [ranked]
 
-      {/* Scoreboard */}
-      <main className="relative z-10 px-3 pb-8 sm:px-6 lg:px-10 lg:pb-10">
-        <div className="max-w-[1600px] mx-auto">
-          <div className="flex-1 min-w-0">
-          {rows.length === 0 ? (
-            <div className={`text-center py-20 lg:py-32 ${theme.muted}`}>
-              <div className="text-5xl lg:text-6xl mb-4">🎯</div>
-              <p className="text-xl lg:text-2xl font-bold">No teams registered yet</p>
-            </div>
-          ) : (
-            <div className="flex flex-col gap-2.5 lg:gap-3">
+  const cols = columns.length
+  const canvasMin = cols * COL_MIN + (cols - 1) * COL_GAP
+  const canvasMax = cols * COL_MAX + (cols - 1) * COL_GAP
+
+  const board = (
+    <div className="flex items-start justify-center w-full" style={{ gap: COL_GAP }}>
+      {columns.map((chunk, ci) => (
+        <div
+          key={ci}
+          className="flex flex-col gap-2.5 lg:gap-3 min-w-0"
+          // The columns divide whatever canvas width FitBoard solved for,
+          // rather than carrying a fixed width of their own.
+          style={{ flex: 1, minWidth: 0 }}
+        >
               {/* Column headers — the 5-column table only exists from lg up;
                   on phones each row carries its own inline labels instead. */}
-              <div className={`hidden lg:grid grid-cols-[80px_1fr_200px_200px_200px] gap-4 px-6 py-2 text-xs font-black uppercase tracking-widest ${theme.muted}`}>
+              <div className={`hidden lg:grid grid-cols-[80px_1fr_200px_130px_130px] gap-4 px-6 py-2 text-xs font-black uppercase tracking-widest ${theme.muted}`}>
                 <div>Rank</div>
                 <div>Team</div>
                 <div className="text-center">{showBonus ? 'Total (Bingo + Bonus)' : 'Points'}</div>
@@ -381,8 +411,7 @@ export function BingoDashProjector() {
                 <div className="text-center">Tasks Done</div>
               </div>
 
-              {rows.map((row, i) => {
-                const rank = i + 1
+              {chunk.map(({ row, rank }) => {
                 const isTop3 = rank <= 3
                 const rankColor = isTop3 ? theme.rankColors[rank - 1] : theme.rankMuted
                 return (
@@ -392,7 +421,7 @@ export function BingoDashProjector() {
                       if (el) rowEls.current.set(row.team.id, el)
                       else rowEls.current.delete(row.team.id)
                     }}
-                    className="grid grid-cols-[2.75rem_minmax(0,1fr)] gap-x-2.5 gap-y-3 items-center px-3 py-3.5 rounded-2xl lg:grid-cols-[80px_1fr_200px_200px_200px] lg:gap-4 lg:px-6 lg:py-5"
+                    className="grid grid-cols-[2.75rem_minmax(0,1fr)] gap-x-2.5 gap-y-3 items-center px-3 py-3.5 rounded-2xl lg:grid-cols-[80px_1fr_200px_130px_130px] lg:gap-4 lg:px-6 lg:py-5"
                     style={{
                       background: isTop3
                         ? `linear-gradient(90deg, ${rankColor}22 0%, rgba(255,255,255,0.03) 100%)`
@@ -420,9 +449,9 @@ export function BingoDashProjector() {
                       </p>
                       {showBonus ? (
                         <p className={`${theme.muted} text-[9px] lg:text-xs font-bold uppercase tracking-wider lg:tracking-widest mt-1`}>
-                          <span className={theme.accent}>{fmt(row.points)} bingo</span>
+                          <span className={theme.accent}>{fmt(row.basePoints)} bingo</span>
                           <span className={theme.muted}> + </span>
-                          <span className={theme.bonus}>{fmt(row.bonus)} bonus</span>
+                          <span className={theme.bonus}>{fmt(row.bonusPoints)} bonus</span>
                         </p>
                       ) : (
                         // No breakdown under the score: the lines column next
@@ -446,11 +475,108 @@ export function BingoDashProjector() {
                     </div>
                   </div>
                 )
-              })}
+          })}
+        </div>
+      ))}
+    </div>
+  )
+
+  return (
+    <div className={`h-screen flex flex-col relative overflow-hidden ${theme.bg}`}>
+      {theme.ambient && <ParticleBackground />}
+
+      {/* Header */}
+      {/* Deliberately compact: every pixel here is one the scoreboard does not
+          get, and on a projector the board is the point - the title is read
+          once. */}
+      <header className="relative z-10 px-3 pt-3 pb-2 sm:px-6 sm:pt-4 lg:px-10 lg:pt-4 lg:pb-3">
+        <div className="max-w-[1600px] mx-auto flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-6">
+          <div className="min-w-0">
+            <p className={`text-[10px] sm:text-sm font-black uppercase tracking-[0.3em] ${theme.accent}`}>Bingo Dash</p>
+            <h1 className={`text-2xl sm:text-3xl lg:text-4xl font-black tracking-tight ${theme.heading}`}>Scoreboard</h1>
+            {activeSection && (
+              <p className={`text-sm sm:text-base font-bold truncate ${theme.muted}`}>{activeSection.name}</p>
+            )}
+          </div>
+          <div className="flex flex-col items-start gap-1 sm:items-end sm:gap-1.5 flex-shrink-0">
+            {activeSection && (activeSection.timer_end_at || activeSection.timer_seconds > 0) && (
+              <div
+                className={`px-3 py-1.5 sm:px-4 sm:py-2 rounded-xl font-black text-xl sm:text-3xl tabular-nums transition-colors ${
+                  timerRunning ? `bg-white/10 ${theme.heading}` : `bg-white/5 ${theme.muted}`
+                }`}
+              >
+                <span className={`mr-2 sm:mr-3 text-base sm:text-2xl ${timerRunning ? theme.positive : theme.muted}`}>
+                  {timerRunning ? '●' : '■'}
+                </span>
+                {timerDisplay}
+              </div>
+            )}
+            <p className={`${theme.muted} text-xs sm:text-sm font-bold`}>{sectionTeams.length} teams competing</p>
+            <p className={`${theme.muted} text-[11px] sm:text-xs font-bold flex items-center gap-1.5`} title="Realtime connection and last data refresh">
+              <span className={`w-2 h-2 rounded-full flex-shrink-0 ${liveState === 'live' ? 'bg-green-400 animate-pulse' : liveState === 'offline' ? 'bg-red-400' : 'bg-amber-400'}`} />
+              {liveState === 'live' ? 'Live' : liveState === 'offline' ? 'Reconnecting' : 'Connecting'}
+              {lastSync > 0 && <span className="opacity-60">· synced {Math.max(0, Math.round((nowTick - lastSync) / 1000))}s ago</span>}
+            </p>
+            <button
+              onClick={() => setShowBonus(v => !v)}
+              className={`px-3 py-2 sm:px-5 sm:py-2.5 rounded-xl text-xs sm:text-sm font-black uppercase tracking-wider transition-all ${
+                showBonus
+                  ? 'bg-amber-400 text-gray-950 shadow-lg shadow-amber-500/30'
+                  : 'bg-white/10 text-amber-300 border border-amber-700/50 hover:bg-white/15'
+              }`}
+            >
+              {showBonus ? '✓ Total after Bonus' : '＋ Total after Bonus'}
+            </button>
+
+            {/* In-page zoom: scales the board only, never the browser UI.
+                Hidden where the board is not scaled at all (narrow screens
+                keep the phone layout), so the buttons are never inert. */}
+            <div className="flex items-center gap-1.5">
+              {fitEnabled && <>
+              <button
+                onClick={() => setZoomPersisted(zoom - ZOOM_STEP)}
+                disabled={zoom <= ZOOM_MIN}
+                className={`w-9 h-9 rounded-xl font-black text-lg bg-white/10 ${theme.heading} border border-white/10 hover:bg-white/20 disabled:opacity-30 disabled:hover:bg-white/10`}
+                title="Zoom out"
+              >−</button>
+              <button
+                onClick={() => setZoomPersisted(1)}
+                className={`px-2 min-w-[4rem] h-9 rounded-xl text-xs font-black tabular-nums bg-white/10 ${theme.heading} border border-white/10 hover:bg-white/20`}
+                title="Back to the largest size that fits every group"
+              >{Math.round(zoom * 100)}%</button>
+              <button
+                onClick={() => setZoomPersisted(zoom + ZOOM_STEP)}
+                disabled={zoom >= ZOOM_MAX}
+                className={`w-9 h-9 rounded-xl font-black text-lg bg-white/10 ${theme.heading} border border-white/10 hover:bg-white/20 disabled:opacity-30 disabled:hover:bg-white/10`}
+                title="Zoom in (100% already fills the screen)"
+              >+</button>
+              </>}
+              <button
+                onClick={toggleFullscreen}
+                className={`w-9 h-9 rounded-xl text-base bg-white/10 ${theme.heading} border border-white/10 hover:bg-white/20`}
+                title={isFullscreen ? 'Exit fullscreen' : 'Fullscreen'}
+              >⛶</button>
             </div>
-          )}
           </div>
         </div>
+      </header>
+
+      {/* Scoreboard */}
+      <main className="relative z-10 px-3 pb-4 sm:px-6 lg:px-10 flex-1 min-h-0 flex flex-col">
+        {rows.length === 0 ? (
+          <div className={`text-center py-20 lg:py-32 ${theme.muted}`}>
+            <div className="text-5xl lg:text-6xl mb-4">🎯</div>
+            <p className="text-xl lg:text-2xl font-bold">No teams registered yet</p>
+          </div>
+        ) : fitEnabled ? (
+          <FitBoard canvasMin={canvasMin} canvasMax={canvasMax} zoom={zoom}>
+            {board}
+          </FitBoard>
+        ) : (
+          // Too narrow to scale a 1600px board onto: keep the phone
+          // layout and let it scroll, as it always has.
+          <div className="max-w-[1600px] mx-auto w-full overflow-auto">{board}</div>
+        )}
       </main>
 
       {/* Sits under the scoreboard on the projected screen — visible to the

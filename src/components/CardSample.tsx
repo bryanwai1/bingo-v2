@@ -6,6 +6,7 @@
 // away once they have.
 
 import { useEffect, useRef, useState } from 'react'
+import { useTaskSamples, type TaskSample } from '../hooks/useTaskSamples'
 import { sampleFor, type Artefact, type Clip, type Frame, type Mark, type Panel, type Tool } from '../lib/cardSamples'
 
 const FRAME_MS = 2600
@@ -246,8 +247,29 @@ function ClipView({ clip, color }: { clip: Clip; color: string }) {
   )
 }
 
-export function CardSample({ title, color }: { title: string | null | undefined; color: string }) {
-  const sample = sampleFor(title)
+/** Admin-uploaded samples (bingo_task_samples): photos and videos with captions. */
+function UploadedView({ samples, color }: { samples: TaskSample[]; color: string }) {
+  return (
+    <div className="flex flex-col gap-3">
+      {samples.map(s => (
+        <div key={s.id}>
+          <div className="rounded-2xl overflow-hidden bg-black" style={{ border: `2px solid ${color}55` }}>
+            {s.media_type === 'video'
+              ? <video src={s.media_url} controls playsInline preload="metadata" className="w-full block" />
+              : <img src={s.media_url} alt="" className="w-full block" />}
+          </div>
+          {s.caption && <p className="text-white/60 text-[11px] font-bold leading-snug text-center mt-1.5">{s.caption}</p>}
+        </div>
+      ))}
+    </div>
+  )
+}
+
+export function CardSample({ title, color, taskId }: { title: string | null | undefined; color: string; taskId?: string | null }) {
+  const { samples: uploaded } = useTaskSamples(taskId)
+  // A card's own uploaded samples win over the built-in ones.
+  const builtIn = sampleFor(title)
+  const sample = uploaded.length ? null : builtIn
   // Open by default: a team should see what "done" looks like before it
   // starts, not discover the sample after guessing. It still folds away.
   const [open, setOpen] = useState(true)
@@ -265,7 +287,7 @@ export function CardSample({ title, color }: { title: string | null | undefined;
     return () => { if (timer.current) clearInterval(timer.current) }
   }, [open, frames])
 
-  if (!sample) return null
+  if (!sample && !uploaded.length) return null
 
   return (
     <div className="mb-6 mt-6">
@@ -282,6 +304,8 @@ export function CardSample({ title, color }: { title: string | null | undefined;
 
       {open && (
         <div className="mt-3">
+          {!sample && <UploadedView samples={uploaded} color={color} />}
+          {sample && <>
           <p className="text-white font-bold text-sm text-center mb-3">{sample.headline}</p>
 
           {sample.tool && <ToolView tool={sample.tool} color={color} />}
@@ -309,6 +333,7 @@ export function CardSample({ title, color }: { title: string | null | undefined;
           {sample.footnote && (
             <p className="text-white/50 text-xs font-bold text-center mt-3 leading-snug">{sample.footnote}</p>
           )}
+          </>}
         </div>
       )}
     </div>

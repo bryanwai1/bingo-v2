@@ -1031,7 +1031,7 @@ export function BingoDashParticipant() {
 
 
         {/* A worked sample for the cards that are really camera tricks. */}
-        <CardSample title={task.title} color={task.hex_code} />
+        <CardSample title={task.title} color={task.hex_code} taskId={task.id} />
 
 
         {aitbActivity && scanRecord && (

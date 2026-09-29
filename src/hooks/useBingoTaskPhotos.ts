@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback } from 'react'
 import { supabase } from '../lib/supabase'
+import { removeMediaIfUnused } from '../lib/mediaCleanup'
 import type { TaskPhoto } from '../types/database'
 
 export function useBingoTaskPhotos(taskId?: string) {
@@ -34,9 +35,11 @@ export function useBingoTaskPhotos(taskId?: string) {
   }, [])
 
   const deletePhoto = useCallback(async (id: string) => {
+    const url = photos.find(p => p.id === id)?.photo_url
     await supabase.from('bingo_task_photos').delete().eq('id', id)
     setPhotos(prev => prev.filter(p => p.id !== id))
-  }, [])
+    await removeMediaIfUnused(url)
+  }, [photos])
 
   const updatePosition = useCallback(async (id: string, x: number, y: number) => {
     setPhotos(prev => prev.map(p => p.id === id ? { ...p, position_x: x, position_y: y } : p))

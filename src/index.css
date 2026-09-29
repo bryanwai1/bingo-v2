@@ -407,6 +407,12 @@ body {
 }
 
 .animate-gold-title {
+  /* background-clip:text paints the glyph with this element's background box.
+     These titles use leading-none, so that box ends at the baseline and any
+     descender (the g in "Presenting") falls outside it and renders
+     transparent - it looks like the letter is cut off. The padding extends the
+     box below the baseline; em keeps it correct at every clamp() size. */
+  padding-bottom: 0.22em;
   background: linear-gradient(
     100deg,
     #8b5a17 0%,

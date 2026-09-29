@@ -3,12 +3,15 @@ import { useNavigate, useParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import type { BingoSection, BingoTeam } from '../types/database'
 import {
+  DEFAULT_PRIZE_COUNTS,
+  HSBC_RED,
   SLIDE_LABELS,
   addSlide,
   buildAwardSlides,
   countsFromOrder,
   defaultSlideOrder,
   isPrizeKind,
+  isPlaceKind,
   normalizeSlideOrder,
   removeSlide,
   type AwardSlideKind,
@@ -18,7 +21,14 @@ import {
 
 type DraftConfig = {
   total_points: number
+  /** The photo applied to every place slide unless that slide overrides it. */
   image_url: string | null
+  /** One slogan, shown on all five place slides. */
+  award_slogan: string
+  /** Main slide background as #rrggbb; null keeps the HSBC red. */
+  main_bg: string | null
+  /** Per-place photo overrides keyed by slide id. Beats image_url. */
+  slide_photos: Record<string, string>
   slide_order: AwardSlideId[]
   slide_points: Record<string, number>
   holding_title: string
@@ -27,17 +37,18 @@ type DraftConfig = {
   main_tagline: string
 }
 
-const INITIAL_ORDER: AwardSlideId[] = defaultSlideOrder({
-  consolation_count: 0,
-  consolation_group_count: 2,
-  third_count: 1,
-  second_count: 1,
-  first_count: 1,
-})
+// New shows default to five places and no consolation groups. Existing saved
+// orders are untouched - they simply contain no fourth:/fifth: ids. The counts
+// are shared with the ceremony so an unconfigured board cannot show one
+// sequence here and another on the projector.
+const INITIAL_ORDER: AwardSlideId[] = defaultSlideOrder(DEFAULT_PRIZE_COUNTS)
 
 const EMPTY_DRAFT: DraftConfig = {
   total_points: 0,
   image_url: null,
+  award_slogan: '',
+  main_bg: null,
+  slide_photos: {},
   slide_order: INITIAL_ORDER,
   slide_points: {},
   holding_title: 'AWARDS',
@@ -55,10 +66,11 @@ export function BingoDashAwardAdmin() {
   const [teams, setTeams] = useState<BingoTeam[]>([])
   const [loaded, setLoaded] = useState(false)
   const [saving, setSaving] = useState(false)
-  const [uploadingTeamId, setUploadingTeamId] = useState<string | null>(null)
   const [savedAt, setSavedAt] = useState<number | null>(null)
-  const teamFileRef = useRef<HTMLInputElement>(null)
-  const pendingTeamRef = useRef<string | null>(null)
+  const awardFileRef = useRef<HTMLInputElement>(null)
+  /** Which place slide the file dialog was opened for; null = apply-to-all. */
+  const pendingAwardRef = useRef<string | null>(null)
+  const [uploadingAward, setUploadingAward] = useState<string | null>(null)
 
   useEffect(() => {
     if (!sectionSlug) return
@@ -83,6 +95,8 @@ export function BingoDashAwardAdmin() {
         const counts = {
           consolation_count: cfg.consolation_count ?? 0,
           consolation_group_count: cfg.consolation_group_count ?? 0,
+          fifth_count: 0,
+          fourth_count: 0,
           third_count: cfg.third_count ?? 1,
           second_count: cfg.second_count ?? 1,
           first_count: cfg.first_count ?? 1,
@@ -90,6 +104,13 @@ export function BingoDashAwardAdmin() {
         setDraft({
           total_points: cfg.total_points ?? 0,
           image_url: cfg.image_url ?? null,
+          // Read defensively: a database without the 20260927 migration has
+          // neither column, and a ceremony must still open.
+          award_slogan: cfg.award_slogan ?? '',
+          main_bg: cfg.main_bg ?? null,
+          slide_photos: (cfg.slide_photos && typeof cfg.slide_photos === 'object')
+            ? cfg.slide_photos
+            : {},
           slide_order: normalizeSlideOrder(cfg.slide_order, counts),
           slide_points: (cfg.slide_points && typeof cfg.slide_points === 'object') ? cfg.slide_points : {},
           holding_title: cfg.holding_title ?? 'AWARDS',
@@ -132,11 +153,15 @@ export function BingoDashAwardAdmin() {
 
   const doRemoveSlide = (id: AwardSlideId) => {
     setDraft(d => {
-      const { [id]: _, ...restPoints } = d.slide_points
+      const restPoints = { ...d.slide_points }
+      const restPhotos = { ...d.slide_photos }
+      delete restPoints[id]
+      delete restPhotos[id]
       return {
         ...d,
         slide_order: removeSlide(d.slide_order, id),
         slide_points: restPoints,
+        slide_photos: restPhotos,
       }
     })
   }
@@ -146,47 +171,46 @@ export function BingoDashAwardAdmin() {
     setDraft(d => ({ ...d, slide_points: { ...d.slide_points, [id]: v } }))
   }
 
-  const uploadTeamPhoto = async (teamId: string, file: File) => {
+  /**
+   * Uploads to the same public `media` bucket as team photos, with the same
+   * 5 MB / image-only guards. Unlike the team flow this writes ONLY to draft
+   * state - an award photo is not a team's photo, and saving is the Save
+   * button's job.
+   *
+   * `slideId` null targets the shared apply-to-all photo.
+   */
+  const uploadAwardPhoto = async (slideId: string | null, file: File) => {
     if (file.size > 5 * 1024 * 1024) { alert(`${file.name} too large (max 5 MB).`); return }
     if (!file.type.startsWith('image/')) { alert('Please choose an image file.'); return }
-    setUploadingTeamId(teamId)
+    setUploadingAward(slideId ?? 'all')
     try {
       const ext = file.name.split('.').pop() || 'jpg'
-      const fileName = `${teamId}-${Date.now()}.${ext}`
-      const path = `bingo-media/team-photos/${fileName}`
+      const path = `bingo-media/award-photos/${section?.id ?? 'board'}-${Date.now()}.${ext}`
       const { error } = await supabase.storage.from('media').upload(path, file)
       if (error) { alert(`Upload failed: ${error.message}`); return }
-      const { data: urlData } = supabase.storage.from('media').getPublicUrl(path)
-      const photo_url = urlData.publicUrl
-      setTeams(prev => prev.map(t => t.id === teamId ? { ...t, photo_url } : t))
-      const { error: updateErr } = await supabase.from('bingo_teams').update({ photo_url }).eq('id', teamId)
-      if (updateErr) alert(`Save failed: ${updateErr.message}`)
+      const url = supabase.storage.from('media').getPublicUrl(path).data.publicUrl
+      setDraft(d => slideId
+        ? { ...d, slide_photos: { ...d.slide_photos, [slideId]: url } }
+        : { ...d, image_url: url })
     } finally {
-      setUploadingTeamId(null)
+      setUploadingAward(null)
     }
   }
 
-  const removeTeamPhoto = async (teamId: string) => {
-    if (!confirm('Remove this group\u2019s photo?')) return
-    setTeams(prev => prev.map(t => t.id === teamId ? { ...t, photo_url: null } : t))
-    const { error } = await supabase.from('bingo_teams').update({ photo_url: null }).eq('id', teamId)
-    if (error) alert(`Failed: ${error.message}`)
+  const setPlacePhoto = (slideId: string, url: string | null) => {
+    setDraft(d => {
+      if (!url) {
+        const rest = { ...d.slide_photos }
+        delete rest[slideId]
+        return { ...d, slide_photos: rest }
+      }
+      return { ...d, slide_photos: { ...d.slide_photos, [slideId]: url } }
+    })
   }
 
-  const deleteTeam = async (teamId: string, teamName: string) => {
-    if (!confirm(`Delete team "${teamName}" and all their scan records? This cannot be undone.`)) return
-    const prev = teams
-    setTeams(p => p.filter(t => t.id !== teamId))
-    const { error } = await supabase.from('bingo_teams').delete().eq('id', teamId)
-    if (error) {
-      alert(`Failed to delete: ${error.message}`)
-      setTeams(prev)
-    }
-  }
-
-  const pickTeamPhoto = (teamId: string) => {
-    pendingTeamRef.current = teamId
-    teamFileRef.current?.click()
+  const pickAwardPhoto = (slideId: string | null) => {
+    pendingAwardRef.current = slideId
+    awardFileRef.current?.click()
   }
 
   const save = async () => {
@@ -194,10 +218,19 @@ export function BingoDashAwardAdmin() {
     setSaving(true)
     try {
       const counts = countsFromOrder(draft.slide_order)
+      // Drop overrides for slides that no longer exist, so removing and
+      // re-adding a place cannot resurrect an old photo against a reused id.
+      const liveIds = new Set(draft.slide_order)
+      const photos = Object.fromEntries(
+        Object.entries(draft.slide_photos).filter(([id]) => liveIds.has(id)),
+      )
       const payload = {
         section_id: section.id,
         total_points: draft.total_points,
         image_url: draft.image_url,
+        award_slogan: draft.award_slogan.trim() || null,
+        main_bg: draft.main_bg,
+        slide_photos: photos,
         consolation_count: counts.consolation_count,
         consolation_group_count: counts.consolation_group_count,
         third_count: counts.third_count,
@@ -296,6 +329,32 @@ export function BingoDashAwardAdmin() {
               className="w-full px-3 py-2 rounded-lg border border-gray-300 text-base focus:outline-none focus:ring-2 focus:ring-rose-300"
             />
 
+            <label className="block text-sm font-semibold text-gray-700 mb-1 mt-3">Background colour</label>
+            <div className="flex items-center gap-3">
+              <input
+                type="color"
+                value={draft.main_bg ?? HSBC_RED}
+                onChange={e => setDraft(d => ({ ...d, main_bg: e.target.value }))}
+                className="w-12 h-10 rounded-lg border border-gray-300 bg-white p-1 cursor-pointer"
+                aria-label="Main slide background colour"
+              />
+              <span className="font-mono text-sm text-gray-600">
+                {draft.main_bg ?? `${HSBC_RED} (default)`}
+              </span>
+              {draft.main_bg && (
+                <button
+                  onClick={() => setDraft(d => ({ ...d, main_bg: null }))}
+                  className="px-3 py-1.5 rounded-lg border border-gray-300 text-sm font-bold text-gray-600 hover:bg-gray-50"
+                >
+                  Reset
+                </button>
+              )}
+            </div>
+            <p className="text-[11px] text-gray-400 mt-1">
+              The slide darkens this colour for the bottom of its gradient. Only
+              the main slide changes; the closing slide stays HSBC red.
+            </p>
+
             <label className="block text-sm font-semibold text-gray-700 mb-1 mt-3">Tagline</label>
             <input
               type="text"
@@ -307,84 +366,75 @@ export function BingoDashAwardAdmin() {
           </section>
 
           <section className="bg-white rounded-2xl border border-gray-200 p-6">
-            <h2 className="font-black text-gray-900 mb-2">Holding slide</h2>
-            <p className="text-sm text-gray-600">
-              Shows a fixed “Presenting Awards” reveal between the opener and the winners. No configuration needed.
-            </p>
-          </section>
-
-          <section className="bg-white rounded-2xl border border-gray-200 p-6">
-            <div className="flex items-baseline justify-between mb-1">
-              <h2 className="font-black text-gray-900">Team photos</h2>
-              <span className="text-[11px] text-gray-400">{teams.filter(t => t.photo_url).length} / {teams.length} set</span>
-            </div>
-            <p className="text-xs text-gray-400 mb-4">Shown on the prize reveal slides · max 5 MB each</p>
-
+            <h2 className="font-black text-gray-900 mb-1">Place slides (1st – 5th)</h2>
             <input
-              ref={teamFileRef}
+              ref={awardFileRef}
               type="file"
               accept="image/*"
               className="hidden"
               onChange={e => {
-                const f = e.target.files?.[0]
-                const id = pendingTeamRef.current
-                pendingTeamRef.current = null
-                if (f && id) uploadTeamPhoto(id, f)
-                if (teamFileRef.current) teamFileRef.current.value = ''
+                const file = e.target.files?.[0]
+                const slideId = pendingAwardRef.current
+                pendingAwardRef.current = null
+                e.target.value = ''
+                if (file) void uploadAwardPhoto(slideId, file)
               }}
             />
+            <p className="text-sm text-gray-600 mb-4">
+              The slogan and photo below are shared by all five place slides. Any
+              place can override the photo in the slide list.
+            </p>
 
-            {teams.length === 0 ? (
-              <p className="text-sm text-gray-400 italic text-center py-4">No teams in this compartment yet.</p>
-            ) : (
-              <ul className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                {teams.map(t => {
-                  const isUploading = uploadingTeamId === t.id
-                  return (
-                    <li key={t.id} className="relative bg-gray-50 border border-gray-200 rounded-xl p-3 flex flex-col items-center gap-2">
-                      <button
-                        onClick={() => deleteTeam(t.id, t.name)}
-                        className="absolute top-1.5 right-1.5 w-6 h-6 rounded-full bg-white border border-gray-200 hover:bg-red-50 hover:border-red-300 hover:text-red-600 text-xs font-bold text-gray-400 flex items-center justify-center shadow-sm"
-                        title={`Delete team "${t.name}"`}
-                      >✕</button>
-                      <button
-                        onClick={() => pickTeamPhoto(t.id)}
-                        disabled={isUploading}
-                        className="w-20 h-20 rounded-full overflow-hidden bg-gray-200 border-2 border-white shadow-sm hover:ring-2 hover:ring-amber-400 transition-all disabled:opacity-50"
-                        title={t.photo_url ? 'Replace photo' : 'Upload photo'}
-                      >
-                        {t.photo_url ? (
-                          <img src={t.photo_url} alt={t.name} className="w-full h-full object-cover" />
-                        ) : (
-                          <div className="w-full h-full flex items-center justify-center text-3xl text-gray-400">👥</div>
-                        )}
-                      </button>
-                      <p className="text-xs font-bold text-center w-full truncate" title={t.name}>{t.name}</p>
-                      <div className="flex gap-1 text-[10px] font-bold uppercase tracking-wider">
-                        <button
-                          onClick={() => pickTeamPhoto(t.id)}
-                          disabled={isUploading}
-                          className="text-amber-600 hover:text-amber-700 disabled:opacity-50"
-                        >
-                          {isUploading ? 'Uploading…' : (t.photo_url ? 'Replace' : 'Upload')}
-                        </button>
-                        {t.photo_url && !isUploading && (
-                          <>
-                            <span className="text-gray-300">·</span>
-                            <button
-                              onClick={() => removeTeamPhoto(t.id)}
-                              className="text-red-600 hover:text-red-700"
-                            >
-                              Remove
-                            </button>
-                          </>
-                        )}
-                      </div>
-                    </li>
-                  )
-                })}
-              </ul>
-            )}
+            <label className="block text-sm font-semibold text-gray-700 mb-1">Slogan</label>
+            <input
+              type="text"
+              value={draft.award_slogan}
+              onChange={e => setDraft(d => ({ ...d, award_slogan: e.target.value }))}
+              placeholder="e.g. CHAMPIONS OF THE DAY"
+              className="w-full px-3 py-2 rounded-lg border border-gray-300 text-base focus:outline-none focus:ring-2 focus:ring-rose-300"
+            />
+            <p className="text-[11px] text-gray-400 mt-1">
+              Leave blank to hide the slogan strip.
+            </p>
+
+            <label className="block text-sm font-semibold text-gray-700 mb-1 mt-4">
+              Photo for all places
+            </label>
+            <div className="flex items-center gap-3">
+              <div className="w-20 h-20 rounded-xl overflow-hidden bg-gray-100 border border-gray-200 flex items-center justify-center shrink-0">
+                {draft.image_url
+                  ? <img src={draft.image_url} alt="" className="w-full h-full object-cover" />
+                  : <span className="text-gray-300 text-2xl">📷</span>}
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  onClick={() => pickAwardPhoto(null)}
+                  disabled={uploadingAward === 'all'}
+                  className="px-3 py-1.5 rounded-lg bg-gray-900 text-white text-sm font-bold hover:bg-gray-800 disabled:opacity-50"
+                >
+                  {uploadingAward === 'all' ? 'Uploading\u2026' : draft.image_url ? 'Replace' : 'Upload'}
+                </button>
+                {draft.image_url && (
+                  <button
+                    onClick={() => setDraft(d => ({ ...d, image_url: null }))}
+                    className="px-3 py-1.5 rounded-lg border border-gray-300 text-sm font-bold text-gray-600 hover:bg-gray-50"
+                  >
+                    Clear
+                  </button>
+                )}
+              </div>
+            </div>
+            <p className="text-[11px] text-gray-400 mt-2">
+              A place with no photo of its own falls back to this, then to that
+              group’s own team photo.
+            </p>
+          </section>
+
+          <section className="bg-white rounded-2xl border border-gray-200 p-6">
+            <h2 className="font-black text-gray-900 mb-2">Holding slide</h2>
+            <p className="text-sm text-gray-600">
+              Shows a fixed “Presenting Awards” reveal between the opener and the winners. No configuration needed.
+            </p>
           </section>
 
           <section className="bg-white rounded-2xl border border-gray-200 p-6">
@@ -450,6 +500,42 @@ export function BingoDashAwardAdmin() {
                       </p>
                       <p className="text-[11px] text-gray-500 truncate">{subtitle}</p>
                     </div>
+
+                    {isPlaceKind(s.kind) && (
+                      <div className="flex items-center gap-2 shrink-0">
+                        <div className="w-10 h-10 rounded-lg overflow-hidden bg-gray-100 border border-gray-200 flex items-center justify-center">
+                          {draft.slide_photos[s.id] || draft.image_url
+                            ? <img src={draft.slide_photos[s.id] || draft.image_url!} alt="" className="w-full h-full object-cover" />
+                            : <span className="text-gray-300 text-sm">👥</span>}
+                        </div>
+                        <div className="flex flex-col gap-0.5">
+                          <div className="flex gap-1">
+                            <button
+                              onClick={() => pickAwardPhoto(s.id)}
+                              disabled={uploadingAward === s.id}
+                              className="px-1.5 py-0.5 rounded border border-gray-200 bg-white text-[10px] font-bold text-gray-600 hover:bg-gray-50 disabled:opacity-50"
+                              title="Upload a photo for this place only"
+                            >
+                              {uploadingAward === s.id ? '…' : 'Upload'}
+                            </button>
+                            {draft.slide_photos[s.id] && (
+                              <button
+                                onClick={() => setPlacePhoto(s.id, null)}
+                                className="px-1.5 py-0.5 rounded border border-gray-200 bg-white text-[10px] font-bold text-gray-600 hover:bg-red-50 hover:text-red-600"
+                                title="Fall back to the shared photo"
+                              >
+                                Clear
+                              </button>
+                            )}
+                          </div>
+                          <span className="text-[9px] text-gray-400">
+                            {draft.slide_photos[s.id]
+                              ? 'own photo'
+                              : draft.image_url ? 'shared photo' : 'group’s own'}
+                          </span>
+                        </div>
+                      </div>
+                    )}
 
                     {isPrizeKind(s.kind) && (
                       <div className="flex items-center gap-1 shrink-0">
@@ -551,7 +637,7 @@ export function BingoDashAwardAdmin() {
                 accent="#fca5a5"
                 onClick={() => doAddSlide('closing')}
               />
-              {(['first', 'second', 'third', 'consolation_group', 'consolation'] as PrizeKind[]).map(kind => {
+              {(['first', 'second', 'third', 'fourth', 'fifth', 'consolation_group', 'consolation'] as PrizeKind[]).map(kind => {
                 const sublabel = kind === 'consolation_group'
                   ? `${slides.filter(s => s.kind === kind).length} group${slides.filter(s => s.kind === kind).length === 1 ? '' : 's'} · 3 teams each`
                   : `Currently ${slides.filter(s => s.kind === kind).length}`
