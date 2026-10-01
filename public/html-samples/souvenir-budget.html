@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Jonker Souvenir Budget</title>
+<style>
+  :root {
+    --bg: #f6efe2; --card: #fffaf0; --ink: #2b2420; --muted: #7a6a5c; --line: #e6d8c3;
+    --jade: #2a9d8f; --pink: #e76f8a; --gold: #d4a017; --red: #c0392b; --ok: #2e7d4f;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 16px; color: var(--ink);
+    font: 15px/1.45 -apple-system, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg)
+      url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='60' height='60'%3E%3Cg fill='%23e76f8a' fill-opacity='.08'%3E%3Ccircle cx='30' cy='30' r='9'/%3E%3C/g%3E%3Cg fill='%232a9d8f' fill-opacity='.08'%3E%3Cpath d='M0 0h9L0 9zM60 0h-9l9 9zM0 60h9l-9-9zM60 60h-9l9-9z'/%3E%3C/g%3E%3C/svg%3E");
+  }
+  .wrap { max-width: 520px; margin: 0 auto; }
+  header { text-align: center; margin-bottom: 14px; }
+  h1 { margin: 0; font-size: 22px; color: #1f4e4a; letter-spacing: .3px; }
+  .sub { margin: 4px 0 0; color: var(--muted); font-size: 13px; }
+  .card { background: var(--card); border: 2px solid var(--line); border-radius: 14px; padding: 14px; margin-bottom: 12px; }
+  label.budget { display: flex; align-items: center; gap: 10px; font-weight: 700; }
+  .money { display: flex; align-items: center; border: 2px solid var(--gold); border-radius: 10px; overflow: hidden; background: #fff; flex: 1; }
+  .money span { padding: 8px 10px; background: #fbf1d6; font-weight: 700; color: #8a6a00; }
+  .money input { border: 0; padding: 8px 10px; font: inherit; font-weight: 700; width: 100%; outline: none; }
+  .row { display: grid; grid-template-columns: 1fr auto auto; gap: 10px; align-items: center; padding: 10px 0; border-bottom: 1px dashed var(--line); }
+  .row:last-child { border-bottom: 0; }
+  .name { font-weight: 700; }
+  .price { color: var(--muted); font-size: 13px; }
+  .qty { display: flex; align-items: center; gap: 6px; }
+  .qty button { width: 32px; height: 32px; border-radius: 50%; border: 0; font-size: 18px; font-weight: 700; cursor: pointer; color: #fff; background: var(--jade); }
+  .qty button.minus { background: var(--pink); }
+  .qty button:disabled { opacity: .35; cursor: default; }
+  .qty output { min-width: 22px; text-align: center; font-weight: 700; }
+  .sub-total { min-width: 70px; text-align: right; font-weight: 700; }
+  .add { display: grid; grid-template-columns: 1fr 90px auto; gap: 8px; margin-top: 10px; }
+  .add input { padding: 8px 10px; border: 2px solid var(--line); border-radius: 10px; font: inherit; min-width: 0; }
+  .add button { border: 0; border-radius: 10px; padding: 0 12px; background: var(--gold); color: #fff; font-weight: 700; cursor: pointer; }
+  .totals { display: grid; gap: 6px; }
+  .totals div { display: flex; justify-content: space-between; }
+  .totals .big { font-size: 20px; font-weight: 800; }
+  .bar { height: 12px; border-radius: 99px; background: var(--line); overflow: hidden; margin-top: 4px; }
+  .bar i { display: block; height: 100%; width: 0; background: var(--jade); transition: width .25s, background .25s; }
+  .status { margin-top: 10px; padding: 10px 12px; border-radius: 10px; font-weight: 700; text-align: center; }
+  .status.ok { background: #e3f3e9; color: var(--ok); }
+  .status.over { background: #fbe3e0; color: var(--red); }
+  .over-num { color: var(--red); }
+  footer { text-align: center; color: var(--muted); font-size: 12px; margin-top: 8px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>🏮 Jonker Souvenir Budget</h1>
+    <p class="sub">Pretend money only — plan what your team would buy.</p>
+  </header>
+
+  <div class="card">
+    <label class="budget">Budget
+      <div class="money"><span>RM</span><input id="budget" type="number" min="0" step="1" value="100" inputmode="numeric"></div>
+    </label>
+  </div>
+
+  <div class="card">
+    <div id="list"></div>
+    <form class="add" id="addForm">
+      <input id="newName" placeholder="Add a souvenir" required>
+      <input id="newPrice" type="number" min="0.1" step="0.1" placeholder="RM" required inputmode="decimal">
+      <button>Add</button>
+    </form>
+  </div>
+
+  <div class="card totals">
+    <div><span>Items</span><span id="count">0</span></div>
+    <div class="big"><span>Total</span><span id="total">RM 0.00</span></div>
+    <div><span>Left</span><span id="left">RM 0.00</span></div>
+    <div class="bar"><i id="bar"></i></div>
+    <div class="status ok" id="status">Within budget ✓</div>
+  </div>
+
+  <footer>Sample tool for the Souvenir Budget card · no real money is spent</footer>
+</div>
+
+<script>
+  const items = [
+    { name: 'Nyonya beaded slippers', price: 35 },
+    { name: 'Peranakan tile coaster', price: 12 },
+    { name: 'Pineapple tarts (box)', price: 18 },
+    { name: 'Gula Melaka (block)', price: 8 },
+    { name: 'Mini trishaw keychain', price: 6 },
+  ].map(i => ({ ...i, qty: 0 }));
+
+  const $ = id => document.getElementById(id);
+  const rm = n => 'RM ' + n.toFixed(2);
+
+  function render() {
+    $('list').innerHTML = '';
+    items.forEach((it, i) => {
+      const row = document.createElement('div');
+      row.className = 'row';
+      row.innerHTML = `
+        <div><div class="name"></div><div class="price">${rm(it.price)} each</div></div>
+        <div class="qty">
+          <button class="minus" aria-label="Less" ${it.qty === 0 ? 'disabled' : ''}>−</button>
+          <output>${it.qty}</output>
+          <button aria-label="More">+</button>
+        </div>
+        <div class="sub-total">${rm(it.qty * it.price)}</div>`;
+      row.querySelector('.name').textContent = it.name;
+      const [minus, plus] = row.querySelectorAll('button');
+      minus.onclick = () => { it.qty = Math.max(0, it.qty - 1); render(); };
+      plus.onclick = () => { it.qty++; render(); };
+      $('list').appendChild(row);
+    });
+    update();
+  }
+
+  function update() {
+    const budget = Math.max(0, parseFloat($('budget').value) || 0);
+    const total = items.reduce((s, it) => s + it.qty * it.price, 0);
+    const count = items.reduce((s, it) => s + it.qty, 0);
+    const left = budget - total;
+    const over = left < 0;
+    $('count').textContent = count;
+    $('total').textContent = rm(total);
+    $('total').className = over ? 'over-num' : '';
+    $('left').textContent = over ? '−' + rm(-left) : rm(left);
+    $('left').className = over ? 'over-num' : '';
+    const pct = budget ? Math.min(100, (total / budget) * 100) : (total ? 100 : 0);
+    $('bar').style.width = pct + '%';
+    $('bar').style.background = over ? 'var(--red)' : pct > 80 ? 'var(--gold)' : 'var(--jade)';
+    $('status').className = 'status ' + (over ? 'over' : 'ok');
+    $('status').textContent = over ? `⚠️ Over budget by ${rm(-left)} — remove something!` : 'Within budget ✓';
+  }
+
+  $('budget').addEventListener('input', update);
+  $('addForm').addEventListener('submit', e => {
+    e.preventDefault();
+    const name = $('newName').value.trim();
+    const price = parseFloat($('newPrice').value);
+    if (!name || !(price > 0)) return;
+    items.push({ name, price, qty: 1 });
+    $('newName').value = ''; $('newPrice').value = '';
+    render();
+  });
+
+  render();
+</script>
+</body>
+</html>
