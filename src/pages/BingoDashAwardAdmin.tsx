@@ -4,7 +4,8 @@ import { supabase } from '../lib/supabase'
 import type { BingoSection, BingoTeam } from '../types/database'
 import {
   DEFAULT_PRIZE_COUNTS,
-  HSBC_RED,
+  CEREMONY_BACKGROUND,
+  CEREMONY_COLOR,
   SLIDE_LABELS,
   addSlide,
   buildAwardSlides,
@@ -13,7 +14,12 @@ import {
   isPrizeKind,
   isPlaceKind,
   normalizeSlideOrder,
+  readSlideText,
   removeSlide,
+  resetSlideOrder,
+  SLIDE_TEXT_DEFAULTS,
+  type SlideText,
+  type SlideTextBlock,
   type AwardSlideKind,
   type AwardSlideId,
   type PrizeKind,
@@ -25,7 +31,7 @@ type DraftConfig = {
   image_url: string | null
   /** One slogan, shown on all five place slides. */
   award_slogan: string
-  /** Main slide background as #rrggbb; null keeps the HSBC red. */
+  /** Main slide background as #rrggbb; null uses the ceremony purple. */
   main_bg: string | null
   /** Per-place photo overrides keyed by slide id. Beats image_url. */
   slide_photos: Record<string, string>
@@ -35,6 +41,8 @@ type DraftConfig = {
   main_title: string
   main_subtitle: string
   main_tagline: string
+  /** Editable text for intro / holding / lineup / scoreboard / closing + logo. */
+  slide_text: SlideText
 }
 
 // New shows default to five places and no consolation groups. Existing saved
@@ -52,9 +60,10 @@ const EMPTY_DRAFT: DraftConfig = {
   slide_order: INITIAL_ORDER,
   slide_points: {},
   holding_title: 'AWARDS',
-  main_title: 'HSBC KL EXPLORACE 2026',
-  main_subtitle: 'HSBC KL Explorace 2026',
+  main_title: '',
+  main_subtitle: '',
   main_tagline: 'AWARDS CEREMONY',
+  slide_text: {},
 }
 
 export function BingoDashAwardAdmin() {
@@ -111,12 +120,13 @@ export function BingoDashAwardAdmin() {
           slide_photos: (cfg.slide_photos && typeof cfg.slide_photos === 'object')
             ? cfg.slide_photos
             : {},
-          slide_order: normalizeSlideOrder(cfg.slide_order, counts),
+          slide_order: normalizeSlideOrder(cfg.slide_order, counts, readSlideText(cfg.slide_text).v !== 1),
           slide_points: (cfg.slide_points && typeof cfg.slide_points === 'object') ? cfg.slide_points : {},
           holding_title: cfg.holding_title ?? 'AWARDS',
-          main_title: cfg.main_title ?? 'HSBC KL EXPLORACE 2026',
-          main_subtitle: cfg.main_subtitle ?? 'HSBC KL Explorace 2026',
+          main_title: cfg.main_title ?? '',
+          main_subtitle: cfg.main_subtitle ?? '',
           main_tagline: cfg.main_tagline ?? 'AWARDS CEREMONY',
+          slide_text: readSlideText(cfg.slide_text),
         })
       }
       const { data: teamRows } = await supabase
@@ -132,6 +142,52 @@ export function BingoDashAwardAdmin() {
   }, [sectionSlug])
 
   const slides = useMemo(() => buildAwardSlides(draft.slide_order), [draft.slide_order])
+
+  // What was last loaded or saved, to tell whether the draft has changes.
+  const [savedJson, setSavedJson] = useState<string | null>(null)
+  useEffect(() => {
+    if (loaded && savedJson === null) setSavedJson(JSON.stringify(draft))
+  }, [loaded, savedJson, draft])
+  const dirty = savedJson !== null && JSON.stringify(draft) !== savedJson
+  useEffect(() => {
+    if (!dirty) return
+    const warn = (e: BeforeUnloadEvent) => { e.preventDefault() }
+    window.addEventListener('beforeunload', warn)
+    return () => window.removeEventListener('beforeunload', warn)
+  }, [dirty])
+
+  const setText = (slide: keyof typeof SLIDE_TEXT_DEFAULTS, field: keyof SlideTextBlock, value: string) => {
+    setDraft(d => ({
+      ...d,
+      slide_text: { ...d.slide_text, [slide]: { ...(d.slide_text[slide] ?? {}), [field]: value } },
+    }))
+  }
+  const setLogo = (logo: string) => setDraft(d => ({ ...d, slide_text: { ...d.slide_text, logo } }))
+
+  const logoFileRef = useRef<HTMLInputElement>(null)
+  const [uploadingLogo, setUploadingLogo] = useState(false)
+  const uploadLogo = async (file: File) => {
+    if (file.size > 5 * 1024 * 1024) { alert(`${file.name} too large (max 5 MB).`); return }
+    if (!file.type.startsWith('image/')) { alert('Please choose an image file.'); return }
+    setUploadingLogo(true)
+    try {
+      const ext = file.name.split('.').pop() || 'png'
+      const path = `bingo-media/award-photos/${section?.id ?? 'board'}-logo-${Date.now()}.${ext}`
+      const { error } = await supabase.storage.from('media').upload(path, file)
+      if (error) { alert(`Upload failed: ${error.message}`); return }
+      setLogo(supabase.storage.from('media').getPublicUrl(path).data.publicUrl)
+    } finally {
+      setUploadingLogo(false)
+    }
+  }
+
+  const runShow = async () => {
+    if (!section) return
+    if (dirty && window.confirm('You have unsaved changes. Save them before running the show?')) {
+      if (!(await save())) return
+    }
+    navigate(`/bingo-dash/slides/awards/${section.slug}`)
+  }
   const hasMain = draft.slide_order.includes('main')
   const hasIntro = draft.slide_order.includes('intro')
   const hasHolding = draft.slide_order.includes('holding')
@@ -164,11 +220,6 @@ export function BingoDashAwardAdmin() {
         slide_photos: restPhotos,
       }
     })
-  }
-
-  const setSlidePoints = (id: AwardSlideId, value: number) => {
-    const v = Math.max(0, Math.floor(Number.isFinite(value) ? value : 0))
-    setDraft(d => ({ ...d, slide_points: { ...d.slide_points, [id]: v } }))
   }
 
   /**
@@ -213,8 +264,8 @@ export function BingoDashAwardAdmin() {
     awardFileRef.current?.click()
   }
 
-  const save = async () => {
-    if (!section) return
+  const save = async (): Promise<boolean> => {
+    if (!section) return false
     setSaving(true)
     try {
       const counts = countsFromOrder(draft.slide_order)
@@ -242,20 +293,25 @@ export function BingoDashAwardAdmin() {
         main_title: draft.main_title.trim() || null,
         main_subtitle: draft.main_subtitle.trim() || null,
         main_tagline: draft.main_tagline.trim() || null,
+        // v:1 tells loaders this editor saved it, so a removed scoreboard or
+        // closing slide stays removed instead of being added back.
+        slide_text: { ...draft.slide_text, v: 1 },
       }
       if (configId) {
         const { error } = await supabase.from('bingo_award_configs').update(payload).eq('id', configId)
-        if (error) { alert(`Save failed: ${error.message}`); return }
+        if (error) { alert(`Save failed: ${error.message}`); return false }
       } else {
         const { data, error } = await supabase
           .from('bingo_award_configs')
           .insert(payload)
           .select()
           .single()
-        if (error || !data) { alert(`Save failed: ${error?.message ?? 'unknown'}`); return }
+        if (error || !data) { alert(`Save failed: ${error?.message ?? 'unknown'}`); return false }
         setConfigId(data.id)
       }
       setSavedAt(Date.now())
+      setSavedJson(JSON.stringify(draft))
+      return true
     } finally {
       setSaving(false)
     }
@@ -284,22 +340,24 @@ export function BingoDashAwardAdmin() {
         </button>
         <div className="flex-1 min-w-0">
           <h1 className="text-xl font-black truncate">🎖 Award Slides · {section.name}</h1>
-          <p className="text-xs text-gray-500 mt-0.5">Configure ceremony content, prize points, and slide order</p>
+          <p className="text-xs text-gray-500 mt-0.5">Edit every slide's text, photos and order. A running show updates when you save.</p>
         </div>
         <button
-          onClick={() => navigate(`/bingo-dash/slides/awards/${section.slug}`)}
+          onClick={() => { void runShow() }}
           className="px-3 py-2 rounded-lg text-xs font-bold uppercase tracking-widest bg-gray-100 hover:bg-gray-200 text-gray-700"
         >
           ▶ Run show
         </button>
         <button
-          onClick={save}
+          onClick={() => { void save() }}
           disabled={saving}
           className="px-4 py-2 rounded-lg text-sm font-bold bg-amber-500 hover:bg-amber-600 text-black disabled:opacity-50"
         >
           {saving ? 'Saving…' : 'Save changes'}
         </button>
-        {savedAt && !saving && (
+        {dirty && !saving ? (
+          <span className="text-xs text-amber-600 font-semibold">Unsaved changes</span>
+        ) : savedAt && !saving && (
           <span className="text-xs text-emerald-600 font-semibold">Saved ✓</span>
         )}
       </header>
@@ -308,15 +366,15 @@ export function BingoDashAwardAdmin() {
         {/* Left: holding slide content */}
         <div className="space-y-6">
           <section className="bg-white rounded-2xl border border-gray-200 p-6">
-            <h2 className="font-black text-gray-900 mb-4">Main slide (HSBC opener)</h2>
-            <p className="text-xs text-gray-400 mb-4">Red-themed branded slide. Mirrors the leader's brief opener.</p>
+            <h2 className="font-black text-gray-900 mb-4">Main slide (opener)</h2>
+            <p className="text-xs text-gray-400 mb-4">The opening title card. Pick a colour, or Reset for the ceremony purple.</p>
 
             <label className="block text-sm font-semibold text-gray-700 mb-1">Title</label>
             <input
               type="text"
               value={draft.main_title}
               onChange={e => setDraft(d => ({ ...d, main_title: e.target.value }))}
-              placeholder="HSBC KL EXPLORACE 2026"
+              placeholder="Optional — leave blank for none"
               className="w-full px-3 py-2 rounded-lg border border-gray-300 text-base focus:outline-none focus:ring-2 focus:ring-rose-300"
             />
 
@@ -325,7 +383,7 @@ export function BingoDashAwardAdmin() {
               type="text"
               value={draft.main_subtitle}
               onChange={e => setDraft(d => ({ ...d, main_subtitle: e.target.value }))}
-              placeholder="HSBC KL Explorace 2026"
+              placeholder="Optional — leave blank for none"
               className="w-full px-3 py-2 rounded-lg border border-gray-300 text-base focus:outline-none focus:ring-2 focus:ring-rose-300"
             />
 
@@ -333,13 +391,13 @@ export function BingoDashAwardAdmin() {
             <div className="flex items-center gap-3">
               <input
                 type="color"
-                value={draft.main_bg ?? HSBC_RED}
+                value={draft.main_bg ?? CEREMONY_COLOR}
                 onChange={e => setDraft(d => ({ ...d, main_bg: e.target.value }))}
                 className="w-12 h-10 rounded-lg border border-gray-300 bg-white p-1 cursor-pointer"
                 aria-label="Main slide background colour"
               />
               <span className="font-mono text-sm text-gray-600">
-                {draft.main_bg ?? `${HSBC_RED} (default)`}
+                {draft.main_bg ?? 'Ceremony purple (default)'}
               </span>
               {draft.main_bg && (
                 <button
@@ -351,8 +409,8 @@ export function BingoDashAwardAdmin() {
               )}
             </div>
             <p className="text-[11px] text-gray-400 mt-1">
-              The slide darkens this colour for the bottom of its gradient. Only
-              the main slide changes; the closing slide stays HSBC red.
+              The slide darkens this colour for the bottom of its gradient. The
+              closing slide has its own colour below.
             </p>
 
             <label className="block text-sm font-semibold text-gray-700 mb-1 mt-3">Tagline</label>
@@ -363,6 +421,41 @@ export function BingoDashAwardAdmin() {
               placeholder="AWARDS CEREMONY"
               className="w-full px-3 py-2 rounded-lg border border-gray-300 text-base focus:outline-none focus:ring-2 focus:ring-rose-300"
             />
+
+            <label className="block text-sm font-semibold text-gray-700 mb-1 mt-4">Logo (main + closing)</label>
+            <input
+              ref={logoFileRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={e => {
+                const file = e.target.files?.[0]
+                e.target.value = ''
+                if (file) void uploadLogo(file)
+              }}
+            />
+            <div className="flex items-center gap-3 flex-wrap">
+              <div className="w-20 h-12 rounded-lg overflow-hidden flex items-center justify-center shrink-0" style={{ background: draft.main_bg ?? CEREMONY_BACKGROUND }}>
+                {draft.slide_text.logo && draft.slide_text.logo !== 'none' && draft.slide_text.logo !== 'default'
+                  ? <img src={draft.slide_text.logo} alt="" className="max-w-full max-h-full object-contain" />
+                  : <span className="text-white/70 text-[10px] font-bold">no logo</span>}
+              </div>
+              {draft.slide_text.logo && draft.slide_text.logo !== 'none' && draft.slide_text.logo !== 'default' && (
+                <button
+                  onClick={() => setLogo('none')}
+                  className="px-3 py-1.5 rounded-lg border border-gray-300 text-sm font-bold text-gray-600 hover:bg-gray-50"
+                >
+                  Remove logo
+                </button>
+              )}
+              <button
+                onClick={() => logoFileRef.current?.click()}
+                disabled={uploadingLogo}
+                className="px-3 py-1.5 rounded-lg border border-gray-300 text-sm font-bold text-gray-600 hover:bg-gray-50 disabled:opacity-50"
+              >
+                {uploadingLogo ? 'Uploading…' : draft.slide_text.logo && draft.slide_text.logo !== 'none' && draft.slide_text.logo !== 'default' ? 'Replace logo' : 'Upload logo'}
+              </button>
+            </div>
           </section>
 
           <section className="bg-white rounded-2xl border border-gray-200 p-6">
@@ -381,8 +474,8 @@ export function BingoDashAwardAdmin() {
               }}
             />
             <p className="text-sm text-gray-600 mb-4">
-              The slogan and photo below are shared by all five place slides. Any
-              place can override the photo in the slide list.
+              The slogan below is shared by all five place slides. Any place can
+              have its own photo in the slide list.
             </p>
 
             <label className="block text-sm font-semibold text-gray-700 mb-1">Slogan</label>
@@ -397,54 +490,72 @@ export function BingoDashAwardAdmin() {
               Leave blank to hide the slogan strip.
             </p>
 
-            <label className="block text-sm font-semibold text-gray-700 mb-1 mt-4">
-              Photo for all places
-            </label>
-            <div className="flex items-center gap-3">
-              <div className="w-20 h-20 rounded-xl overflow-hidden bg-gray-100 border border-gray-200 flex items-center justify-center shrink-0">
-                {draft.image_url
-                  ? <img src={draft.image_url} alt="" className="w-full h-full object-cover" />
-                  : <span className="text-gray-300 text-2xl">📷</span>}
-              </div>
-              <div className="flex flex-wrap gap-2">
-                <button
-                  onClick={() => pickAwardPhoto(null)}
-                  disabled={uploadingAward === 'all'}
-                  className="px-3 py-1.5 rounded-lg bg-gray-900 text-white text-sm font-bold hover:bg-gray-800 disabled:opacity-50"
-                >
-                  {uploadingAward === 'all' ? 'Uploading\u2026' : draft.image_url ? 'Replace' : 'Upload'}
-                </button>
-                {draft.image_url && (
-                  <button
-                    onClick={() => setDraft(d => ({ ...d, image_url: null }))}
-                    className="px-3 py-1.5 rounded-lg border border-gray-300 text-sm font-bold text-gray-600 hover:bg-gray-50"
-                  >
-                    Clear
-                  </button>
-                )}
-              </div>
-            </div>
-            <p className="text-[11px] text-gray-400 mt-2">
-              A place with no photo of its own falls back to this, then to that
-              group’s own team photo.
+            <p className="text-[11px] text-gray-400 mt-3">
+              Each place shows its own uploaded photo (set in the slide list), else
+              the winning group's team photo, else the logo from the main slide.
             </p>
           </section>
 
-          <section className="bg-white rounded-2xl border border-gray-200 p-6">
-            <h2 className="font-black text-gray-900 mb-2">Holding slide</h2>
-            <p className="text-sm text-gray-600">
-              Shows a fixed “Presenting Awards” reveal between the opener and the winners. No configuration needed.
-            </p>
-          </section>
+          <SlideTextCard
+            title="Intro slide"
+            hint="Animated ceremony opener."
+            fields={[['pretitle', 'Small line above'], ['title', 'Title'], ['subtitle', 'Line below']]}
+            slide="intro" draft={draft} onChange={setText}
+          />
+          <SlideTextCard
+            title="Holding slide"
+            hint="The reveal shown before the winners."
+            fields={[['pretitle', 'Small line above'], ['title', 'Title'], ['hint', 'Hint at the bottom']]}
+            slide="holding" draft={draft} onChange={setText}
+          />
+          <SlideTextCard
+            title="Lineup slide"
+            hint="Every team with its photo."
+            fields={[['pretitle', 'Small line above'], ['title', 'Title']]}
+            slide="lineup" draft={draft} onChange={setText}
+          />
+          <SlideTextCard
+            title="Full scoreboard slide"
+            hint="Every team ranked. It always fits all teams on screen."
+            fields={[['pretitle', 'Small line above'], ['title', 'Title']]}
+            slide="scoreboard" draft={draft} onChange={setText}
+          />
+          <SlideTextCard
+            title="Closing slide"
+            hint={draft.main_title ? `The end card. A blank title uses the main slide's (“${draft.main_title}”).` : 'The end card. A blank title uses the main slide’s title.'}
+            fields={[['pretitle', 'Small line above'], ['title', 'Title'], ['subtitle', 'Subtitle'], ['tagline', 'Tagline']]}
+            slide="closing" draft={draft} onChange={setText}
+            titleFallback={draft.main_title}
+          >
+            <label className="block text-sm font-semibold text-gray-700 mb-1 mt-3">Background colour</label>
+            <div className="flex items-center gap-3">
+              <input
+                type="color"
+                value={draft.slide_text.closing?.bg || CEREMONY_COLOR}
+                onChange={e => setText('closing', 'bg', e.target.value)}
+                className="w-12 h-10 rounded-lg border border-gray-300 bg-white p-1 cursor-pointer"
+                aria-label="Closing slide background colour"
+              />
+              <span className="font-mono text-sm text-gray-600">
+                {draft.slide_text.closing?.bg || 'Ceremony purple (default)'}
+              </span>
+              {draft.slide_text.closing?.bg && (
+                <button
+                  onClick={() => setText('closing', 'bg', '')}
+                  className="px-3 py-1.5 rounded-lg border border-gray-300 text-sm font-bold text-gray-600 hover:bg-gray-50"
+                >
+                  Reset
+                </button>
+              )}
+            </div>
+          </SlideTextCard>
 
           <section className="bg-white rounded-2xl border border-gray-200 p-6">
             <h2 className="font-black text-gray-900 mb-2">Ceremony summary</h2>
             <ul className="text-sm text-gray-700 space-y-1 list-disc pl-5">
               <li>{slides.length} slide{slides.length === 1 ? '' : 's'} total</li>
               <li>{slides.filter(s => isPrizeKind(s.kind)).length} prize reveal{slides.filter(s => isPrizeKind(s.kind)).length === 1 ? '' : 's'}</li>
-              <li>Prize pool (sum of per-slide pts): <span className="font-mono font-bold">
-                {slides.filter(s => isPrizeKind(s.kind)).reduce((sum, s) => sum + (draft.slide_points[s.id] ?? 0), 0)}
-              </span></li>
+              <li>{teams.length} team{teams.length === 1 ? '' : 's'} on this board</li>
             </ul>
           </section>
         </div>
@@ -455,31 +566,30 @@ export function BingoDashAwardAdmin() {
             <div className="flex items-baseline justify-between mb-1">
               <h2 className="font-black text-gray-900">Slide sequence</h2>
               <button
-                onClick={() => setDraft(d => ({ ...d, slide_order: defaultSlideOrder(countsFromOrder(d.slide_order)) }))}
+                onClick={() => setDraft(d => ({ ...d, slide_order: resetSlideOrder(d.slide_order) }))}
                 className="text-xs text-gray-500 hover:text-gray-900 underline"
-                title="Put slides back in default order (intro → holding → consolation → 3rd → 2nd → 1st)"
+                title="Put slides back in default order (main → intro → holding → lineup → prizes → scoreboard → closing)"
               >
                 Reset order
               </button>
             </div>
-            <p className="text-xs text-gray-400 mb-4">Reorder with arrows · Remove with ✕ · Type prize pts per slide</p>
+            <p className="text-xs text-gray-400 mb-4">Reorder with arrows · Remove with ✕</p>
 
             <ol className="space-y-2">
               {slides.map((s, i) => {
                 const { label, emoji, accent } = SLIDE_LABELS[s.kind]
-                const pts = draft.slide_points[s.id] ?? 0
                 const subtitle = s.kind === 'main'
-                  ? `${draft.main_title || 'HSBC KL EXPLORACE 2026'} · ${draft.main_tagline || 'AWARDS CEREMONY'}`
+                  ? [draft.main_title, draft.main_tagline].filter(Boolean).join(' · ') || 'No title'
                   : s.kind === 'intro'
-                    ? '🏆 Award Ceremony title reveal'
+                    ? draft.slide_text.intro?.title || SLIDE_TEXT_DEFAULTS.intro.title
                     : s.kind === 'holding'
-                      ? '“Presenting Awards” reveal'
+                      ? `“${draft.slide_text.holding?.title || SLIDE_TEXT_DEFAULTS.holding.title}” reveal`
                       : s.kind === 'lineup'
                         ? `${teams.length} team${teams.length === 1 ? '' : 's'} · grid w/ photos`
                         : s.kind === 'scoreboard'
                           ? `${teams.length} team${teams.length === 1 ? '' : 's'} ranked · final totals`
                           : s.kind === 'closing'
-                            ? `${draft.main_title || 'HSBC KL EXPLORACE 2026'} · Thank You`
+                            ? [draft.slide_text.closing?.title || draft.main_title, draft.slide_text.closing?.pretitle || SLIDE_TEXT_DEFAULTS.closing.pretitle].filter(Boolean).join(' · ')
                             : s.kind === 'consolation_group'
                               ? `Team ranks ${(s.teamRanks ?? []).map(r => `#${r}`).join(', ')} · ${label}${s.rank && s.rank > 1 ? ` #${s.rank}` : ''}`
                               : `Team rank #${(s.teamRanks ?? [])[0] ?? '?'} · ${label}${s.rank && s.rank > 1 ? ` #${s.rank}` : ''}`
@@ -504,8 +614,8 @@ export function BingoDashAwardAdmin() {
                     {isPlaceKind(s.kind) && (
                       <div className="flex items-center gap-2 shrink-0">
                         <div className="w-10 h-10 rounded-lg overflow-hidden bg-gray-100 border border-gray-200 flex items-center justify-center">
-                          {draft.slide_photos[s.id] || draft.image_url
-                            ? <img src={draft.slide_photos[s.id] || draft.image_url!} alt="" className="w-full h-full object-cover" />
+                          {draft.slide_photos[s.id]
+                            ? <img src={draft.slide_photos[s.id]} alt="" className="w-full h-full object-cover" />
                             : <span className="text-gray-300 text-sm">👥</span>}
                         </div>
                         <div className="flex flex-col gap-0.5">
@@ -522,33 +632,16 @@ export function BingoDashAwardAdmin() {
                               <button
                                 onClick={() => setPlacePhoto(s.id, null)}
                                 className="px-1.5 py-0.5 rounded border border-gray-200 bg-white text-[10px] font-bold text-gray-600 hover:bg-red-50 hover:text-red-600"
-                                title="Fall back to the shared photo"
+                                title="Fall back to the team photo, then the logo"
                               >
                                 Clear
                               </button>
                             )}
                           </div>
                           <span className="text-[9px] text-gray-400">
-                            {draft.slide_photos[s.id]
-                              ? 'own photo'
-                              : draft.image_url ? 'shared photo' : 'group’s own'}
+                            {draft.slide_photos[s.id] ? 'own photo' : 'team photo / logo'}
                           </span>
                         </div>
-                      </div>
-                    )}
-
-                    {isPrizeKind(s.kind) && (
-                      <div className="flex items-center gap-1 shrink-0">
-                        <input
-                          type="number"
-                          min={0}
-                          value={pts}
-                          onChange={e => setSlidePoints(s.id, parseFloat(e.target.value) || 0)}
-                          onClick={e => (e.target as HTMLInputElement).select()}
-                          className="w-20 px-2 py-1.5 rounded-lg border border-gray-300 text-center font-mono font-bold text-sm focus:outline-none focus:ring-2 focus:ring-amber-400"
-                          title="Points this team receives"
-                        />
-                        <span className="text-[10px] font-bold text-gray-400 uppercase">pts</span>
                       </div>
                     )}
 
@@ -586,14 +679,14 @@ export function BingoDashAwardAdmin() {
 
           <section className="bg-white rounded-2xl border border-gray-200 p-6">
             <h2 className="font-black text-gray-900 mb-1">Add a slide</h2>
-            <p className="text-xs text-gray-400 mb-4">New slides are appended to the end. Reorder with the arrows above.</p>
+            <p className="text-xs text-gray-400 mb-4">New slides go to their natural place (openers first, prizes before the scoreboard, closing last). Reorder with the arrows above.</p>
 
             <div className="grid grid-cols-2 gap-2">
               <AddButton
                 disabled={hasMain}
                 emoji="🎬"
                 label="Main"
-                sublabel={hasMain ? 'already added' : 'HSBC-branded opener'}
+                sublabel={hasMain ? 'already added' : 'title card opener'}
                 accent="#fca5a5"
                 onClick={() => doAddSlide('main')}
               />
@@ -633,7 +726,7 @@ export function BingoDashAwardAdmin() {
                 disabled={hasClosing}
                 emoji="🎬"
                 label="Closing"
-                sublabel={hasClosing ? 'already added' : 'HSBC red end card'}
+                sublabel={hasClosing ? 'already added' : 'thank-you end card'}
                 accent="#fca5a5"
                 onClick={() => doAddSlide('closing')}
               />
@@ -687,5 +780,40 @@ function AddButton({
         <p className="text-[11px] text-gray-500 truncate">{sublabel}</p>
       </div>
     </button>
+  )
+}
+
+function SlideTextCard({
+  title, hint, fields, slide, draft, onChange, titleFallback, children,
+}: {
+  title: string
+  hint: string
+  fields: [keyof SlideTextBlock, string][]
+  slide: keyof typeof SLIDE_TEXT_DEFAULTS
+  draft: DraftConfig
+  onChange: (slide: keyof typeof SLIDE_TEXT_DEFAULTS, field: keyof SlideTextBlock, value: string) => void
+  /** Placeholder for a title whose default is another slide's text. */
+  titleFallback?: string
+  children?: React.ReactNode
+}) {
+  const defaults = SLIDE_TEXT_DEFAULTS[slide] as SlideTextBlock
+  return (
+    <section className="bg-white rounded-2xl border border-gray-200 p-6">
+      <h2 className="font-black text-gray-900 mb-1">{title}</h2>
+      <p className="text-xs text-gray-400 mb-3">{hint} Leave a field empty to use the text shown in grey.</p>
+      {fields.map(([field, label], i) => (
+        <div key={field} className={i > 0 ? 'mt-3' : ''}>
+          <label className="block text-sm font-semibold text-gray-700 mb-1">{label}</label>
+          <input
+            type="text"
+            value={draft.slide_text[slide]?.[field] ?? ''}
+            onChange={e => onChange(slide, field, e.target.value)}
+            placeholder={defaults[field] ?? (field === 'title' ? titleFallback : '') ?? ''}
+            className="w-full px-3 py-2 rounded-lg border border-gray-300 text-base focus:outline-none focus:ring-2 focus:ring-rose-300"
+          />
+        </div>
+      ))}
+      {children}
+    </section>
   )
 }

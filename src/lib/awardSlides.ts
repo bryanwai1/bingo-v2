@@ -99,7 +99,7 @@ export const SLIDE_LABELS: Record<AwardSlideKind, { label: string; emoji: string
   holding:           { label: 'Holding slide',      emoji: '⏳', accent: '#fcd34d' },
   lineup:            { label: 'Team lineup',        emoji: '👥', accent: '#a5f3fc' },
   scoreboard:        { label: 'Full scoreboard',    emoji: '📊', accent: '#86efac' },
-  closing:           { label: 'HSBC closing',       emoji: '🎬', accent: '#fca5a5' },
+  closing:           { label: 'Closing slide',       emoji: '🎬', accent: '#fca5a5' },
   first:             { label: 'Grand Champion',     emoji: '🏆', accent: '#fde047' },
   second:            { label: 'First Runner-Up',    emoji: '🥈', accent: '#e5e7eb' },
   third:             { label: 'Second Runner-Up',   emoji: '🥉', accent: '#f59e0b' },
@@ -184,6 +184,8 @@ export function defaultSlideOrder(counts: PrizeCounts): AwardSlideId[] {
 export function normalizeSlideOrder(
   saved: unknown,
   counts: PrizeCounts,
+  /** False once the editor has saved with removable end slides (slide_text.v). */
+  injectEndSlides = true,
 ): AwardSlideId[] {
   if (!Array.isArray(saved) || saved.length === 0) return defaultSlideOrder(counts)
   const seen = new Set<string>()
@@ -204,6 +206,7 @@ export function normalizeSlideOrder(
   }
   if (!out.length) return defaultSlideOrder(counts)
 
+  if (!injectEndSlides) return out
   if (!seen.has('scoreboard')) {
     let lastFirst = -1
     for (let i = 0; i < out.length; i++) {
@@ -238,13 +241,35 @@ function nextPrizeId(order: AwardSlideId[], kind: PrizeKind): AwardSlideId {
   return `${kind}:${max + 1}`
 }
 
-/** Append a new slide of the given kind. Singletons prepend (intro/holding/lineup/main). */
+/** Where each singleton belongs in a show, opener to finale. */
+const SINGLETON_RANK: Record<SingletonKind, number> = {
+  main: 0, intro: 1, holding: 2, lineup: 3, scoreboard: 90, closing: 99,
+}
+const singletonRank = (id: AwardSlideId) => (isSingletonKind(id) ? SINGLETON_RANK[id] : 50)
+
+/**
+ * Add a slide in its natural place: openers (main → intro → holding → lineup)
+ * after the existing openers, the scoreboard before the closing slide, the
+ * closing slide last, and prizes just before the end slides.
+ */
 export function addSlide(order: AwardSlideId[], kind: AwardSlideKind): AwardSlideId[] {
-  if (isSingletonKind(kind)) {
-    if (order.includes(kind)) return order
-    return [kind, ...order]
+  const id: AwardSlideId = isSingletonKind(kind) ? kind : nextPrizeId(order, kind)
+  if (order.includes(id)) return order
+  const r = singletonRank(id)
+  let at = order.length
+  for (let i = 0; i < order.length; i++) {
+    if (singletonRank(order[i]) > r) { at = i; break }
   }
-  return [...order, nextPrizeId(order, kind)]
+  return [...order.slice(0, at), id, ...order.slice(at)]
+}
+
+/** Reset to the default order, keeping any optional openers (intro, lineup) the show has. */
+export function resetSlideOrder(order: AwardSlideId[]): AwardSlideId[] {
+  let out = defaultSlideOrder(countsFromOrder(order))
+  for (const extra of ['intro', 'lineup'] as const) {
+    if (order.includes(extra)) out = addSlide(out, extra)
+  }
+  return out
 }
 
 /** Remove a slide by id. */
@@ -327,6 +352,11 @@ export function groupLabel(name: string): string {
 /** HSBC red, used when a board has picked no colour of its own. */
 export const HSBC_RED = '#DB0011'
 
+/** The ceremony slides' background (holding, lineup, scoreboard…). */
+export const CEREMONY_BACKGROUND = 'radial-gradient(ellipse at 50% 35%, #3b1f66 0%, #180a33 55%, #06020f 100%)'
+/** Its main colour, for the colour picker when no colour is set. */
+export const CEREMONY_COLOR = '#3b1f66'
+
 /**
  * The main slide's two-stop gradient, from a single picked colour.
  *
@@ -337,6 +367,56 @@ export const HSBC_RED = '#DB0011'
  * is no shade-arithmetic to get wrong.
  */
 export function mainBackground(hex: string | null | undefined): string {
-  const c = hex && /^#[0-9a-fA-F]{6}$/.test(hex) ? hex : HSBC_RED
+  // No colour picked: the ceremony's own purple, same as the other slides.
+  if (!hex || !/^#[0-9a-fA-F]{6}$/.test(hex)) return CEREMONY_BACKGROUND
+  const c = hex
   return `linear-gradient(135deg, ${c} 0%, color-mix(in srgb, ${c}, #000 35%) 100%)`
+}
+
+// ── Editable slide text ───────────────────────────────────────────────────
+export type SlideTextBlock = {
+  pretitle?: string
+  title?: string
+  subtitle?: string
+  tagline?: string
+  hint?: string
+  bg?: string
+}
+export type SlideText = {
+  /** Set by the editor; see normalizeSlideOrder's injectEndSlides. */
+  v?: number
+  /** Main + closing logo: "default" emblem, "none", or an image URL. */
+  logo?: string
+  intro?: SlideTextBlock
+  holding?: SlideTextBlock
+  lineup?: SlideTextBlock
+  scoreboard?: SlideTextBlock
+  closing?: SlideTextBlock
+}
+
+/** Built-in text for each editable slide — what an empty field falls back to. */
+export const SLIDE_TEXT_DEFAULTS = {
+  intro: { pretitle: 'Ladies and Gentlemen', title: '🏆 AWARD CEREMONY', subtitle: 'Presenting your champions…' },
+  holding: { pretitle: 'Ladies and Gentlemen', title: 'Presenting Awards', hint: '▶ Continue for the winners' },
+  lineup: { pretitle: "Tonight's Contenders", title: '👥 MEET THE TEAMS' },
+  scoreboard: { pretitle: 'Final Standings', title: '🏆 FULL SCOREBOARD' },
+  closing: { pretitle: 'Thank You', subtitle: 'Thank you to all our teams', tagline: 'CONGRATULATIONS · SEE YOU NEXT TIME' },
+} as const
+
+/** Read stored slide_text defensively — it arrives as user-edited JSON. */
+export function readSlideText(raw: unknown): SlideText {
+  return raw && typeof raw === 'object' && !Array.isArray(raw) ? (raw as SlideText) : {}
+}
+
+/** A field's stored text, or its default when blank. */
+export function slideTextValue(
+  text: SlideText,
+  slide: keyof typeof SLIDE_TEXT_DEFAULTS,
+  field: keyof SlideTextBlock,
+  fallback?: string,
+): string {
+  const v = text[slide]?.[field]
+  if (typeof v === 'string' && v.trim()) return v
+  const d = (SLIDE_TEXT_DEFAULTS[slide] as SlideTextBlock)[field]
+  return d ?? fallback ?? ''
 }

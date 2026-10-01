@@ -954,6 +954,9 @@ export function BingoDashTaskEdit() {
           </div>
         )}
 
+        {/* The Answer Input and Sample tabs show only their own editor; every
+            other card setting lives under Instructions. */}
+        {activeTab === 'instructions' && (<>
         {/* Sign Splice cards carry their own game settings. */}
         {task.task_type === 'sign_splice' && (
           <SignSpliceAdminPanel
@@ -1059,6 +1062,7 @@ export function BingoDashTaskEdit() {
           }}
           onSlotsChange={() => { void reloadDraw() }}
         />
+        </>)}
       </main>
 
       {/* Leaving with unsaved edits. Three ways out rather than a blunt

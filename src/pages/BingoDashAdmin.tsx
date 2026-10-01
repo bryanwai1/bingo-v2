@@ -292,18 +292,21 @@ function BulkApplyPanel({ group, onApply }: {
   const pointsSet = new Set(group.tasks.map(t => t.points ?? 0))
   const uniformHex = hexes.size === 1 ? [...hexes][0] : null
   const uniformPoints = pointsSet.size === 1 ? [...pointsSet][0] : null
+  // Mixed colours: start the picker on the group's most common colour (the
+  // one the category actually looks like), not an unrelated default.
+  const counts = new Map<string, number>()
+  for (const t of group.tasks) if (t.hex_code) counts.set(t.hex_code, (counts.get(t.hex_code) ?? 0) + 1)
+  const startHex = uniformHex ?? [...counts].sort((x, y) => y[1] - x[1])[0]?.[0] ?? '#3B82F6'
 
-  const [hex, setHex] = useState<string>(uniformHex ?? '#3B82F6')
+  const [hex, setHex] = useState<string>(startHex)
   const [pts, setPts] = useState<string>(uniformPoints !== null ? String(uniformPoints) : '')
-  const [touchedHex, setTouchedHex] = useState(false)
 
   if (!open) {
     return (
       <button
         onClick={() => {
-          setHex(uniformHex ?? '#3B82F6')
+          setHex(startHex)
           setPts(uniformPoints !== null ? String(uniformPoints) : '')
-          setTouchedHex(false)
           setOpen(true)
         }}
         title={`Set colour or points for all ${n} ${group.label} card${n === 1 ? '' : 's'} at once`}
@@ -315,18 +318,17 @@ function BulkApplyPanel({ group, onApply }: {
   }
 
   const ptsNum = pts.trim() === '' ? null : Math.max(0, parseFloat(pts) || 0)
-  const nothingToDo = !touchedHex && ptsNum === null
 
   return (
     <div className="flex-shrink-0 flex items-center gap-2 flex-wrap a-surface-2 border a-border rounded-xl px-2.5 py-1.5">
       <span className="text-[11px] a-text-3 font-bold uppercase tracking-wider">All {n}</span>
 
       <input type="color" value={hex}
-        onChange={e => { setHex(e.target.value); setTouchedHex(true) }}
+        onChange={e => setHex(e.target.value)}
         className="w-7 h-7 rounded cursor-pointer border a-border"
         title="Colour to apply" />
       <input type="text" value={hex}
-        onChange={e => { setHex(e.target.value); setTouchedHex(true) }}
+        onChange={e => setHex(e.target.value)}
         placeholder={uniformHex ? undefined : 'Mixed'}
         className="w-[5.5rem] px-1.5 py-0.5 text-xs border a-border a-surface a-text rounded font-mono focus:outline-none focus:ring-1 focus:ring-teal-500"
         title="Exact hex code to apply" />
@@ -340,13 +342,14 @@ function BulkApplyPanel({ group, onApply }: {
 
       <button
         onClick={async () => {
-          const patch: { hex?: string; points?: number } = {}
-          if (touchedHex) patch.hex = hex
+          // A force apply: the colour shown always goes to every card, so the
+          // group can be re-synced even when nothing was edited.
+          const patch: { hex?: string; points?: number } = { hex }
           if (ptsNum !== null) patch.points = ptsNum
           await onApply(group.tasks, patch)
           setOpen(false)
         }}
-        disabled={nothingToDo || !/^#[0-9a-fA-F]{6}$/.test(hex)}
+        disabled={!/^#[0-9a-fA-F]{6}$/.test(hex)}
         className="px-3 py-1 rounded-lg bg-teal-600 text-white text-[11px] font-black disabled:opacity-40"
       >
         Apply to {n} card{n === 1 ? '' : 's'}
@@ -423,10 +426,20 @@ function CategoryGroupBlock({
 
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
         {group.tasks.map(task => (
-          <div key={task.id} className="rounded-2xl overflow-hidden flex flex-col shadow-sm"
-            style={{ backgroundColor: task.hex_code }}>
+          <div key={task.id} className="rounded-2xl overflow-hidden flex flex-col"
+            // Neutral card, colour as an accent (same as the library view) —
+            // dark text on a solid hex block was hard to read.
+            style={{
+              background: 'var(--a-surface)',
+              border: '1px solid var(--a-border)',
+              borderTop: `6px solid ${task.hex_code}`,
+              boxShadow: 'var(--a-shadow-1)',
+            }}>
             <div className="px-4 pt-4 pb-3 flex-1">
-              <p className="a-text-2 text-xs font-bold uppercase tracking-widest mb-1">{task.color}</p>
+              <p className="a-text-2 text-xs font-bold uppercase tracking-widest mb-1 flex items-center gap-1.5">
+                <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: task.hex_code }} />
+                {task.color}
+              </p>
               <h3 className="a-text font-black text-lg leading-tight">{task.title}</h3>
               {editingCategoryId === task.id ? (
                 <select
@@ -434,7 +447,7 @@ function CategoryGroupBlock({
                   defaultValue={task.category || ''}
                   onChange={e => saveCategoryInline(task.id, e.target.value)}
                   onBlur={() => setEditingCategoryId(null)}
-                  className="w-full bg-black/20 a-text text-xs px-2 py-1 rounded border border-white/30 focus:outline-none focus:border-white/60 mt-2"
+                  className="w-full a-surface-2 a-text text-xs px-2 py-1 rounded border a-border focus:outline-none mt-2"
                 >
                   <option value="">— Uncategorized —</option>
                   {categoryNamesFor(task.section_id).map(name => (
@@ -477,29 +490,29 @@ function CategoryGroupBlock({
             </div>
             <div className="px-3 pb-3 flex flex-wrap gap-1.5">
               <button onClick={() => navigate(`/bingo-dash/admin/task/${task.id}?from=board`)}
-                className="px-3 py-1.5 a-surface/20 rounded-lg a-text text-xs font-bold hover:a-surface/30 transition-colors">
+                className="px-3 py-1.5 a-surface-2 border a-border rounded-lg a-text text-xs font-bold hover:a-surface transition-colors">
                 Edit
               </button>
               <button onClick={() => setQrTask(task)}
-                className="px-3 py-1.5 a-surface/20 rounded-lg a-text text-xs font-bold hover:a-surface/30 transition-colors">
+                className="px-3 py-1.5 a-surface-2 border a-border rounded-lg a-text text-xs font-bold hover:a-surface transition-colors">
                 QR
               </button>
               <button onClick={() => copyLink(task.id)}
-                className="px-3 py-1.5 a-surface/20 rounded-lg a-text text-xs font-bold hover:a-surface/30 transition-colors">
+                className="px-3 py-1.5 a-surface-2 border a-border rounded-lg a-text text-xs font-bold hover:a-surface transition-colors">
                 {copiedId === task.id ? '✓' : '🔗'}
               </button>
               <button onClick={() => duplicateTask(task)}
-                className="px-3 py-1.5 a-surface/20 rounded-lg a-text text-xs font-bold hover:a-surface/30 transition-colors"
+                className="px-3 py-1.5 a-surface-2 border a-border rounded-lg a-text text-xs font-bold hover:a-surface transition-colors"
                 title="Duplicate this card in this section">
                 ⎘ Copy
               </button>
               <button onClick={() => openTileEdit(task)}
-                className="px-3 py-1.5 a-surface/20 rounded-lg a-text text-xs font-bold hover:a-surface/30 transition-colors"
+                className="px-3 py-1.5 a-surface-2 border a-border rounded-lg a-text text-xs font-bold hover:a-surface transition-colors"
                 title="Quick edit — title, category and points">
                 Quick edit
               </button>
               <button onClick={() => deleteTask(task.id, task.title)}
-                className="px-3 py-1.5 bg-red-500/30 rounded-lg a-text text-xs font-bold hover:bg-red-500/50 transition-colors">
+                className="px-3 py-1.5 bg-red-500/10 border border-red-500/30 rounded-lg text-red-600 text-xs font-bold hover:bg-red-500/20 transition-colors">
                 Delete
               </button>
             </div>

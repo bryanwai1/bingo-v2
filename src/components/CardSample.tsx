@@ -210,20 +210,38 @@ function ArtefactView({ artefact, color }: { artefact: Artefact; color: string }
 }
 
 /** A working page, embedded so it can be used without leaving the card. */
+// Storage serves uploaded .html as plain text (sandboxed), so an uploaded page
+// is fetched and rendered from its source instead of loaded by URL.
+const isStoredHtml = (src: string) => /\/storage\/v1\/object\/public\/.*\.html?(\?|$)/i.test(src)
+
 function ToolView({ tool, color }: { tool: Tool; color: string }) {
+  const stored = isStoredHtml(tool.src)
+  const [html, setHtml] = useState<string | null>(null)
+  const [openUrl, setOpenUrl] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!stored) return
+    let url: string | null = null
+    let cancelled = false
+    fetch(tool.src).then(r => r.text()).then(text => {
+      if (cancelled) return
+      url = URL.createObjectURL(new Blob([text], { type: 'text/html' }))
+      setHtml(text); setOpenUrl(url)
+    }).catch(() => {})
+    return () => { cancelled = true; if (url) URL.revokeObjectURL(url) }
+  }, [tool.src, stored])
+
+  const href = stored ? openUrl ?? undefined : tool.src
   return (
     <div>
       <div className="rounded-2xl overflow-hidden bg-black/30" style={{ border: `2px solid ${color}55` }}>
-        <iframe
-          src={tool.src}
-          title={tool.label}
-          className="w-full block"
-          style={{ height: 430, border: 0 }}
-          loading="lazy"
-        />
+        {stored
+          ? <iframe srcDoc={html ?? ''} title={tool.label} sandbox="allow-scripts allow-forms allow-popups"
+              className="w-full block bg-white" style={{ height: 430, border: 0 }} />
+          : <iframe src={tool.src} title={tool.label} className="w-full block" style={{ height: 430, border: 0 }} loading="lazy" />}
       </div>
       <a
-        href={tool.src}
+        href={href}
         target="_blank"
         rel="noopener noreferrer"
         className="mt-2 w-full flex items-center justify-center gap-1.5 py-2.5 rounded-2xl font-black text-xs uppercase tracking-wider transition-all active:scale-95"
@@ -251,7 +269,9 @@ function ClipView({ clip, color }: { clip: Clip; color: string }) {
 function UploadedView({ samples, color }: { samples: TaskSample[]; color: string }) {
   return (
     <div className="flex flex-col gap-3">
-      {samples.map(s => (
+      {samples.map(s => s.media_type === 'link' ? (
+        <ToolView key={s.id} tool={{ src: s.media_url, label: s.caption || 'Open the sample' }} color={color} />
+      ) : (
         <div key={s.id}>
           <div className="rounded-2xl overflow-hidden bg-black" style={{ border: `2px solid ${color}55` }}>
             {s.media_type === 'video'

@@ -281,6 +281,8 @@ export interface BingoAwardConfig {
   main_title: string | null
   main_subtitle: string | null
   main_tagline: string | null
+  /** Editable text per slide + logo; see SlideText in src/lib/awardSlides.ts. */
+  slide_text?: Record<string, unknown> | null
   created_at: string
 }
 

@@ -6,7 +6,7 @@ export type TaskSample = {
   task_id: string
   sort_order: number
   media_url: string
-  media_type: 'image' | 'video'
+  media_type: 'image' | 'video' | 'link'
   caption: string | null
 }
 
