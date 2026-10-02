@@ -2771,6 +2771,16 @@ function SampleController({ code, readOnly = false }: { code: string; readOnly?:
   // empty while the big screen fills up, which is the one move a presenter
   // makes most.
   const quickSlots = new Set(QUICK_WIN_STEPS.slice(0, quickWinRows).flat())
+  const watchSection = sections.find(x => x.id === selectedId) ?? null
+
+  // A viewer cannot tap the BINGO celebration away - the board is inert - so
+  // BoardScreen would sit behind it forever. Mirror the projector instead:
+  // once the big screen has cleared its celebration, clear ours. The heartbeat
+  // ticks state every few seconds, which also drains a queue of them.
+  const watchBoardRef = useRef<BoardScreenHandle>(null)
+  useEffect(() => {
+    if (readOnly && !state?.popup) watchBoardRef.current?.dismissPopup()
+  }, [readOnly, state])
   const chatOpen = state?.chatOpen ?? false
 
   return (
@@ -2793,7 +2803,65 @@ function SampleController({ code, readOnly = false }: { code: string; readOnly?:
         <div className="flex-1 flex flex-col items-center justify-center text-center px-6 gap-2">
           <div className="text-4xl animate-pulse">📡</div>
           <p className="text-gray-300 font-bold">Looking for the projector…</p>
-          <p className="text-gray-500 text-sm">Make sure the sample screen is open and shows <span className="text-emerald-300 font-bold">Paired</span>.</p>
+          <p className="text-gray-500 text-sm">
+            {readOnly
+              ? 'The presenter needs the sample screen open with Share screen on.'
+              : <>Make sure the sample screen is open and shows <span className="text-emerald-300 font-bold">Paired</span>.</>}
+          </p>
+        </div>
+      ) : readOnly ? (
+        /* A viewer gets the REAL board the room is looking at - the same
+           BoardScreen the projector renders - not the controller's thumbnail
+           grid. `inert` makes the whole subtree non-interactive in one word -
+           unlike pointer-events-none it also drops it out of the tab order, so
+           there is no keyboard route in either, and no disabled flag to thread
+           through every control and miss one. */
+        <div className="flex-1 min-h-0 overflow-y-auto select-none" inert>
+          {view === 'scoreboard' ? (
+            <SampleScoreboard
+              gridTasks={gridTasks}
+              section={watchSection}
+              playedTeamName={teamName}
+              scanState={scanState}
+              quickWinSlots={quickSlots}
+            />
+          ) : teamName && gridTasks.length > 0 ? (
+            /* Wait for the tasks before mounting the board. BoardScreen seeds
+               its "already celebrated" baseline on its first run, so mounting
+               with an empty grid seeds it as NO lines - and the moment the
+               tasks land, lines completed long ago look brand new and the
+               viewer is ambushed by a celebration it cannot tap away. */
+            <BoardScreen
+              ref={watchBoardRef}
+              teamName={teamName}
+              gridTasks={gridTasks}
+              scanState={scanState}
+              quickWinSlots={quickSlots}
+              section={watchSection}
+              /* Glow comes from the board row loaded at mount. ponytail: a
+                 viewer will not see glow toggled mid-show; subscribe to
+                 bingo_sections like the projector does if that matters. */
+              glowSlots={new Set(watchSection?.glow_slots ?? [])}
+              glowMode={false}
+              onToggleGlow={() => {}}
+              onClearGlow={() => {}}
+              onToggleGlowMode={() => {}}
+              onOpenTask={() => {}}
+              onSwitchTeam={() => {}}
+              onShowScoreboard={() => {}}
+              inviteUrl={`${window.location.origin}/bingo-dash/sample`}
+            />
+          ) : (
+            <div className="flex flex-col items-center justify-center text-center px-6 py-20 gap-2">
+              <div className="text-4xl">🎯</div>
+              <p className="text-gray-300 font-bold">Waiting for the presenter to start…</p>
+            </div>
+          )}
+          {openTaskObj && (
+            <p className="px-4 pb-6 text-center text-sm font-bold text-emerald-200">
+              On screen now: <span className="text-white">{openTaskObj.title}</span>
+            </p>
+          )}
         </div>
       ) : (
         <div className="flex-1 p-3 flex flex-col gap-3 max-w-md w-full mx-auto">
@@ -2817,16 +2885,13 @@ function SampleController({ code, readOnly = false }: { code: string; readOnly?:
                   <span className="text-purple-300/80 font-bold"> · {popupQueued} more to come</span>
                 )}
               </p>
-              {!readOnly && (
-                <button onClick={() => sendCommand({ action: 'dismissPopup' })}
-                  className="w-full py-3.5 rounded-lg bg-purple-500 text-white text-base font-black hover:bg-purple-400 active:scale-95 transition-all">
-                  ▶ Tap to continue
-                </button>
-              )}
+              <button onClick={() => sendCommand({ action: 'dismissPopup' })}
+                className="w-full py-3.5 rounded-lg bg-purple-500 text-white text-base font-black hover:bg-purple-400 active:scale-95 transition-all">
+                ▶ Tap to continue
+              </button>
             </div>
           )}
 
-          {!readOnly && <>
           {/* Board / Scoreboard view toggle */}
           <div className="grid grid-cols-2 gap-1 p-1 rounded-xl bg-white/5 border border-white/10">
             <button
@@ -2905,24 +2970,10 @@ function SampleController({ code, readOnly = false }: { code: string; readOnly?:
             </div>
           )}
 
-          </>}
-
-          {/* Tile grid — tap to open on the projector. Read-only viewers see the
-              same grid, and follow the projector into the scoreboard. */}
-          {readOnly && view === 'scoreboard' && (
-            <SampleScoreboard
-              gridTasks={gridTasks}
-              section={sections.find(x => x.id === selectedId) ?? null}
-              playedTeamName={teamName}
-              scanState={scanState}
-              quickWinSlots={quickSlots}
-            />
-          )}
-          {teamName && !(readOnly && view === 'scoreboard') && (
+          {/* Tile grid — tap to open on the projector */}
+          {teamName && (
             <div>
-              <label className="text-[11px] text-gray-500 font-bold uppercase tracking-wide">
-                {readOnly ? 'On the big screen now' : 'Tap a tile to show it on screen'}
-              </label>
+              <label className="text-[11px] text-gray-500 font-bold uppercase tracking-wide">Tap a tile to show it on screen</label>
               <div className="grid grid-cols-5 gap-1.5 mt-1">
                 {slots.map((task, i) => {
                   if (!task) return <div key={i} className="rounded-lg aspect-square bg-white/5 border border-white/10" />
@@ -2930,8 +2981,7 @@ function SampleController({ code, readOnly = false }: { code: string; readOnly?:
                   const isOpen = task.id === openTaskId
                   return (
                     <button key={i}
-                      onClick={() => { if (!readOnly) sendCommand({ action: 'openTask', taskId: task.id }) }}
-                      disabled={readOnly}
+                      onClick={() => sendCommand({ action: 'openTask', taskId: task.id })}
                       title={task.title}
                       className={`relative rounded-lg aspect-square flex items-center justify-center text-[9px] font-black leading-none p-0.5 text-center transition-all active:scale-95 ${isOpen ? 'ring-2 ring-emerald-400' : ''}`}
                       style={{ backgroundColor: task.hex_code, opacity: st ? 1 : 0.8 }}>
@@ -2946,16 +2996,10 @@ function SampleController({ code, readOnly = false }: { code: string; readOnly?:
             </div>
           )}
 
-          {/* Which tile is up. A viewer sees this and nothing below it: the
-              controls walk the tile's flow on the big screen, but naming the
-              tile is the whole point of mirroring - without it, opening one
-              shows a viewer nothing but a ring on a thumbnail. */}
+          {/* Open-task controls — walk the tile's flow on the big screen */}
           {openTaskObj && (
             <div className="bg-emerald-500/10 border border-emerald-400/30 rounded-xl p-3 flex flex-col gap-2">
-              <p className={`font-bold text-emerald-200 ${readOnly ? 'text-base' : 'text-xs'}`}>
-                On screen now: <span className="text-white">{openTaskObj.title}</span>
-              </p>
-              {!readOnly && <>
+              <p className="text-xs text-emerald-200 font-bold">On screen now: <span className="text-white">{openTaskObj.title}</span></p>
 
               {scanState[openTaskObj.id] === 'completed' ? (
                 <button onClick={() => sendCommand({ action: 'uncomplete', taskId: openTaskObj.id })}
@@ -3003,11 +3047,9 @@ function SampleController({ code, readOnly = false }: { code: string; readOnly?:
                 className="w-full py-2 rounded-lg bg-white/5 text-gray-300 border border-white/10 text-xs font-bold hover:bg-white/10 transition-colors">
                 ← Back to board
               </button>
-              </>}
             </div>
           )}
 
-          {!readOnly && <>
           {/* Put something on the big screen on demand. Both are toggles so
               the presenter can take them away without touching the laptop. */}
           {teamName && (
@@ -3046,7 +3088,6 @@ function SampleController({ code, readOnly = false }: { code: string; readOnly?:
               ↺ Reset demo
             </button>
           </div>
-          </>}
         </div>
       )}
     </div>

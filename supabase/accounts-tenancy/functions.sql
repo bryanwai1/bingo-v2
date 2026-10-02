@@ -17,7 +17,6 @@ returns boolean language sql stable security definer set search_path = public as
     select 1 from public.bingo_accounts
     where id = auth.uid() and role = 'owner' and status = 'approved'
   );
-$$;
 
 create or replace function public.is_bingo_approved()
 returns boolean language sql stable security definer set search_path = public as $$
