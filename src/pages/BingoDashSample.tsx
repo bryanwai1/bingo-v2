@@ -2778,6 +2778,30 @@ function SampleController({ code, readOnly = false }: { code: string; readOnly?:
   // once the big screen has cleared its celebration, clear ours. The heartbeat
   // ticks state every few seconds, which also drains a queue of them.
   const watchBoardRef = useRef<BoardScreenHandle>(null)
+  const watchDetailRef = useRef<SampleTaskDetailHandle>(null)
+  const [watchStep, setWatchStep] = useState<DetailStep | null>(null)
+  // Bumped to remount the detail. The handle can go forward but never back to
+  // the splash, so a viewer that ran ahead - a stale snapshot is enough - could
+  // never return. Remounting is the only way back, and it resets to the splash.
+  const [watchDetailNonce, setWatchDetailNonce] = useState(0)
+
+  // Walk the viewer's copy of the tile detail onto the projector's step. The
+  // snapshot carries where the big screen is (splash/page/marshal) but not how
+  // it got there, so converge one move per render using the same imperative
+  // handle the phone remote drives: each call re-reports via onStep, which
+  // re-runs this until the two agree. Moves that have no handle (going back to
+  // the splash) are simply not made, so it settles instead of looping.
+  useEffect(() => {
+    if (!readOnly) return
+    const target = state?.detail
+    const h = watchDetailRef.current
+    if (!target || !watchStep || !h) return
+    if (target.phase === 'splash' && watchStep.phase === 'main') { setWatchDetailNonce(n => n + 1); return }
+    if (target.phase === 'main' && watchStep.phase === 'splash') { h.start(); return }
+    if (target.pageIndex > watchStep.pageIndex) { h.nextPage(); return }
+    if (target.pageIndex < watchStep.pageIndex) { h.prevPage(); return }
+    if (target.marshalFilled && !watchStep.marshalFilled) h.fillMarshal()
+  }, [readOnly, state, watchStep])
   useEffect(() => {
     if (readOnly && !state?.popup) watchBoardRef.current?.dismissPopup()
   }, [readOnly, state])
@@ -2786,10 +2810,11 @@ function SampleController({ code, readOnly = false }: { code: string; readOnly?:
   return (
     <div className="min-h-screen bg-gray-950 text-white flex flex-col">
       {/* Header */}
-      <div className={`sticky top-0 z-40 bg-gray-950/95 backdrop-blur border-b px-3 py-2.5 flex items-center gap-2 ${readOnly ? 'border-sky-500/30' : 'border-emerald-500/30'}`}>
-        <span className={`px-2 py-1 rounded-lg text-black text-[11px] font-black tracking-wider ${readOnly ? 'bg-sky-400' : 'bg-emerald-500'}`}>
-          {readOnly ? '📺 WATCHING' : '📡 REMOTE'}
-        </span>
+      {/* The viewer is meant to look like the big screen, so it carries no
+          chrome of its own - the only exception is the reconnect notice below,
+          which has to be visible or a frozen screen looks like a live one. */}
+      <div className={`sticky top-0 z-40 bg-gray-950/95 backdrop-blur border-b border-emerald-500/30 px-3 py-2.5 items-center gap-2 ${readOnly ? 'hidden' : 'flex'}`}>
+        <span className="px-2 py-1 rounded-lg bg-emerald-500 text-black text-[11px] font-black tracking-wider">📡 REMOTE</span>
         <span className="text-[11px] text-gray-400 font-bold tracking-[0.2em]">{code}</span>
         <span className="ml-auto flex items-center gap-1.5 text-[11px] font-bold">
           <span className={`w-2 h-2 rounded-full ${
@@ -2810,13 +2835,21 @@ function SampleController({ code, readOnly = false }: { code: string; readOnly?:
           </p>
         </div>
       ) : readOnly ? (
-        /* A viewer gets the REAL board the room is looking at - the same
-           BoardScreen the projector renders - not the controller's thumbnail
-           grid. `inert` makes the whole subtree non-interactive in one word -
-           unlike pointer-events-none it also drops it out of the tab order, so
-           there is no keyboard route in either, and no disabled flag to thread
+        /* A viewer sees exactly what the room sees, in the projector's own
+           render order - the join screen, then the board - rather than only
+           the board once a team is picked. Everything here is the component
+           the projector itself renders.
+
+           `inert` makes the whole subtree non-interactive in one word; unlike
+           pointer-events-none it also drops it out of the tab order, so there
+           is no keyboard route in either, and no disabled flag to thread
            through every control and miss one. */
-        <div className="flex-1 min-h-0 overflow-y-auto select-none" inert>
+        <div className="flex-1 min-h-0 overflow-y-auto select-none relative" inert>
+          {!connected && (
+            <div className="sticky top-0 z-50 bg-red-500/90 text-white text-center text-xs font-black py-1.5">
+              Reconnecting to the screen…
+            </div>
+          )}
           {view === 'scoreboard' ? (
             <SampleScoreboard
               gridTasks={gridTasks}
@@ -2825,7 +2858,12 @@ function SampleController({ code, readOnly = false }: { code: string; readOnly?:
               scanState={scanState}
               quickWinSlots={quickSlots}
             />
-          ) : teamName && gridTasks.length > 0 ? (
+          ) : !teamName ? (
+            /* Mirrors the group list and, once the presenter picks one, the
+               "Enter Password" step - JoinScreen derives that from `selected`
+               and pre-fills the demo password exactly as on the big screen. */
+            <JoinScreen selected={pendingGroup} onSelect={() => {}} onJoin={() => {}} />
+          ) : gridTasks.length > 0 ? (
             /* Wait for the tasks before mounting the board. BoardScreen seeds
                its "already celebrated" baseline on its first run, so mounting
                with an empty grid seeds it as NO lines - and the moment the
@@ -2833,6 +2871,7 @@ function SampleController({ code, readOnly = false }: { code: string; readOnly?:
                viewer is ambushed by a celebration it cannot tap away. */
             <BoardScreen
               ref={watchBoardRef}
+              key={selectedId ?? 'none'}
               teamName={teamName}
               gridTasks={gridTasks}
               scanState={scanState}
@@ -2852,15 +2891,32 @@ function SampleController({ code, readOnly = false }: { code: string; readOnly?:
               inviteUrl={`${window.location.origin}/bingo-dash/sample`}
             />
           ) : (
-            <div className="flex flex-col items-center justify-center text-center px-6 py-20 gap-2">
-              <div className="text-4xl">🎯</div>
-              <p className="text-gray-300 font-bold">Waiting for the presenter to start…</p>
+            <div className="min-h-[70vh] flex items-center justify-center">
+              <div className="text-gray-400 text-xl font-bold animate-pulse">Loading board…</div>
             </div>
           )}
-          {openTaskObj && (
-            <p className="px-4 pb-6 text-center text-sm font-bold text-emerald-200">
-              On screen now: <span className="text-white">{openTaskObj.title}</span>
-            </p>
+          {openTaskObj && view === 'board' && (
+            <SampleTaskDetail
+              key={`${openTaskObj.id}:${watchDetailNonce}`}
+              ref={watchDetailRef}
+              task={openTaskObj}
+              teamName={teamName ?? 'Sample Team'}
+              marshalPassword={DEMO_MARSHAL_PASSWORD}
+              completed={scanState[openTaskObj.id] === 'completed'}
+              /* Same chain the projector builds - it comes from gridTasks and
+                 scanState, both of which a viewer already has. */
+              chain={{
+                prev: gridTasks.find(t => t.id === openTaskObj.prerequisite_task_id) ?? null,
+                locked: !!openTaskObj.prerequisite_task_id
+                  && scanState[openTaskObj.prerequisite_task_id] !== 'completed',
+                next: gridTasks.find(t => t.prerequisite_task_id === openTaskObj.id) ?? null,
+              }}
+              onJump={() => {}}
+              onComplete={() => {}}
+              onUncomplete={() => {}}
+              onClose={() => {}}
+              onStep={setWatchStep}
+            />
           )}
         </div>
       ) : (
