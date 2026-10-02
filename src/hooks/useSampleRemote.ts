@@ -15,7 +15,9 @@ import { supabase, isSupabaseConfigured } from '../lib/supabase'
 
 export type RemoteCommand =
   | { action: 'selectBoard'; id: string }
-  | { action: 'join'; teamName: string }
+  | { action: 'join'; teamName: string } // pick a group → projector shows "Enter Password"
+  | { action: 'confirmJoin' }            // submit the pre-filled password
+  | { action: 'cancelJoin' }             // back to the group list
   | { action: 'leave' }
   | { action: 'openTask'; taskId: string }
   | { action: 'closeTask' }
@@ -54,6 +56,8 @@ export type DetailStep = {
 export type RemoteState = {
   selectedId: string | null
   teamName: string | null
+  /** Group picked but still on the projector's "Enter Password" step. */
+  pendingGroup: string | null
   scanState: Record<string, 'scanned' | 'completed'>
   openTaskId: string | null
   view: SampleView

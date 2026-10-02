@@ -101,6 +101,8 @@ function DemoBar({
   showQuickWin,
   onRemote,
   remoteActive,
+  onShare,
+  shareActive,
   onTryIt,
   view,
   onToggleView,
@@ -117,6 +119,8 @@ function DemoBar({
   showQuickWin: boolean
   onRemote: () => void
   remoteActive: boolean
+  onShare: () => void
+  shareActive: boolean
   onTryIt: () => void
   view: SampleView
   onToggleView: () => void
@@ -175,6 +179,17 @@ function DemoBar({
               📡<span className="hidden sm:inline"> {remoteActive ? 'Paired' : 'Remote'}</span>
             </button>
             <button
+              onClick={onShare}
+              title="Share this screen — the audience watches along, read-only"
+              className={`flex-shrink-0 px-2.5 py-2 rounded-lg text-xs font-black border transition-colors whitespace-nowrap ${
+                shareActive
+                  ? 'bg-sky-500/20 text-sky-200 border-sky-400/50 hover:bg-sky-500/30'
+                  : 'bg-white/10 text-gray-200 border-white/15 hover:bg-white/20'
+              }`}
+            >
+              📺<span className="hidden sm:inline"> {shareActive ? 'Sharing' : 'Share screen'}</span>
+            </button>
+            <button
               onClick={onTryIt}
               title="Let the audience try the game on their own phones"
               className="flex-shrink-0 px-2.5 py-2 rounded-lg bg-white/10 text-gray-200 border border-white/15 text-xs font-black hover:bg-white/20 transition-colors whitespace-nowrap"
@@ -213,23 +228,29 @@ function DemoBar({
 
 // ── Join Screen (sandbox: demo groups + pre-filled sample password) ───────────
 
-function JoinScreen({ onJoin }: { onJoin: (groupName: string) => void }) {
-  const [step, setStep] = useState<1 | 2>(1)
+// The picked group is held by the projector (not here) so a group chosen on the
+// paired phone lands on the same "Enter Password" step as a click on screen.
+function JoinScreen({ selected, onSelect, onJoin }: {
+  selected: string | null
+  onSelect: (groupName: string | null) => void
+  onJoin: (groupName: string) => void
+}) {
+  const step = selected ? 2 : 1
   const [search, setSearch] = useState('')
-  const [selected, setSelected] = useState<string | null>(null)
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
+
+  // Pre-fill the sample password for the demo whenever a group is picked.
+  useEffect(() => {
+    setPassword(selected ? SAMPLE_TEAM_PASSWORD : '')
+    setError('')
+  }, [selected])
 
   const groups = DEMO_GROUPS
     .filter(g => g.toLowerCase().includes(search.toLowerCase()))
     .sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }))
 
-  const pick = (name: string) => {
-    setSelected(name)
-    setPassword(SAMPLE_TEAM_PASSWORD) // pre-fill the sample password for the demo
-    setError('')
-    setStep(2)
-  }
+  const pick = (name: string) => onSelect(name)
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault()
@@ -293,7 +314,7 @@ function JoinScreen({ onJoin }: { onJoin: (groupName: string) => void }) {
           style={{ animationDelay: '0.05s', opacity: 0, animationFillMode: 'forwards' }}
         >
           <button
-            onClick={() => { setStep(1); setError('') }}
+            onClick={() => onSelect(null)}
             className="text-sm text-purple-500 font-bold mb-4 hover:text-purple-700 transition-colors"
           >
             &larr; Back
@@ -1895,10 +1916,19 @@ const SampleTaskDetail = forwardRef<SampleTaskDetailHandle, {
 
 // ── Main Page ─────────────────────────────────────────────────────────────────
 
-// Entry point: `?remote=<code>` opens the phone controller; otherwise the
-// normal sample view (which doubles as the "projector" when a phone is paired).
+// Entry point:
+//   ?remote=<code> → the phone controller
+//   ?watch=<code>  → the same screen read-only, for the audience to follow
+//   otherwise      → the normal sample view, which doubles as the "projector"
+//
+// A viewer is literally the controller with its buttons hidden: that component
+// is already a phone-sized mirror of the big screen driven entirely by
+// RemoteState, so there is nothing else to build.
 export function BingoDashSample() {
-  const remoteCode = new URLSearchParams(window.location.search).get('remote')
+  const params = new URLSearchParams(window.location.search)
+  const remoteCode = params.get('remote')
+  const watchCode = params.get('watch')
+  if (watchCode) return <SampleController code={watchCode} readOnly />
   return remoteCode ? <SampleController code={remoteCode} /> : <SampleProjector />
 }
 
@@ -1922,11 +1952,18 @@ const QUICK_WIN_STEPS: number[][] = [
   [20, 21, 22, 23, 24],  // row 4 → O (fills the board)
 ]
 
+// Board to come back to after "Reset demo" reloads the page.
+const RESET_BOARD_KEY = 'sample_reset_board'
+
 function SampleProjector() {
   // `?board=<sectionId>` lets the admin launch the demo pre-scoped to a
   // specific event's board (from the Run Event panel); when present it also
   // swaps the "← Hub" link for a way back to that event's admin page.
   const boardParam = new URLSearchParams(window.location.search).get('board')
+  // Read once at mount (not in the load effect, which StrictMode runs twice).
+  const [resetBoard] = useState(() => {
+    try { return sessionStorage.getItem(RESET_BOARD_KEY) } catch { return null }
+  })
 
   const [sections, setSections] = useState<BingoSection[]>([])
   const [selectedId, setSelectedId] = useState<string | null>(null)
@@ -1935,6 +1972,8 @@ function SampleProjector() {
   const [tasksLoading, setTasksLoading] = useState(false)
 
   const [teamName, setTeamName] = useState<string | null>(null)
+  // Group picked on the join screen but not yet past "Enter Password".
+  const [pendingGroup, setPendingGroup] = useState<string | null>(null)
   const [scanState, setScanState] = useState<ScanState>({})
   const [openTask, setOpenTask] = useState<BingoTask | null>(null)
   // Quick BINGO's own completion, tracked by SLOT rather than task id. A card
@@ -1989,6 +2028,14 @@ function SampleProjector() {
     () => new URLSearchParams(window.location.search).get('pair'),
   )
   const [showPair, setShowPair] = useState(false)
+  // Audience viewers get their OWN code on their own channel. The control code
+  // is never handed out, so a scanned link cannot be edited into control mode.
+  // Lives in the URL as ?share=<code> for the same reason as ?pair= below: a
+  // reload would otherwise kill every QR already scanned in the room.
+  const [watchCode, setWatchCode] = useState<string | null>(
+    () => new URLSearchParams(window.location.search).get('share'),
+  )
+  const [showShare, setShowShare] = useState(false)
   const [showTryIt, setShowTryIt] = useState(false)
   // Live step of the open task detail, reported up so the phone shows the right
   // buttons (Start Challenge → pages → marshal password → Complete).
@@ -2013,7 +2060,9 @@ function SampleProjector() {
       const list = (secs ?? []) as BingoSection[]
       setSections(list)
       const active = settings?.active_section_id
-      const initial = (boardParam && list.find(s => s.id === boardParam)?.id)
+      try { sessionStorage.removeItem(RESET_BOARD_KEY) } catch { /* private mode */ }
+      const initial = (resetBoard && list.find(s => s.id === resetBoard)?.id)
+        ?? (boardParam && list.find(s => s.id === boardParam)?.id)
         ?? list.find(s => s.id === active)?.id
         ?? list[0]?.id
         ?? null
@@ -2054,11 +2103,11 @@ function SampleProjector() {
     setPopup(prev => (prev.letters === letters && prev.queued === queued ? prev : { letters, queued }))
   }, [])
 
+  // A full page reload, so nothing from the last run (open overlays, timers,
+  // module state) can linger. The ?pair= code is in the URL, so a paired phone
+  // picks the projector straight back up; the board on screen is carried over
+  // via sessionStorage so a reset doesn't jump to a different board.
   const handleReset = () => {
-    setScanState({})
-    setQuickWinSlots(new Set())
-    setOpenTask(null)
-    setTeamName(null)
     // Roulette-style modules (spin wheels) track their spin count in
     // localStorage, keyed per activity — "nothing is saved" for the demo
     // otherwise, but that one exception needs clearing explicitly or a
@@ -2068,7 +2117,9 @@ function SampleProjector() {
         const key = localStorage.key(i)
         if (key?.startsWith('aitb_spins_')) localStorage.removeItem(key)
       }
+      if (selectedId) sessionStorage.setItem(RESET_BOARD_KEY, selectedId)
     } catch { /* private mode — nothing to clear */ }
+    window.location.reload()
   }
 
   const handleOpenTask = (task: BingoTask) => {
@@ -2099,6 +2150,7 @@ function SampleProjector() {
   const snapshot = (): RemoteState => ({
     selectedId,
     teamName,
+    pendingGroup,
     scanState,
     openTaskId: openTask?.id ?? null,
     view,
@@ -2113,8 +2165,12 @@ function SampleProjector() {
   const applyCommand = (c: RemoteCommand) => {
     switch (c.action) {
       case 'selectBoard': handleSelectBoard(c.id); break
-      case 'join': setTeamName(c.teamName); break
-      case 'leave': setTeamName(null); setOpenTask(null); break
+      case 'join': setPendingGroup(c.teamName); break // → "Enter Password" step
+      case 'cancelJoin': setPendingGroup(null); break
+      case 'confirmJoin':
+        if (pendingGroup) { setTeamName(pendingGroup); setPendingGroup(null) }
+        break
+      case 'leave': setTeamName(null); setPendingGroup(null); setOpenTask(null); break
       case 'openTask': {
         const t = gridTasks.find(x => x.id === c.taskId)
         if (t) handleOpenTask(t)
@@ -2143,12 +2199,15 @@ function SampleProjector() {
   }
 
   const { sendState } = useSampleRemote(remoteCode, { onCommand: applyCommand })
+  // Send-only: viewers never talk back, so this channel has no handlers.
+  const { sendState: sendWatchState } = useSampleRemote(watchCode, {})
 
-  // Push a fresh snapshot to the paired phone on every meaningful change.
+  // Push a fresh snapshot to the paired phone and to any viewers on every
+  // meaningful change. One snapshot, sent down both channels.
   useEffect(() => {
-    if (!remoteCode) return
-    sendState({
-      selectedId, teamName, scanState,
+    if (!remoteCode && !watchCode) return
+    const snap = {
+      selectedId, teamName, pendingGroup, scanState,
       openTaskId: openTask?.id ?? null,
       view,
       detail: openTask ? detailStep : null,
@@ -2157,8 +2216,10 @@ function SampleProjector() {
       inviteOpen,
       quickWinRows,
       chatOpen,
-    })
-  }, [remoteCode, selectedId, teamName, scanState, openTask, view, detailStep, popup, inviteOpen, quickWinRows, chatOpen, sendState])
+    }
+    if (remoteCode) sendState(snap)
+    if (watchCode) sendWatchState(snap)
+  }, [remoteCode, watchCode, selectedId, teamName, pendingGroup, scanState, openTask, view, detailStep, popup, inviteOpen, quickWinRows, chatOpen, sendState, sendWatchState])
 
   // Heartbeat. The phone cannot tell "nothing has changed" from "the projector
   // is gone", so the projector re-broadcasts its state every few seconds and
@@ -2167,10 +2228,14 @@ function SampleProjector() {
   const snapshotRef = useRef(snapshot)
   snapshotRef.current = snapshot
   useEffect(() => {
-    if (!remoteCode) return
-    const id = setInterval(() => sendState(snapshotRef.current()), HEARTBEAT_MS)
+    if (!remoteCode && !watchCode) return
+    const id = setInterval(() => {
+      const snap = snapshotRef.current()
+      if (remoteCode) sendState(snap)
+      if (watchCode) sendWatchState(snap)
+    }, HEARTBEAT_MS)
     return () => clearInterval(id)
-  }, [remoteCode, sendState])
+  }, [remoteCode, watchCode, sendState, sendWatchState])
 
   const enableRemote = () => {
     setRemoteCode(prev => {
@@ -2184,6 +2249,18 @@ function SampleProjector() {
       return code
     })
     setShowPair(true)
+  }
+
+  const enableShare = () => {
+    setWatchCode(prev => {
+      if (prev) return prev
+      const code = makeRemoteCode()
+      const url = new URL(window.location.href)
+      url.searchParams.set('share', code)
+      window.history.replaceState(null, '', url)
+      return code
+    })
+    setShowShare(true)
   }
 
   if (loading) {
@@ -2206,6 +2283,8 @@ function SampleProjector() {
         showQuickWin={!!teamName && gridTasks.length > 0}
         onRemote={enableRemote}
         remoteActive={!!remoteCode}
+        onShare={enableShare}
+        shareActive={!!watchCode}
         onTryIt={() => setShowTryIt(true)}
         view={view}
         onToggleView={() => setView(v => v === 'board' ? 'scoreboard' : 'board')}
@@ -2226,9 +2305,14 @@ function SampleProjector() {
           section={selectedSection}
           playedTeamName={teamName}
           scanState={scanState}
+          quickWinSlots={quickWinSlots}
         />
       ) : !teamName ? (
-        <JoinScreen onJoin={name => setTeamName(name)} />
+        <JoinScreen
+          selected={pendingGroup}
+          onSelect={setPendingGroup}
+          onJoin={name => { setTeamName(name); setPendingGroup(null) }}
+        />
       ) : tasksLoading ? (
         <div className="min-h-[70vh] flex items-center justify-center">
           <div className="text-gray-400 text-xl font-bold animate-pulse">Loading board…</div>
@@ -2287,6 +2371,17 @@ function SampleProjector() {
       {showPair && remoteCode && (
         <RemotePairModal code={remoteCode} onClose={() => setShowPair(false)} />
       )}
+      {showShare && watchCode && (
+        <RemotePairModal
+          code={watchCode}
+          param="watch"
+          title="📺 Share this screen"
+          subtitle="Everyone scans this to watch along, read-only"
+          codeLabel="Viewer code"
+          footer="Viewers see exactly what is on this screen and cannot change it. Leave this open while you present."
+          onClose={() => setShowShare(false)}
+        />
+      )}
 
       {showTryIt && (
         <TryItModal
@@ -2299,11 +2394,29 @@ function SampleProjector() {
   )
 }
 
-// ── Remote pairing modal (projector side) ─────────────────────────────────────
-// Shows the QR + code a phone scans/enters to become the controller.
+// ── Pairing / sharing modal (projector side) ──────────────────────────────────
+// Shows the QR + code a phone scans. Same markup serves the phone remote and
+// the audience "share screen" link - only the words and the query param differ,
+// which is not worth a second copy of a QR, a code chip and a copy button.
 
-function RemotePairModal({ code, onClose }: { code: string; onClose: () => void }) {
-  const url = `${window.location.origin}/bingo-dash/sample?remote=${code}`
+function RemotePairModal({
+  code, onClose, param = 'remote', title = '📡 Phone Remote',
+  subtitle = 'Scan on a 2nd device to control this screen',
+  codeLabel = 'Pairing code',
+  footer = 'Keep this device on the projector. The phone becomes your remote — every tap here shows up on the big screen.',
+}: {
+  code: string
+  onClose: () => void
+  param?: 'remote' | 'watch'
+  title?: string
+  subtitle?: string
+  codeLabel?: string
+  footer?: string
+}) {
+  // VITE_APP_URL first, like QRCodeModal: a QR pointing at localhost cannot be
+  // scanned from a phone, which is the entire point of showing one.
+  const base = import.meta.env.VITE_APP_URL || window.location.origin
+  const url = `${base.replace(/\/$/, '')}/bingo-dash/sample?${param}=${code}`
   const [copied, setCopied] = useState(false)
   const copy = () => {
     navigator.clipboard.writeText(url).then(() => {
@@ -2316,8 +2429,8 @@ function RemotePairModal({ code, onClose }: { code: string; onClose: () => void 
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm animate-bounce-in" onClick={e => e.stopPropagation()}>
         <div className="px-6 py-5 border-b border-gray-100 flex items-center justify-between">
           <div>
-            <h3 className="text-lg font-black text-gray-900">📡 Phone Remote</h3>
-            <p className="text-xs text-gray-400 mt-0.5">Scan on a 2nd device to control this screen</p>
+            <h3 className="text-lg font-black text-gray-900">{title}</h3>
+            <p className="text-xs text-gray-400 mt-0.5">{subtitle}</p>
           </div>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-700 text-2xl font-light">&times;</button>
         </div>
@@ -2326,7 +2439,7 @@ function RemotePairModal({ code, onClose }: { code: string; onClose: () => void 
             <QRCodeSVG value={url} size={220} level="H" />
           </div>
           <div className="flex items-center gap-2">
-            <span className="text-xs text-gray-400 font-bold">Pairing code</span>
+            <span className="text-xs text-gray-400 font-bold">{codeLabel}</span>
             <span className="px-3 py-1 rounded-lg bg-purple-50 border border-purple-200 text-purple-700 font-black tracking-[0.25em] text-lg">
               {code}
             </span>
@@ -2342,9 +2455,7 @@ function RemotePairModal({ code, onClose }: { code: string; onClose: () => void 
               {copied ? 'Copied!' : 'Copy'}
             </button>
           </div>
-          <p className="text-[11px] text-gray-400 text-center">
-            Keep this device on the projector. The phone becomes your remote — every tap here shows up on the big screen.
-          </p>
+          <p className="text-[11px] text-gray-400 text-center">{footer}</p>
         </div>
       </div>
     </div>
@@ -2454,21 +2565,32 @@ const SCOREBOARD_PRESET: Record<string, number> = {
 }
 
 function SampleScoreboard({
-  gridTasks, section, playedTeamName, scanState,
+  gridTasks, section, playedTeamName, scanState, quickWinSlots,
 }: {
   gridTasks: BingoTask[]
   section: BingoSection | null
   playedTeamName: string | null
   scanState: ScanState
+  /** Slots Quick BINGO lit. It marks by SLOT and never touches scanState, so
+   *  without this the board fills up while the scoreboard still reads zero. */
+  quickWinSlots: Set<number>
 }) {
   const slots = buildBingoSlots(gridTasks)
   const orderedTasks = slots.filter((t): t is BingoTask => t !== null)
   const total = gridTasks.length
 
+  // Resolve the lit slots to task ids, the same reconciliation the board does.
+  const quickIds = new Set(
+    [...quickWinSlots].map(i => slots[i]?.id).filter((id): id is string => !!id),
+  )
+
   const rows = DEMO_GROUPS.map((name, idx) => {
     const isPlayed = name === playedTeamName
     const completedIds = isPlayed
-      ? new Set(Object.entries(scanState).filter(([, v]) => v === 'completed').map(([k]) => k))
+      ? new Set([
+          ...Object.entries(scanState).filter(([, v]) => v === 'completed').map(([k]) => k),
+          ...quickIds,
+        ])
       : new Set(orderedTasks.slice(0, Math.round((SCOREBOARD_PRESET[name] ?? 0.3) * total)).map(t => t.id))
     const bingos = completedBingoLines(slots, completedIds).length
     // Same rule the live scoreboard uses: each line lifts the running total as
@@ -2566,7 +2688,10 @@ function SampleScoreboard({
 // and drives it: switch board, join, tap tiles (open on screen), complete,
 // Quick Win, reset. Read-only fetches for board/task names; no DB writes.
 
-function SampleController({ code }: { code: string }) {
+// `readOnly` turns this same screen into an audience viewer: it already is a
+// phone-sized mirror of the projector driven entirely by RemoteState, so the
+// viewer is this component with its controls hidden and nothing sent back.
+function SampleController({ code, readOnly = false }: { code: string; readOnly?: boolean }) {
   const [sections, setSections] = useState<BingoSection[]>([])
   const [gridTasks, setGridTasks] = useState<BingoTask[]>([])
   const [state, setState] = useState<RemoteState | null>(null)
@@ -2603,12 +2728,17 @@ function SampleController({ code }: { code: string }) {
   const liveRef = useRef(live)
   liveRef.current = live
   useEffect(() => {
+    // Viewers stay silent: a read-only screen should not be able to drive the
+    // projector, and a roomful of phones polling is pointless chatter. They
+    // pick the state up from the projector's heartbeat instead - up to
+    // HEARTBEAT_MS late, which the "connecting" state below covers.
+    if (readOnly) return
     sendCommand({ action: 'requestState' })
     const iv = setInterval(() => {
       if (!liveRef.current) sendCommand({ action: 'requestState' })
     }, 2000)
     return () => clearInterval(iv)
-  }, [sendCommand])
+  }, [sendCommand, readOnly])
 
   const selectedId = state?.selectedId ?? null
 
@@ -2623,6 +2753,7 @@ function SampleController({ code }: { code: string }) {
   // Had a state at some point AND still hearing beats.
   const connected = !!state && live
   const teamName = state?.teamName ?? null
+  const pendingGroup = state?.pendingGroup ?? null
   const scanState = state?.scanState ?? {}
   const openTaskId = state?.openTaskId ?? null
   const openTaskObj = gridTasks.find(t => t.id === openTaskId) ?? null
@@ -2634,13 +2765,21 @@ function SampleController({ code }: { code: string }) {
   const popupQueued = state?.popupQueued ?? 0
   const inviteOpen = state?.inviteOpen ?? false
   const quickWinRows = state?.quickWinRows ?? 0
+  // Quick BINGO lights whole rows by SLOT, not by scanState (see handleQuickWin),
+  // and the snapshot carries only the row count - so rebuild the lit slots from
+  // it rather than widening the protocol. Without this the mirrored grid stays
+  // empty while the big screen fills up, which is the one move a presenter
+  // makes most.
+  const quickSlots = new Set(QUICK_WIN_STEPS.slice(0, quickWinRows).flat())
   const chatOpen = state?.chatOpen ?? false
 
   return (
     <div className="min-h-screen bg-gray-950 text-white flex flex-col">
       {/* Header */}
-      <div className="sticky top-0 z-40 bg-gray-950/95 backdrop-blur border-b border-emerald-500/30 px-3 py-2.5 flex items-center gap-2">
-        <span className="px-2 py-1 rounded-lg bg-emerald-500 text-black text-[11px] font-black tracking-wider">📡 REMOTE</span>
+      <div className={`sticky top-0 z-40 bg-gray-950/95 backdrop-blur border-b px-3 py-2.5 flex items-center gap-2 ${readOnly ? 'border-sky-500/30' : 'border-emerald-500/30'}`}>
+        <span className={`px-2 py-1 rounded-lg text-black text-[11px] font-black tracking-wider ${readOnly ? 'bg-sky-400' : 'bg-emerald-500'}`}>
+          {readOnly ? '📺 WATCHING' : '📡 REMOTE'}
+        </span>
         <span className="text-[11px] text-gray-400 font-bold tracking-[0.2em]">{code}</span>
         <span className="ml-auto flex items-center gap-1.5 text-[11px] font-bold">
           <span className={`w-2 h-2 rounded-full ${
@@ -2678,13 +2817,16 @@ function SampleController({ code }: { code: string }) {
                   <span className="text-purple-300/80 font-bold"> · {popupQueued} more to come</span>
                 )}
               </p>
-              <button onClick={() => sendCommand({ action: 'dismissPopup' })}
-                className="w-full py-3.5 rounded-lg bg-purple-500 text-white text-base font-black hover:bg-purple-400 active:scale-95 transition-all">
-                ▶ Tap to continue
-              </button>
+              {!readOnly && (
+                <button onClick={() => sendCommand({ action: 'dismissPopup' })}
+                  className="w-full py-3.5 rounded-lg bg-purple-500 text-white text-base font-black hover:bg-purple-400 active:scale-95 transition-all">
+                  ▶ Tap to continue
+                </button>
+              )}
             </div>
           )}
 
+          {!readOnly && <>
           {/* Board / Scoreboard view toggle */}
           <div className="grid grid-cols-2 gap-1 p-1 rounded-xl bg-white/5 border border-white/10">
             <button
@@ -2725,7 +2867,21 @@ function SampleController({ code }: { code: string }) {
           </div>
 
           {/* Join / team */}
-          {!teamName ? (
+          {!teamName && pendingGroup ? (
+            <div className="rounded-xl bg-purple-500/10 border border-purple-400/40 p-3 flex flex-col gap-2">
+              <p className="text-xs text-purple-200 font-bold">
+                🔑 On screen: Enter Password for <span className="text-white">{pendingGroup}</span>
+              </p>
+              <button onClick={() => sendCommand({ action: 'confirmJoin' })}
+                className="w-full py-3 rounded-lg bg-purple-500 text-white text-sm font-black hover:bg-purple-400 active:scale-95 transition-all">
+                Join Group → <span className="text-purple-200 font-bold">(password {SAMPLE_TEAM_PASSWORD})</span>
+              </button>
+              <button onClick={() => sendCommand({ action: 'cancelJoin' })}
+                className="w-full py-2 rounded-lg bg-white/5 text-gray-300 border border-white/10 text-xs font-bold hover:bg-white/10 transition-colors">
+                ← Back to groups
+              </button>
+            </div>
+          ) : !teamName ? (
             <div>
               <label className="text-[11px] text-gray-500 font-bold uppercase tracking-wide">Join as</label>
               <div className="grid grid-cols-2 gap-2 mt-1">
@@ -2749,18 +2905,33 @@ function SampleController({ code }: { code: string }) {
             </div>
           )}
 
-          {/* Tile grid — tap to open on the projector */}
-          {teamName && (
+          </>}
+
+          {/* Tile grid — tap to open on the projector. Read-only viewers see the
+              same grid, and follow the projector into the scoreboard. */}
+          {readOnly && view === 'scoreboard' && (
+            <SampleScoreboard
+              gridTasks={gridTasks}
+              section={sections.find(x => x.id === selectedId) ?? null}
+              playedTeamName={teamName}
+              scanState={scanState}
+              quickWinSlots={quickSlots}
+            />
+          )}
+          {teamName && !(readOnly && view === 'scoreboard') && (
             <div>
-              <label className="text-[11px] text-gray-500 font-bold uppercase tracking-wide">Tap a tile to show it on screen</label>
+              <label className="text-[11px] text-gray-500 font-bold uppercase tracking-wide">
+                {readOnly ? 'On the big screen now' : 'Tap a tile to show it on screen'}
+              </label>
               <div className="grid grid-cols-5 gap-1.5 mt-1">
                 {slots.map((task, i) => {
                   if (!task) return <div key={i} className="rounded-lg aspect-square bg-white/5 border border-white/10" />
-                  const st = scanState[task.id]
+                  const st = quickSlots.has(i) ? 'completed' : scanState[task.id]
                   const isOpen = task.id === openTaskId
                   return (
                     <button key={i}
-                      onClick={() => sendCommand({ action: 'openTask', taskId: task.id })}
+                      onClick={() => { if (!readOnly) sendCommand({ action: 'openTask', taskId: task.id }) }}
+                      disabled={readOnly}
                       title={task.title}
                       className={`relative rounded-lg aspect-square flex items-center justify-center text-[9px] font-black leading-none p-0.5 text-center transition-all active:scale-95 ${isOpen ? 'ring-2 ring-emerald-400' : ''}`}
                       style={{ backgroundColor: task.hex_code, opacity: st ? 1 : 0.8 }}>
@@ -2775,10 +2946,16 @@ function SampleController({ code }: { code: string }) {
             </div>
           )}
 
-          {/* Open-task controls — walk the tile's flow on the big screen */}
+          {/* Which tile is up. A viewer sees this and nothing below it: the
+              controls walk the tile's flow on the big screen, but naming the
+              tile is the whole point of mirroring - without it, opening one
+              shows a viewer nothing but a ring on a thumbnail. */}
           {openTaskObj && (
             <div className="bg-emerald-500/10 border border-emerald-400/30 rounded-xl p-3 flex flex-col gap-2">
-              <p className="text-xs text-emerald-200 font-bold">On screen now: <span className="text-white">{openTaskObj.title}</span></p>
+              <p className={`font-bold text-emerald-200 ${readOnly ? 'text-base' : 'text-xs'}`}>
+                On screen now: <span className="text-white">{openTaskObj.title}</span>
+              </p>
+              {!readOnly && <>
 
               {scanState[openTaskObj.id] === 'completed' ? (
                 <button onClick={() => sendCommand({ action: 'uncomplete', taskId: openTaskObj.id })}
@@ -2826,9 +3003,11 @@ function SampleController({ code }: { code: string }) {
                 className="w-full py-2 rounded-lg bg-white/5 text-gray-300 border border-white/10 text-xs font-bold hover:bg-white/10 transition-colors">
                 ← Back to board
               </button>
+              </>}
             </div>
           )}
 
+          {!readOnly && <>
           {/* Put something on the big screen on demand. Both are toggles so
               the presenter can take them away without touching the laptop. */}
           {teamName && (
@@ -2867,6 +3046,7 @@ function SampleController({ code }: { code: string }) {
               ↺ Reset demo
             </button>
           </div>
+          </>}
         </div>
       )}
     </div>
