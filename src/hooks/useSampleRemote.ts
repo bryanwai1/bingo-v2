@@ -77,6 +77,15 @@ export type RemoteState = {
   quickWinRows: number
   /** Whether the help-chat message box is open on the projector. */
   chatOpen: boolean
+  /**
+   * How far the big screen is scrolled, 0-1 of its scrollable range.
+   *
+   * A FRACTION, not pixels: a viewer's phone is a different height from the
+   * projector, so the same pixel offset would land somewhere else. Without
+   * this a viewer watching a long challenge sees the hero image while the
+   * room is reading the "complete" step at the bottom.
+   */
+  scroll: number
 }
 
 /**

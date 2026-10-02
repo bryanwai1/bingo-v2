@@ -282,7 +282,7 @@ function JoinScreen({ selected, onSelect, onJoin }: {
             value={search}
             onChange={e => setSearch(e.target.value)}
             placeholder="Search groups..."
-            className="w-full px-4 py-3 rounded-2xl border-2 text-base font-medium focus:outline-none transition-colors text-center mb-3"
+            className="w-full px-4 py-3 rounded-2xl border-2 text-base font-medium text-gray-900 focus:outline-none transition-colors text-center mb-3"
             style={{ borderColor: search ? '#a855f7' : '#e5e7eb' }}
           />
 
@@ -335,7 +335,11 @@ function JoinScreen({ selected, onSelect, onJoin }: {
               value={password}
               onChange={e => { setPassword(e.target.value.replace(/\D/g, '').slice(0, 4)); setError('') }}
               placeholder="• • • •"
-              className="w-full px-5 py-4 rounded-2xl border-2 text-4xl font-black focus:outline-none transition-colors text-center tracking-[0.6em]"
+              /* Explicit colour: this input sits on a white card but used to
+                 inherit its text colour, so on a screen whose wrapper sets
+                 text-white the pre-filled password rendered white-on-white -
+                 present in the DOM, invisible to the room. */
+              className="w-full px-5 py-4 rounded-2xl border-2 text-4xl font-black text-gray-900 focus:outline-none transition-colors text-center tracking-[0.6em]"
               style={{ borderColor: password.length === 4 ? '#a855f7' : '#e5e7eb' }}
               maxLength={4}
             />
@@ -901,6 +905,8 @@ export type SampleTaskDetailHandle = {
   fillMarshal: () => void
   submitComplete: () => void
   scroll: (direction: 'up' | 'down') => void
+  /** Jump to a fraction of the scrollable range, for mirroring. */
+  scrollTo: (frac: number) => void
 }
 
 const SampleTaskDetail = forwardRef<SampleTaskDetailHandle, {
@@ -917,8 +923,11 @@ const SampleTaskDetail = forwardRef<SampleTaskDetailHandle, {
   onUncomplete: () => void
   onClose: () => void
   onStep?: (s: DetailStep) => void
+  /** Scroll position as a fraction, so a shared screen can follow along. */
+  onScrollFrac?: (frac: number) => void
 }>(function SampleTaskDetail({
   task, teamName, marshalPassword, completed, chain, onJump, onComplete, onUncomplete, onClose, onStep,
+  onScrollFrac,
 }, ref) {
   const { pages } = useBingoTaskPages(task.id)
   const { photos } = useBingoTaskPhotos(task.id)
@@ -1082,6 +1091,15 @@ const SampleTaskDetail = forwardRef<SampleTaskDetailHandle, {
     fillMarshal: () => { setMarshalInput(marshalPassword); setMarshalError('') },
     submitComplete: () => doComplete(),
     scroll: direction => scrollRef.current?.scrollBy({ top: direction === 'down' ? 400 : -400, behavior: 'smooth' }),
+    scrollTo: frac => {
+      const el = scrollRef.current
+      if (!el) return
+      const range = el.scrollHeight - el.clientHeight
+      if (range <= 0) return
+      const want = frac * range
+      // Ignore sub-pixel noise, or mirroring fights the smooth scroll above.
+      if (Math.abs(el.scrollTop - want) > 8) el.scrollTo({ top: want })
+    },
   }))
 
   // Report the current step up so the controller renders the right buttons.
@@ -1148,6 +1166,11 @@ const SampleTaskDetail = forwardRef<SampleTaskDetailHandle, {
   return (
     <div
       ref={scrollRef}
+      onScroll={e => {
+        const el = e.currentTarget
+        const range = el.scrollHeight - el.clientHeight
+        onScrollFrac?.(range > 0 ? el.scrollTop / range : 0)
+      }}
       className="fixed inset-0 z-50 overflow-y-auto"
       style={{ backgroundColor: `color-mix(in srgb, ${task.hex_code} 50%, #0a0a0a)` }}
     >
@@ -2050,6 +2073,24 @@ function SampleProjector() {
   const selectedSection = sections.find(s => s.id === selectedId) ?? null
   const marshalPassword = DEMO_MARSHAL_PASSWORD
 
+  // Where this screen is scrolled to, as a fraction, so shared viewers can
+  // follow. The open tile reports its own (it scrolls inside the overlay);
+  // otherwise it is the page itself.
+  const [scrollFrac, setScrollFrac] = useState(0)
+  useEffect(() => {
+    const onScroll = () => {
+      const range = document.documentElement.scrollHeight - window.innerHeight
+      setScrollFrac(range > 0 ? window.scrollY / range : 0)
+    }
+    onScroll()
+    window.addEventListener('scroll', onScroll, { passive: true })
+    return () => window.removeEventListener('scroll', onScroll)
+  }, [])
+  // Opening or closing a tile swaps which element scrolls, and the new one
+  // starts at the top. Without this reset the last fraction from the old one
+  // leaks across and a viewer jumps to the middle of a tile nobody scrolled.
+  useEffect(() => { setScrollFrac(0) }, [openTask?.id])
+
   // Load all boards once. Prefer the admin's active board as the initial pick.
   useEffect(() => {
     (async () => {
@@ -2160,6 +2201,7 @@ function SampleProjector() {
     inviteOpen,
     quickWinRows,
     chatOpen,
+    scroll: scrollFrac,
   })
 
   const applyCommand = (c: RemoteCommand) => {
@@ -2216,10 +2258,11 @@ function SampleProjector() {
       inviteOpen,
       quickWinRows,
       chatOpen,
+      scroll: scrollFrac,
     }
     if (remoteCode) sendState(snap)
     if (watchCode) sendWatchState(snap)
-  }, [remoteCode, watchCode, selectedId, teamName, pendingGroup, scanState, openTask, view, detailStep, popup, inviteOpen, quickWinRows, chatOpen, sendState, sendWatchState])
+  }, [remoteCode, watchCode, selectedId, teamName, pendingGroup, scanState, openTask, view, detailStep, popup, inviteOpen, quickWinRows, chatOpen, scrollFrac, sendState, sendWatchState])
 
   // Heartbeat. The phone cannot tell "nothing has changed" from "the projector
   // is gone", so the projector re-broadcasts its state every few seconds and
@@ -2365,6 +2408,7 @@ function SampleProjector() {
           onUncomplete={() => markUncomplete(openTask.id)}
           onClose={() => setOpenTask(null)}
           onStep={setDetailStep}
+          onScrollFrac={setScrollFrac}
         />
       )}
 
@@ -2784,6 +2828,29 @@ function SampleController({ code, readOnly = false }: { code: string; readOnly?:
   // the splash, so a viewer that ran ahead - a stale snapshot is enough - could
   // never return. Remounting is the only way back, and it resets to the splash.
   const [watchDetailNonce, setWatchDetailNonce] = useState(0)
+  const watchScrollRef = useRef<HTMLDivElement>(null)
+
+  // Everything the presenter does that is not a board change: the message box,
+  // the invite QR, and how far the screen is scrolled. All three are already
+  // in the snapshot, and BoardScreen/SampleTaskDetail already expose handles
+  // for them - the viewer just has to apply them.
+  useEffect(() => {
+    if (!readOnly || !state) return
+    watchBoardRef.current?.setChat(state.chatOpen)
+    watchBoardRef.current?.setInvite(state.inviteOpen)
+    // The open tile scrolls inside its own overlay; otherwise it is the page.
+    if (state.openTaskId) watchDetailRef.current?.scrollTo(state.scroll ?? 0)
+    else {
+      const el = watchScrollRef.current
+      if (el) {
+        const range = el.scrollHeight - el.clientHeight
+        if (range > 0) {
+          const want = (state.scroll ?? 0) * range
+          if (Math.abs(el.scrollTop - want) > 8) el.scrollTo({ top: want })
+        }
+      }
+    }
+  }, [readOnly, state])
 
   // Walk the viewer's copy of the tile detail onto the projector's step. The
   // snapshot carries where the big screen is (splash/page/marshal) but not how
@@ -2844,7 +2911,7 @@ function SampleController({ code, readOnly = false }: { code: string; readOnly?:
            pointer-events-none it also drops it out of the tab order, so there
            is no keyboard route in either, and no disabled flag to thread
            through every control and miss one. */
-        <div className="flex-1 min-h-0 overflow-y-auto select-none relative" inert>
+        <div ref={watchScrollRef} className="flex-1 min-h-0 overflow-y-auto select-none relative" inert>
           {!connected && (
             <div className="sticky top-0 z-50 bg-red-500/90 text-white text-center text-xs font-black py-1.5">
               Reconnecting to the screen…
