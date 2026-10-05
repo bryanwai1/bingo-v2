@@ -294,7 +294,7 @@ function CupsPicker({ color, slots, savedWords, disabled, onSave, pools }: SubPr
         <button onClick={draw} disabled={disabled || dealing}
           className="w-full mt-3 py-3.5 rounded-2xl font-black text-lg transition-all active:scale-95 disabled:opacity-50"
           style={{ background: color, color: '#000' }}>
-          {dealing ? 'Drawing…' : '🎲 DRAW YOUR PROMPT'}
+          {dealing ? 'Drawing…' : '🎲 DRAW'}
         </button>
       )}
       {done && (
