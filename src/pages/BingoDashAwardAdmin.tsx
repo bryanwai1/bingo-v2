@@ -400,21 +400,12 @@ export function BingoDashAwardAdmin() {
             <h2 className="font-black text-gray-900 mb-4">Main slide (opener)</h2>
             <p className="text-xs text-gray-400 mb-4">The opening title card. Pick a colour, or Reset for the ceremony purple.</p>
 
-            <label className="block text-sm font-semibold text-gray-700 mb-1">Title (top line, smaller)</label>
+            <label className="block text-sm font-semibold text-gray-700 mb-1">Title</label>
             <input
               type="text"
               value={draft.main_title}
               onChange={e => setDraft(d => ({ ...d, main_title: e.target.value }))}
               placeholder="Optional — leave blank for none"
-              className="w-full px-3 py-2 rounded-lg border border-gray-300 text-base focus:outline-none focus:ring-2 focus:ring-rose-300"
-            />
-
-            <label className="block text-sm font-semibold text-gray-700 mb-1 mt-3">Big title (bottom line, larger)</label>
-            <input
-              type="text"
-              value={draft.slide_text.main_title_big ?? ''}
-              onChange={e => setDraft(d => ({ ...d, slide_text: { ...d.slide_text, main_title_big: e.target.value } }))}
-              placeholder="e.g. SUCCESS — leave blank for the plain single title"
               className="w-full px-3 py-2 rounded-lg border border-gray-300 text-base focus:outline-none focus:ring-2 focus:ring-rose-300"
             />
 

@@ -618,7 +618,6 @@ function MainSlide({ slideIdx, config, text }: { slideIdx: number; config: Bingo
   // Blank means no subtitle line — there is no built-in fallback.
   const subtitle = config?.main_subtitle?.trim() || ''
   const tagline = config?.main_tagline || 'AWARDS CEREMONY'
-  const bigTitle = text.main_title_big?.trim() || ''
 
   return (
     <div key={slideIdx} className="absolute inset-0 flex flex-col items-center justify-center text-center px-6 award-slide-enter">
@@ -644,22 +643,11 @@ function MainSlide({ slideIdx, config, text }: { slideIdx: number; config: Bingo
 
       <SlideLogo logo={text.logo} bg={text.logo_bg} />
 
-      {bigTitle ? (
-        <div className="relative z-10 flex flex-col items-center" style={{ animation: 'title-slam 0.8s cubic-bezier(0.22, 1, 0.36, 1) 0.35s both' }}>
-          {title && (
-            <h1 className="font-black leading-[0.95] text-white" style={{ fontSize: 'clamp(1.6rem, 5vw, 4rem)', letterSpacing: '0.04em', textShadow: '0 4px 30px rgba(0,0,0,0.45)' }}>
-              {title}
-            </h1>
-          )}
-          <h2 className="font-black leading-[0.95] text-white mt-2" style={{ fontSize: 'clamp(3rem, 12vw, 9.5rem)', letterSpacing: '0.04em', textShadow: '0 4px 30px rgba(0,0,0,0.45)' }}>
-            {bigTitle}
-          </h2>
-        </div>
-      ) : title && (
+      {title && (
         <h1
           className="relative z-10 font-black leading-[0.95] text-white"
           style={{
-            fontSize: 'clamp(3rem, 11vw, 9rem)',
+            fontSize: 'clamp(2.6rem, 9vw, 7.5rem)',
             letterSpacing: '0.04em',
             textShadow: '0 4px 30px rgba(0,0,0,0.45)',
             animation: 'title-slam 0.8s cubic-bezier(0.22, 1, 0.36, 1) 0.35s both',
