@@ -387,6 +387,8 @@ export type SlideText = {
   v?: number
   /** Main + closing logo: "default" emblem, "none", or an image URL. */
   logo?: string
+  /** Backdrop behind the logo only (CSS colour); white when unset. */
+  logo_bg?: string
   intro?: SlideTextBlock
   holding?: SlideTextBlock
   lineup?: SlideTextBlock

@@ -144,7 +144,7 @@ export function TileFace({
   if (display === 'icon') {
     return (
       <div
-        className="relative z-0 flex items-center justify-center w-full h-full a-text"
+        className="relative z-0 flex items-center justify-center w-full h-full text-white"
         style={{ filter: 'drop-shadow(0 1px 2px rgba(0,0,0,0.45))' }}
       >
         <CategoryIcon category={category} className={size === 'sm' ? 'w-[50%] h-[50%]' : 'w-[52%] h-[52%]'} />

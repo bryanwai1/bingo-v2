@@ -4,7 +4,6 @@ import { supabase } from '../lib/supabase'
 import type { BingoSection, BingoTeam } from '../types/database'
 import {
   DEFAULT_PRIZE_COUNTS,
-  CEREMONY_BACKGROUND,
   CEREMONY_COLOR,
   SLIDE_LABELS,
   addSlide,
@@ -435,10 +434,10 @@ export function BingoDashAwardAdmin() {
               }}
             />
             <div className="flex items-center gap-3 flex-wrap">
-              <div className="w-20 h-12 rounded-lg overflow-hidden flex items-center justify-center shrink-0" style={{ background: draft.main_bg ?? CEREMONY_BACKGROUND }}>
+              <div className="w-20 h-12 rounded-lg overflow-hidden flex items-center justify-center shrink-0" style={{ background: draft.slide_text.logo_bg || '#ffffff' }}>
                 {draft.slide_text.logo && draft.slide_text.logo !== 'none' && draft.slide_text.logo !== 'default'
                   ? <img src={draft.slide_text.logo} alt="" className="max-w-full max-h-full object-contain" />
-                  : <span className="text-white/70 text-[10px] font-bold">no logo</span>}
+                  : <span className="text-gray-400 text-[10px] font-bold">no logo</span>}
               </div>
               {draft.slide_text.logo && draft.slide_text.logo !== 'none' && draft.slide_text.logo !== 'default' && (
                 <button
@@ -455,6 +454,23 @@ export function BingoDashAwardAdmin() {
               >
                 {uploadingLogo ? 'Uploading…' : draft.slide_text.logo && draft.slide_text.logo !== 'none' && draft.slide_text.logo !== 'default' ? 'Replace logo' : 'Upload logo'}
               </button>
+              <label className="flex items-center gap-2 text-sm font-bold text-gray-600">
+                Logo background
+                <input
+                  type="color"
+                  value={draft.slide_text.logo_bg || '#ffffff'}
+                  onChange={e => setDraft(d => ({ ...d, slide_text: { ...d.slide_text, logo_bg: e.target.value } }))}
+                  className="w-9 h-9 rounded border border-gray-300 cursor-pointer"
+                />
+              </label>
+              {draft.slide_text.logo_bg && draft.slide_text.logo_bg.toLowerCase() !== '#ffffff' && (
+                <button
+                  onClick={() => setDraft(d => ({ ...d, slide_text: { ...d.slide_text, logo_bg: undefined } }))}
+                  className="px-3 py-1.5 rounded-lg border border-gray-300 text-sm font-bold text-gray-600 hover:bg-gray-50"
+                >
+                  Reset to white
+                </button>
+              )}
             </div>
           </section>
 

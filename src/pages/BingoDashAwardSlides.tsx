@@ -445,18 +445,19 @@ function AwardShow({ sectionSlug }: { sectionSlug: string }) {
 // Sort: higher total first, then more bingos, then more tasks done, then name asc
 
 // ── Single slide renderer ─────────────────────────────────────────────────
+const DEFAULT_LOGO_BG = '#ffffff'
 const CEREMONY_BONUS_LABEL = 'Award ceremony'
 
 /** Main / closing emblem: the default hexagon, nothing, or an uploaded image. */
-function SlideLogo({ logo }: { logo?: string }) {
+function SlideLogo({ logo, bg }: { logo?: string; bg?: string }) {
   const custom = customLogo(logo)
   if (!custom) return null
   return (
     <div
-      className="relative z-10 mb-6"
-      style={{ animation: 'pop-bounce-in 0.8s cubic-bezier(0.34, 1.56, 0.64, 1) 0.1s both' }}
+      className="relative z-10 mb-6 rounded-2xl"
+      style={{ background: bg || DEFAULT_LOGO_BG, padding: '10px 16px', animation: 'pop-bounce-in 0.8s cubic-bezier(0.34, 1.56, 0.64, 1) 0.1s both' }}
     >
-      <img src={custom} alt="" style={{ maxWidth: '220px', maxHeight: '110px', objectFit: 'contain', filter: 'drop-shadow(0 6px 22px rgba(0,0,0,0.55))' }} />
+      <img src={custom} alt="" style={{ maxWidth: '220px', maxHeight: '110px', objectFit: 'contain', display: 'block' }} />
     </div>
   )
 }
@@ -637,7 +638,7 @@ function MainSlide({ slideIdx, config, text }: { slideIdx: number; config: Bingo
         }}
       />
 
-      <SlideLogo logo={text.logo} />
+      <SlideLogo logo={text.logo} bg={text.logo_bg} />
 
       {title && (
         <h1
@@ -1031,7 +1032,7 @@ function ClosingSlide({ slideIdx, config, text }: { slideIdx: number; config: Bi
         }}
       />
 
-      <SlideLogo logo={text.logo} />
+      <SlideLogo logo={text.logo} bg={text.logo_bg} />
 
       <p
         className="relative z-10 text-white/80 font-bold uppercase mb-4"
@@ -1403,7 +1404,7 @@ function PlaceSlide({
           <div
             style={{
               position: 'absolute', ...photoBox, overflow: 'hidden',
-              background: mainBackground(config?.main_bg),
+              background: readSlideText(config?.slide_text).logo_bg || DEFAULT_LOGO_BG,
               display: 'flex', alignItems: 'center', justifyContent: 'center',
             }}
           >
