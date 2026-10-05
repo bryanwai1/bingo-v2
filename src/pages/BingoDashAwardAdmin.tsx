@@ -362,27 +362,27 @@ export function BingoDashAwardAdmin() {
 
   return (
     <div className="min-h-screen bg-gray-50 text-gray-900">
-      <header className="border-b border-gray-200 bg-white px-6 py-4 flex items-center gap-4">
+      <header className="border-b border-gray-200 bg-white px-4 sm:px-6 py-3 sm:py-4 flex flex-wrap items-center gap-x-3 gap-y-2 sm:gap-4">
         <button
           onClick={() => navigate('/bingo-dash/slides/awards')}
-          className="text-xs text-gray-500 hover:text-gray-900 transition-colors uppercase tracking-widest font-semibold"
+          className="text-xs text-gray-500 hover:text-gray-900 transition-colors uppercase tracking-widest font-semibold whitespace-nowrap"
         >
           ← Awards Home
         </button>
-        <div className="flex-1 min-w-0">
-          <h1 className="text-xl font-black truncate">🎖 Award Slides · {section.name}</h1>
-          <p className="text-xs text-gray-500 mt-0.5">Edit every slide's text, photos and order. A running show updates when you save.</p>
+        <div className="order-last sm:order-none w-full sm:w-auto sm:flex-1 min-w-0">
+          <h1 className="text-lg sm:text-xl font-black truncate">🎖 Award Slides · {section.name}</h1>
+          <p className="hidden sm:block text-xs text-gray-500 mt-0.5">Edit every slide's text, photos and order. A running show updates when you save.</p>
         </div>
         <button
           onClick={() => { void runShow() }}
-          className="px-3 py-2 rounded-lg text-xs font-bold uppercase tracking-widest bg-gray-100 hover:bg-gray-200 text-gray-700"
+          className="ml-auto sm:ml-0 whitespace-nowrap px-3 py-2 rounded-lg text-xs font-bold uppercase tracking-widest bg-gray-100 hover:bg-gray-200 text-gray-700"
         >
           ▶ Run show
         </button>
         <button
           onClick={() => { void save() }}
           disabled={saving}
-          className="px-4 py-2 rounded-lg text-sm font-bold bg-amber-500 hover:bg-amber-600 text-black disabled:opacity-50"
+          className="whitespace-nowrap px-4 py-2 rounded-lg text-sm font-bold bg-amber-500 hover:bg-amber-600 text-black disabled:opacity-50"
         >
           {saving ? 'Saving…' : 'Save changes'}
         </button>
@@ -393,7 +393,7 @@ export function BingoDashAwardAdmin() {
         )}
       </header>
 
-      <div className="max-w-6xl mx-auto p-6 grid gap-6 lg:grid-cols-[1fr_1fr]">
+      <div className="max-w-6xl mx-auto p-3 sm:p-6 grid gap-6 lg:grid-cols-[1fr_1fr]">
         {/* Left: holding slide content */}
         <div className="space-y-6">
           <section id="editor-main" className="bg-white rounded-2xl border border-gray-200 p-6">
@@ -650,6 +650,24 @@ export function BingoDashAwardAdmin() {
             </div>
           </SlideTextCard>
           )}
+
+          <section className="bg-white rounded-2xl border border-gray-200 p-6">
+            <h2 className="font-black text-gray-900 mb-1">Total after bonus</h2>
+            <p className="text-xs text-gray-400 mb-3">
+              On: places and scores include the facilitator's bonus points. Off: places and scores use base points only (no bonus).
+            </p>
+            <button
+              onClick={() => setDraft(d => ({ ...d, slide_text: { ...d.slide_text, include_bonus: d.slide_text.include_bonus === false } }))}
+              className={`flex items-center gap-3 px-4 py-2 rounded-xl border font-bold text-sm transition-colors ${draft.slide_text.include_bonus === false ? 'bg-gray-100 border-gray-300 text-gray-600' : 'bg-emerald-50 border-emerald-300 text-emerald-700'}`}
+              role="switch"
+              aria-checked={draft.slide_text.include_bonus !== false}
+            >
+              <span className={`w-10 h-6 rounded-full relative transition-colors ${draft.slide_text.include_bonus === false ? 'bg-gray-300' : 'bg-emerald-500'}`}>
+                <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white transition-all ${draft.slide_text.include_bonus === false ? 'left-0.5' : 'left-[1.1rem]'}`} />
+              </span>
+              {draft.slide_text.include_bonus === false ? 'OFF — base points only' : 'ON — total after bonus'}
+            </button>
+          </section>
 
           <section className="bg-white rounded-2xl border border-gray-200 p-6">
             <h2 className="font-black text-gray-900 mb-2">Ceremony summary</h2>

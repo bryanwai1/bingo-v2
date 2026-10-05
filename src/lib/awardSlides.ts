@@ -391,6 +391,8 @@ export type SlideText = {
   logo?: string
   /** Backdrop behind the logo only (CSS colour); white when unset. */
   logo_bg?: string
+  /** Rank and show scores including the facilitator bonus. Undefined = on. */
+  include_bonus?: boolean
   /** Evaluation slide: uploaded QR code image URL. */
   eval_qr?: string
   evaluation?: SlideTextBlock

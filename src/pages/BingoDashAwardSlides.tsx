@@ -206,12 +206,14 @@ function AwardShow({ sectionSlug }: { sectionSlug: string }) {
     return () => { void supabase.removeChannel(channel) }
   }, [sectionId])
 
-  const ranked: RankedTeam[] = useMemo(
-    () => rankTeams({ teams, scans, boardTasks: gridTasks as BoardTask[], duels }),
-    [teams, scans, gridTasks, duels],
-  )
-
   const text: SlideText = useMemo(() => readSlideText(config?.slide_text), [config])
+  const includeBonus = text.include_bonus !== false
+
+  // Bonus off: rank on base points and show them as the total everywhere.
+  const ranked: RankedTeam[] = useMemo(() => {
+    const r = rankTeams({ teams, scans, boardTasks: gridTasks as BoardTask[], duels }, { includeBonus })
+    return includeBonus ? r : r.map(t => ({ ...t, total: t.basePoints }))
+  }, [teams, scans, gridTasks, duels, includeBonus])
   const slides: AwardSlideDescriptor[] = useMemo(() => {
     const counts = config ?? DEFAULT_PRIZE_COUNTS
     // An editor-saved config may have removed the scoreboard / closing slide.
