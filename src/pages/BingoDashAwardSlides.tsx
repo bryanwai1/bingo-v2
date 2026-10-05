@@ -618,6 +618,7 @@ function MainSlide({ slideIdx, config, text }: { slideIdx: number; config: Bingo
   // Blank means no subtitle line — there is no built-in fallback.
   const subtitle = config?.main_subtitle?.trim() || ''
   const tagline = config?.main_tagline || 'AWARDS CEREMONY'
+  const bigTitle = text.main_title_big?.trim() || ''
 
   return (
     <div key={slideIdx} className="absolute inset-0 flex flex-col items-center justify-center text-center px-6 award-slide-enter">
@@ -643,7 +644,30 @@ function MainSlide({ slideIdx, config, text }: { slideIdx: number; config: Bingo
 
       <SlideLogo logo={text.logo} bg={text.logo_bg} />
 
-      {title && (
+      {bigTitle ? (
+        <div className="relative z-10 flex flex-col items-center" style={{ animation: 'title-slam 0.8s cubic-bezier(0.22, 1, 0.36, 1) 0.35s both' }}>
+          {title && (
+            <h1 className="font-black uppercase leading-tight" style={{ color: '#1b4170', fontSize: 'clamp(1.4rem, 4.4vw, 3.6rem)', textShadow: '0 2px 10px rgba(255,255,255,0.35)' }}>
+              {title}
+            </h1>
+          )}
+          <h2
+            className="uppercase leading-[0.95] mt-2"
+            style={{
+              fontFamily: "'Chango', 'Arial Black', sans-serif",
+              fontStyle: 'italic',
+              color: '#fff1e0',
+              fontSize: 'clamp(3.2rem, 13vw, 10.5rem)',
+              WebkitTextStroke: '0.16em #1b4170',
+              paintOrder: 'stroke fill',
+              filter: 'drop-shadow(0 6px 14px rgba(0,0,0,0.3))',
+              letterSpacing: '0.02em',
+            }}
+          >
+            {bigTitle}
+          </h2>
+        </div>
+      ) : title && (
         <h1
           className="relative z-10 font-black leading-[0.95] text-white"
           style={{
