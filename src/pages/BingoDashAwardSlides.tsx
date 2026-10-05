@@ -448,16 +448,16 @@ function AwardShow({ sectionSlug }: { sectionSlug: string }) {
 const DEFAULT_LOGO_BG = '#ffffff'
 const CEREMONY_BONUS_LABEL = 'Award ceremony'
 
-/** Main / closing emblem: the default hexagon, nothing, or an uploaded image. */
+/** Main-slide emblem: the default hexagon, nothing, or an uploaded image. */
 function SlideLogo({ logo, bg }: { logo?: string; bg?: string }) {
   const custom = customLogo(logo)
   if (!custom) return null
   return (
     <div
-      className="relative z-10 mb-6 rounded-2xl"
-      style={{ background: bg || DEFAULT_LOGO_BG, padding: '10px 16px', animation: 'pop-bounce-in 0.8s cubic-bezier(0.34, 1.56, 0.64, 1) 0.1s both' }}
+      className="relative z-10 mb-6 rounded-full flex items-center justify-center overflow-hidden"
+      style={{ background: bg || DEFAULT_LOGO_BG, width: '170px', height: '170px', padding: '28px', animation: 'pop-bounce-in 0.8s cubic-bezier(0.34, 1.56, 0.64, 1) 0.1s both' }}
     >
-      <img src={custom} alt="" style={{ maxWidth: '220px', maxHeight: '110px', objectFit: 'contain', display: 'block' }} />
+      <img src={custom} alt="" style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', display: 'block' }} />
     </div>
   )
 }
@@ -1031,8 +1031,6 @@ function ClosingSlide({ slideIdx, config, text }: { slideIdx: number; config: Bi
           animation: 'medal-pulse 8s ease-in-out 1s infinite',
         }}
       />
-
-      <SlideLogo logo={text.logo} bg={text.logo_bg} />
 
       <p
         className="relative z-10 text-white/80 font-bold uppercase mb-4"

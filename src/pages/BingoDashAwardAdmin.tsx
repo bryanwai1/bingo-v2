@@ -421,7 +421,7 @@ export function BingoDashAwardAdmin() {
               className="w-full px-3 py-2 rounded-lg border border-gray-300 text-base focus:outline-none focus:ring-2 focus:ring-rose-300"
             />
 
-            <label className="block text-sm font-semibold text-gray-700 mb-1 mt-4">Logo (main + closing)</label>
+            <label className="block text-sm font-semibold text-gray-700 mb-1 mt-4">Logo (main slide)</label>
             <input
               ref={logoFileRef}
               type="file"
@@ -434,7 +434,7 @@ export function BingoDashAwardAdmin() {
               }}
             />
             <div className="flex items-center gap-3 flex-wrap">
-              <div className="w-20 h-12 rounded-lg overflow-hidden flex items-center justify-center shrink-0" style={{ background: draft.slide_text.logo_bg || '#ffffff' }}>
+              <div className="w-14 h-14 rounded-full p-2 overflow-hidden flex items-center justify-center shrink-0" style={{ background: draft.slide_text.logo_bg || '#ffffff' }}>
                 {draft.slide_text.logo && draft.slide_text.logo !== 'none' && draft.slide_text.logo !== 'default'
                   ? <img src={draft.slide_text.logo} alt="" className="max-w-full max-h-full object-contain" />
                   : <span className="text-gray-400 text-[10px] font-bold">no logo</span>}
