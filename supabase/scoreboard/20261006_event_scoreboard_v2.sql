@@ -1,44 +1,19 @@
--- bingo_events: an opt-in, read-only sharing group across renters — several
--- accounts run the same day and pool their boards onto one combined
--- scoreboard. Source: accounts-tenancy/009_shared_events.sql.
-
-create table public.bingo_events (
-  id          uuid primary key default gen_random_uuid(),
-  name        text not null,
-  code        text not null unique,
-  created_by  uuid references public.bingo_accounts(id) on delete set null,
-  starts_at   timestamptz,
-  ends_at     timestamptz,
-  archived    boolean not null default false,
-  created_at  timestamptz not null default now()
-);
-
-alter table public.bingo_events enable row level security;
-
-create policy "members read event" on public.bingo_events for select to authenticated
-  using (public.is_bingo_owner() or id in (select public.my_event_ids()) or created_by = auth.uid());
-create policy "creator writes event" on public.bingo_events for all to authenticated
-  using (public.is_bingo_owner() or created_by = auth.uid())
-  with check (public.is_bingo_owner() or created_by = auth.uid());
-
--- Dropped first: the view below depends on these.
-drop view if exists public.event_scoreboard;
-drop function if exists public.bingo_line_multiplier(int);
-
--- Per-team board score. Must match scoreWithBingoLines() in
--- src/lib/bingoLines.ts and bonusPoints() in src/lib/timeBonus.ts.
+-- Scoring v2 for the combined event scoreboard (event_scoreboard view).
 --
--- Scoring v2: every finished box pays its base points x a time bonus (150%
--- inside the card's full window, sliding evenly to 100% at its timer, to 2
--- decimals), and completed lines add a flat bonus on top -- the 1st +100, 2nd
--- +200 ... 5th +500, nothing after. Lines are ordered by completed_at.
--- The window is the card's own bonus_*_minutes, else the board's
--- default_bonus_*_minutes, else 10 / 25. See supabase/scoreboard/20261006_time_bonus.sql.
+-- Must match src/lib/bingoLines.ts (scoreWithBingoLines) and
+-- src/lib/timeBonus.ts (bonusPoints). Replaces the old x1.2...x2.0 line
+-- multiplier. Run once in the Supabase SQL editor; the view itself is unchanged
+-- (the function keeps its signature and result columns).
 --
--- Only cards actually PLACED on the board count -- the same set the
--- TypeScript builds from bingo_board_cards. Completion is matched per BOX
--- (scans.board_card_id), with the pre-20260910 fallback of matching on
--- task_id for legacy scans recorded before that column existed.
+--  * Every finished box pays its base points x the time bonus: 150% when the
+--    team finished (completed_at - scanned_at) inside the full window, a
+--    straight slide down to 100% at the timer, 100% after. To 2 decimals.
+--    The window is the card's own bonus_*_minutes, else the board's
+--    default_bonus_*_minutes, else 10 / 25.
+--  * Completed lines add a flat bonus on top: the 1st +100, 2nd +200 ... 5th
+--    +500. The 6th onward pays nothing. Lines are ordered by when they were
+--    completed.
+
 create or replace function public.bingo_time_bonus_points(
   base      numeric,
   opened    timestamptz,
@@ -160,45 +135,5 @@ begin
 end;
 $$;
 
--- Per-team totals across every board pooled into an event, for the combined
--- scoreboard. The duel bonus and the facilitator's manual bonus are added on
--- top of the board score UNSCALED -- neither is board progress, so a line
--- must not inflate them.
---
--- Recreated rather than replaced (dropped above): total_points changes from
--- int to numeric once a fractional multiplier is involved, which
--- create or replace forbids.
-create view public.event_scoreboard as
-select
-  eb.event_id,
-  t.id            as team_id,
-  t.name          as team_name,
-  s.id            as section_id,
-  s.name          as section_name,
-  s.owner_id      as tenant_id,
-  round(board.tile_points, 2)                    as tile_points,
-  board.bingo_lines                              as bingo_lines,
-  -- What the lines added on their own, so a combined scoreboard can say where
-  -- the jump came from instead of the total silently growing.
-  round(board.scaled_points - board.tile_points, 2) as line_bonus,
-  coalesce(duel.bonus, 0)                        as duel_bonus,
-  coalesce(t.bonus_points, 0)                    as manual_bonus,
-  round(
-    board.scaled_points
-    + coalesce(duel.bonus, 0)
-    + coalesce(t.bonus_points, 0)
-  , 2)                                           as total_points,
-  board.tiles_done                               as tiles_done
-from public.bingo_event_boards eb
-join public.bingo_sections s on s.id = eb.section_id
-join public.bingo_teams    t on t.section_id = s.id
-left join lateral public.bingo_team_board_score(t.id, s.id) board on true
-left join lateral (
-  select coalesce(sum(d.bonus_points),0) as bonus
-  from public.bingo_duels d
-  where d.winner_team_id = t.id and d.status = 'done'
-) duel on true;
-
-grant select on public.event_scoreboard to authenticated;
 grant execute on function public.bingo_time_bonus_points(numeric, timestamptz, timestamptz, numeric, numeric) to authenticated;
 grant execute on function public.bingo_team_board_score(uuid, uuid) to authenticated;

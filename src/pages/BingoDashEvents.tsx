@@ -34,7 +34,7 @@ type Member = {
 
 const fmtPts = (n: number) => {
   const v = Number(n) || 0
-  return Number.isInteger(v) ? v.toLocaleString() : v.toFixed(1)
+  return v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
 
 export function BingoDashEvents() {
