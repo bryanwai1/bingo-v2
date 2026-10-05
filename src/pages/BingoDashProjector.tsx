@@ -240,13 +240,13 @@ export function BingoDashProjector() {
     scans,
     boardTasks: gridTasks as BoardTask[],
     duels,
+    board: activeSection,
   })
 
   // "Total after Bonus" is a DISPLAY choice — the score itself always carries
   // the manual bonus. Both the figure shown and the ordering follow the toggle.
   const scoreOf = (r: Row) => (showBonus ? r.total : r.basePoints)
-  const decimals = !!activeSection?.decimal_points
-  const fmt = (v: unknown) => formatScore(v, decimals)
+  const fmt = (v: unknown) => formatScore(v)
   rows.sort((a, b) => compareTeamScores(a, b, { includeBonus: showBonus }))
 
   // Per-board skin. A hotel room with windows needs 'daylight' or the

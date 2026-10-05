@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { supabase } from '../lib/supabase'
-import { AITB_POINTS, aitbSpeedBonus, aitbToolUrl, aitbToolCaption, type AitbActivity, aitbHeroUrlById } from '../lib/aitbActivities'
+import { AITB_POINTS, aitbBasePoints, aitbSpeedBonus, aitbToolUrl, aitbToolCaption, type AitbActivity, aitbHeroUrlById } from '../lib/aitbActivities'
 import { AitbMissionModule } from './AitbMissionModule'
-import { BonusBar } from './AitbBonusBar'
+import { CardBonusTimer } from './CardBonusTimer'
+import { resolveBonusWindow } from '../lib/timeBonus'
 
 // One activity inside a bundle, ported from the company AITB mission page.
 //
@@ -149,8 +150,8 @@ export function BundleMission({ activity, progress, teamId, bundleId, onBack, on
             </div>
 
             {progress?.checked_in_at && (
-              <BonusBar elapsedMs={elapsedMs} activity={activity}
-                        completed={done} bankedBonus={progress.bonus} />
+              <CardBonusTimer elapsedMs={elapsedMs} window={resolveBonusWindow()}
+                              basePoints={aitbBasePoints(activity)} completed={done} />
             )}
 
             {/* Steps read as this card's instructions — shown above the

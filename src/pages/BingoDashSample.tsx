@@ -15,8 +15,9 @@ import { SupportChat } from '../components/SupportChat'
 import { MyQrButton } from '../components/MyQrButton'
 import { DemoBundleCard } from '../components/DemoBundleCard'
 import { AitbMissionModule } from '../components/AitbMissionModule'
-import { BonusBar } from '../components/AitbBonusBar'
-import { aitbByName, aitbToolUrl, aitbToolCaption, aitbWithTimer, AITB_POINTS } from '../lib/aitbActivities'
+import { CardBonusTimer } from '../components/CardBonusTimer'
+import { resolveBonusWindow } from '../lib/timeBonus'
+import { aitbByName, aitbToolUrl, aitbToolCaption, AITB_POINTS } from '../lib/aitbActivities'
 import { InstructionPage } from '../components/InstructionPage'
 import { PageNavigator } from '../components/PageNavigator'
 import { SwipeablePages } from '../components/SwipeablePages'
@@ -967,10 +968,7 @@ const SampleTaskDetail = forwardRef<SampleTaskDetailHandle, {
   // so the result just lives in this component's own state.
   const { config: drawConfig } = useCardDrawConfig(task.id)
   const aitbBase = aitbByName(task.title)
-  // A card can rescale or switch off the AITB bonus clock — see
-  // supabase/aitb/020_aitb_card_timer.sql.
-  const aitbActivity = aitbBase ? aitbWithTimer(aitbBase, task.aitb_timer_minutes) : undefined
-  const aitbTimerOn = task.aitb_timer_enabled !== false
+  const aitbActivity = aitbBase
   const [aitbWords, setAitbWords] = useState<string[]>([])
 
   const needsDrawnAnswer = !!(inputs.answer && !task.answer_text && task.answer_min == null && drawConfig)
@@ -1253,7 +1251,7 @@ const SampleTaskDetail = forwardRef<SampleTaskDetailHandle, {
                 <span className="px-2 py-1 rounded-lg text-xs font-black bg-emerald-400/20 text-emerald-300">✓ Completed</span>
               )}
             </div>
-            {aitbTimerOn && <BonusBar elapsedMs={completed ? 0 : now - aitbStartedAt} activity={aitbActivity} completed={completed} bankedBonus={0} />}
+            <CardBonusTimer elapsedMs={completed ? 0 : now - aitbStartedAt} window={resolveBonusWindow(task)} basePoints={task.points ?? 0} completed={completed} />
             <div className="rounded-2xl p-4 mb-6" style={{ background: 'rgba(255,255,255,0.05)', border: '2px solid rgba(255,255,255,0.1)' }}>
               <h2 className="text-white font-black text-lg mb-2">{aitbActivity.tagline}</h2>
               <p className="text-gray-300 text-sm leading-relaxed">{aitbActivity.description}</p>

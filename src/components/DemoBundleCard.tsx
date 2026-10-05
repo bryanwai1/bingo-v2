@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { supabase } from '../lib/supabase'
-import { AITB_POINTS, aitbByName, aitbMaxPoints, aitbSpeedBonus, aitbToolUrl, aitbToolCaption, type AitbActivity, aitbHeroUrlById } from '../lib/aitbActivities'
-import { BonusBar } from './AitbBonusBar'
+import { AITB_POINTS, aitbBasePoints, aitbByName, aitbMaxPoints, aitbSpeedBonus, aitbToolUrl, aitbToolCaption, type AitbActivity, aitbHeroUrlById } from '../lib/aitbActivities'
+import { CardBonusTimer } from './CardBonusTimer'
+import { resolveBonusWindow } from '../lib/timeBonus'
 import { AitbMissionModule } from './AitbMissionModule'
 import type { BingoTask } from '../types/database'
 
@@ -115,7 +116,7 @@ function DemoBundleMission({ activity, progress, marshalPassword, onBack, onChan
             </div>
 
             {progress.checkedInAt && (
-              <BonusBar elapsedMs={elapsedMs} activity={activity} completed={done} bankedBonus={progress.bonus} />
+              <CardBonusTimer elapsedMs={elapsedMs} window={resolveBonusWindow()} basePoints={aitbBasePoints(activity)} completed={done} />
             )}
 
             {/* Steps read as this card's instructions — shown above the

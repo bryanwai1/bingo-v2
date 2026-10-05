@@ -211,9 +211,9 @@ function AwardShow({ sectionSlug }: { sectionSlug: string }) {
 
   // Bonus off: rank on base points and show them as the total everywhere.
   const ranked: RankedTeam[] = useMemo(() => {
-    const r = rankTeams({ teams, scans, boardTasks: gridTasks as BoardTask[], duels }, { includeBonus })
+    const r = rankTeams({ teams, scans, boardTasks: gridTasks as BoardTask[], duels, board: section }, { includeBonus })
     return includeBonus ? r : r.map(t => ({ ...t, total: t.basePoints }))
-  }, [teams, scans, gridTasks, duels, includeBonus])
+  }, [teams, scans, gridTasks, duels, includeBonus, section])
   const slides: AwardSlideDescriptor[] = useMemo(() => {
     const counts = config ?? DEFAULT_PRIZE_COUNTS
     // An editor-saved config may have removed the scoreboard / closing slide.
@@ -306,7 +306,6 @@ function AwardShow({ sectionSlug }: { sectionSlug: string }) {
         config={config}
         teams={teams}
         ranked={ranked}
-        decimals={!!section.decimal_points}
         text={text}
       />
 
@@ -390,7 +389,7 @@ function AwardShow({ sectionSlug }: { sectionSlug: string }) {
                     <span className="font-bold text-sm truncate">{r.team.name}</span>
                   </div>
                   <span className="text-xs font-mono text-amber-400 whitespace-nowrap ml-2">
-                    {r.total} pts
+                    {formatScore(r.total)} pts
                   </span>
                 </div>
                 <div className="flex items-center gap-2">
@@ -419,7 +418,7 @@ function AwardShow({ sectionSlug }: { sectionSlug: string }) {
                   >+5</button>
                 </div>
                 <p className="text-[10px] text-white/40 mt-1.5 font-mono">
-                  Base {r.basePoints} + Bonus {r.bonusPoints} · {r.bingos} bingo{r.bingos === 1 ? '' : 's'}
+                  Base {formatScore(r.basePoints)} + Bonus {formatScore(r.bonusPoints)} · {r.bingos} bingo{r.bingos === 1 ? '' : 's'}
                 </p>
               </div>
             ))}
@@ -559,7 +558,7 @@ function tierTitle(kind: 'consolation' | 'third' | 'second' | 'first', rank: num
 }
 
 function AwardSlideRenderer({
-  slideIdx, descriptor, teamsForSlide, config, teams, ranked, decimals, text,
+  slideIdx, descriptor, teamsForSlide, config, teams, ranked, text,
 }: {
   slideIdx: number
   descriptor: AwardSlideDescriptor
@@ -567,15 +566,13 @@ function AwardSlideRenderer({
   config: BingoAwardConfig | null
   teams: BingoTeam[]
   ranked: RankedTeam[]
-  /** Board's points format — the score carries a tiebreak fraction. */
-  decimals: boolean
   text: SlideText
 }) {
   if (descriptor.kind === 'main') return <MainSlide slideIdx={slideIdx} config={config} text={text} />
   if (descriptor.kind === 'intro') return <IntroSlide slideIdx={slideIdx} text={text} />
   if (descriptor.kind === 'holding') return <HoldingSlide slideIdx={slideIdx} text={text} />
   if (descriptor.kind === 'lineup') return <LineupSlide slideIdx={slideIdx} teams={teams} text={text} />
-  if (descriptor.kind === 'scoreboard') return <ScoreboardSlide slideIdx={slideIdx} ranked={ranked} decimals={decimals} text={text} />
+  if (descriptor.kind === 'scoreboard') return <ScoreboardSlide slideIdx={slideIdx} ranked={ranked} text={text} />
   if (descriptor.kind === 'evaluation') return <EvaluationSlide slideIdx={slideIdx} config={config} text={text} />
   if (descriptor.kind === 'closing') return <ClosingSlide slideIdx={slideIdx} config={config} text={text} />
   if (descriptor.kind === 'consolation_group') {
@@ -584,7 +581,6 @@ function AwardSlideRenderer({
         slideIdx={slideIdx}
         descriptor={descriptor}
         teamsForSlide={teamsForSlide}
-        decimals={decimals}
       />
     )
   }
@@ -596,7 +592,6 @@ function AwardSlideRenderer({
         slideIdx={slideIdx}
         descriptor={descriptor}
         config={config}
-        decimals={decimals}
         ranked={teamsForSlide[0] ?? null}
       />
     )
@@ -605,7 +600,6 @@ function AwardSlideRenderer({
     <PrizeSlide
       slideIdx={slideIdx}
       descriptor={descriptor}
-      decimals={decimals}
       ranked={teamsForSlide[0] ?? null}
     />
   )
@@ -917,7 +911,7 @@ const SB_COL_GAP = 40
 const SB_TWO_COL_FROM = 8
 const SB_TWO_COL_MIN_WIDTH = 1024
 
-function ScoreboardSlide({ slideIdx, ranked, decimals, text }: { slideIdx: number; ranked: RankedTeam[]; decimals: boolean; text: SlideText }) {
+function ScoreboardSlide({ slideIdx, ranked, text }: { slideIdx: number; ranked: RankedTeam[]; text: SlideText }) {
   const viewportWidth = useViewportWidth()
   const count = ranked.length
   const two = viewportWidth >= SB_TWO_COL_MIN_WIDTH && count >= SB_TWO_COL_FROM
@@ -991,7 +985,7 @@ function ScoreboardSlide({ slideIdx, ranked, decimals, text }: { slideIdx: numbe
                             textShadow: isPodium ? '0 0 18px rgba(253,224,71,0.5)' : 'none',
                           }}
                         >
-                          {formatScore(r.total, decimals)}
+                          {formatScore(r.total)}
                           <span className="text-white/50 font-light text-[0.6em] ml-1.5">pts</span>
                         </p>
                       </div>
@@ -1136,12 +1130,11 @@ function ClosingSlide({ slideIdx, config, text }: { slideIdx: number; config: Bi
 
 // ── Prize slide (consolation/third/second/first) ──────────────────────────
 function PrizeSlide({
-  slideIdx, descriptor, ranked, decimals,
+  slideIdx, descriptor, ranked,
 }: {
   slideIdx: number
   descriptor: AwardSlideDescriptor
   ranked: RankedTeam | null
-  decimals: boolean
 }) {
   const kind = descriptor.kind as 'consolation' | 'third' | 'second' | 'first'
   const cfg = TIER[kind]
@@ -1264,7 +1257,7 @@ function PrizeSlide({
                 letterSpacing: '0.02em',
               }}
             >
-              {formatScore(ranked!.total, decimals)} <span className="text-white/70 font-light">pts</span>
+              {formatScore(ranked!.total)} <span className="text-white/70 font-light">pts</span>
             </p>
           </div>
         </>
@@ -1411,13 +1404,12 @@ function SlotText({
 }
 
 function PlaceSlide({
-  slideIdx, descriptor, ranked, config, decimals,
+  slideIdx, descriptor, ranked, config,
 }: {
   slideIdx: number
   descriptor: AwardSlideDescriptor
   ranked: RankedTeam | null
   config: BingoAwardConfig | null
-  decimals: boolean
 }) {
   const kind = descriptor.kind as PlaceKind
   const team = ranked?.team
@@ -1457,7 +1449,7 @@ function PlaceSlide({
         {team && (
           <SlotText
             slot={SLOTS.points}
-            value={formatScore(ranked!.total, decimals)}
+            value={formatScore(ranked!.total)}
             max={88}
           />
         )}
@@ -1469,12 +1461,11 @@ function PlaceSlide({
 
 // ── Consolation group slide (3 teams revealed together) ──────────────────
 function ConsolationGroupSlide({
-  slideIdx, descriptor, teamsForSlide, decimals,
+  slideIdx, descriptor, teamsForSlide,
 }: {
   slideIdx: number
   descriptor: AwardSlideDescriptor
   teamsForSlide: RankedTeam[]
-  decimals: boolean
 }) {
   const cfg = TIER.consolation
   const ranks = descriptor.teamRanks ?? []
@@ -1588,7 +1579,7 @@ function ConsolationGroupSlide({
                     letterSpacing: '0.02em',
                   }}
                 >
-                  {formatScore(entry.team.total, decimals)} <span className="text-white/70 font-light text-base">pts</span>
+                  {formatScore(entry.team.total)} <span className="text-white/70 font-light text-base">pts</span>
                 </p>
               )}
             </div>

@@ -24,27 +24,19 @@ Two numbers (board default, overridable per card):
 - **Full-bonus minutes** (F) — finish within this and get **150%** of base points.
 - **Timer minutes** (T) — at/after this you get **100%** (base only), no bonus.
 
-Between F and T the bonus drops in **visible 10% checkpoints** (not a hidden smooth slide): 150% → 140% → 130% → 120% → 110% → 100%. The span T−F is split into 5 equal steps, so each checkpoint is a clear "hit this time → get this %":
+Inside F the card pays **150%**. After F the bonus **glides down evenly, second by second**, to **100% (base)** at T — a straight line, so scores carry real decimals and ties are very unlikely. The bar shows landmarks at 140 / 130 / 120 / 110% (they sit exactly on the line):
 
-```
-elapsed <= F                 → 150%
-F  < elapsed <= F + 1·s      → 140%      where s = (T − F) / 5
-F+s < elapsed <= F + 2·s     → 130%
-F+2s < elapsed <= F + 3·s    → 120%
-F+3s < elapsed <  T          → 110%      (last checkpoint ends exactly at T)
-elapsed >= T                 → 100%  (base points only, timer run out)
-tile points = round(base × %)
-```
-Worked example (your case, F=10, T=25 → s=3 min, base 100):
-
-| Finish by | Multiplier | Points |
+| Finish at (F=10, T=25) | % | Points on a 100-pt card |
 |---|---|---|
-| 10:00 | 150% | 150 |
-| 13:00 | 140% | 140 |
-| 16:00 | 130% | 130 |
-| 19:00 | 120% | 120 |
-| 22:00 | 110% | 110 |
-| 25:00 and after | 100% (base) | 100 |
+| up to 10:00 | 150% | 150.00 |
+| 11:30 | 145.00% | 145.00 |
+| 13:00 | 140% | 140.00 |
+| 14:20 | 135.56% | 135.56 |
+| 16:00 | 130% | 130.00 |
+| 20:45 | 114.17% | 114.17 |
+| 25:00 and after | 100% (base) | 100.00 |
+
+Points = base x %, rounded to 2 decimals. The live timer shows "Finish NOW for N pts" ticking down every second.
 
 Never below base: a slow team is never punished, only un-rewarded.
 
@@ -84,11 +76,12 @@ Rationale for 10/25: ~2 h game, 25 boxes, teams work in parallel; your example i
 - `src/pages/BingoDashSample.tsx` (~2643), `BingoDashProjector.tsx`, `BingoDashAwardSlides.tsx` — drop `decimals` plumbing; use new score. Award ceremony and projector keep sharing `teamScore.ts` so they cannot disagree.
 - Player side: generalise `src/components/AitbBonusBar.tsx` into a shared `CardBonusTimer` shown in the opened card (`BingoDashParticipant.tsx`, `BundleMission.tsx`, `BingoDashSample.tsx`), plus the draining ring on in-progress tiles in `BingoTileFace.tsx` / `BingoDashHome.tsx` / `BingoDashJoin.tsx`.
 
-## Open questions for you
-1. **AI Team Building cards** currently have their own speed bonus (up to +1000 pts, ×1.0/1.4/1.8 by difficulty, `AITB_POINTS`/`AITB_COMPLETE`). Do they (a) switch to the new 150% model too (simplest, one system), or (b) keep their ladders? Recommendation: (a), so "whole scoring system" is truly one rule.
-2. Steps are fixed at 5 checkpoints of −10% (150/140/130/120/110 then base), evenly spaced between F and T. OK, or do you want a different step size / editable checkpoints?
-3. Does the timer start when the team **opens/scans** the card (`scanned_at`, recommended), or from game start?
-4. Existing finished games: leave history as-is, or re-score with the new rule? (Scores are computed live from scans, so old boards would change retroactively — recommend applying only to new boards or accepting the change.)
+## Decisions (confirmed)
+1. **AI Team Building cards** switch to the new 150% model too. Their old +1000-style speed bonus ladders (`bonusTiers`, `AITB_BONUS_MULT`) are retired. Every card, AI or not, uses base points x checkpoint %.
+2. **The countdown UI on every card copies the AI Team Building card's timer design** (`AitbBonusBar.tsx`): show the running timer and a live "**finish now = N points**" readout, plus the checkpoint bar.
+3. **Steps are fixed**: 5 checkpoints of -10% (150, 140, 130, 120, 110, then base), evenly spaced between F and T.
+4. **Timer starts when the team opens the card** (`scanned_at`).
+5. **Old boards are re-scored** with the new rule (no per-board scoring-version switch).
 
 ## Verification (after we agree and build)
 - Unit-style checks of `scoreWithBingoLines` / multiplier: 1 line → +100; 2 lines → +300 total bonus; 6th line → no extra; F/T edge cases (elapsed = F, = T, T ≤ F, no scanned_at).

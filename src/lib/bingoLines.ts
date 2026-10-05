@@ -50,38 +50,27 @@ export function completedBingoLines(
 }
 
 // ── Bingo line scoring ────────────────────────────────────────────────────────
-// A completed line pays a multiplier on THE BOXES THAT FORM IT. The 1st line a
-// team completes pays ×1.2 on the total of its five boxes, the 2nd ×1.4, then
-// ×1.6, ×1.8 and ×2.0 — five lines' worth of bonus and no more.
+// Every finished box pays its own points (already time-adjusted by the caller).
+// Completed lines add a flat bonus on top: the 1st line a team completes pays
+// +100, the 2nd +200, then +300, +400 and +500 — five lines' worth and no more.
 //
-//   Line 1 (row 1):  100+100+100+100+100 = 500 × 1.2 = 600
-//   Line 2 (col 1):  100+100+100+100+100 = 500 × 1.4 = 700
-//   3 boxes in no line:                               300
-//                                            TOTAL = 1600
+//   Line 1 (row 1):  +100
+//   Line 2 (col 1):  +200
+//   3 other boxes:   still pay their own points
 //
-// Two rules that decide the awkward cases:
-//
-//  • A box on a crossing point counts in EVERY line it belongs to. Box 1 above
-//    sits in both lines and is paid in both — intersecting lines are worth
-//    planning for.
-//  • A box in no scoring line is paid once at face value. Finishing a task
-//    always earns its points; the line is what multiplies them.
-//
-// Boxes are therefore never paid their face value AND a line multiple — a box
-// inside a scoring line is paid only through that line.
-//
-// Order matters: the multiplier a line gets depends on how many lines came
-// before it, so this replays the board in the order boxes were crossed off.
-// Duel winnings and the facilitator's manual bonus are added by the caller
-// afterwards, untouched.
-export const BINGO_LINE_MULTIPLIER_STEP = 0.2
+// A box on a crossing point counts toward every line it belongs to, but its own
+// points are paid once. Order matters: the bonus a line gets depends on how many
+// lines came before it, so this replays the board in the order boxes were
+// crossed off. Duel winnings and the facilitator's manual bonus are added by the
+// caller afterwards, untouched.
+export const BINGO_LINE_BONUS_STEP = 100
 
-/** How many completed lines can earn a multiplier. The 6th onward pay nothing. */
+/** How many completed lines earn a bonus. The 6th onward pay nothing. */
 export const MAX_SCORING_LINES = 5
 
-/** The multiplier the Nth completed line pays: 1 → 1.2, 2 → 1.4 … 5 → 2.0. */
-export function bingoLineMultiplier(lineNumber: number): number {
-  return 1 + BINGO_LINE_MULTIPLIER_STEP * lineNumber
+/** The bonus the Nth completed line pays: 1 → 100, 2 → 200 … 5 → 500. */
+export function bingoLineBonus(lineNumber: number): number {
+  return BINGO_LINE_BONUS_STEP * lineNumber
 }
 
 export type BingoCompletion = {
@@ -93,11 +82,11 @@ export type BingoCompletion = {
 }
 
 export type BingoScore = {
-  /** Points after every line multiplier has been applied. */
+  /** Box points plus the line bonus. */
   total: number
-  /** Raw box points, before any line multiplier. */
+  /** Box points alone, before any line bonus. */
   tilePoints: number
-  /** What the lines added — total minus tilePoints. */
+  /** What the completed lines added. */
   lineBonus: number
   /** Lines completed in total (may exceed the 5 that actually pay). */
   bingos: number
@@ -115,11 +104,10 @@ export function scoreWithBingoLines(
     .sort((a, b) => (a.c.at - b.c.at) || (a.i - b.i))
     .map(x => x.c)
 
-  const pointsById = new Map<string, number>()
-  for (const c of completions) pointsById.set(c.id, Number(c.points) || 0)
-  const tilePoints = ordered.reduce((sum, c) => sum + (Number(c.points) || 0), 0)
+  // Box points carry 2 decimals; round the sum so float noise never shows.
+  const tilePoints = Math.round(ordered.reduce((sum, c) => sum + (Number(c.points) || 0), 0) * 100) / 100
 
-  // Replay to find the ORDER lines complete — that order sets which multiplier
+  // Replay to find the ORDER lines complete — that order sets which bonus
   // each one earns. One box can close two lines at once (a crossing point);
   // completedBingoLines returns them in BINGO_LINES order, which then decides
   // which of the two is "first".
@@ -135,27 +123,10 @@ export function scoreWithBingoLines(
     }
   }
 
-  const scoringLines = lineOrder.slice(0, MAX_SCORING_LINES)
+  const lineBonus = lineOrder
+    .slice(0, MAX_SCORING_LINES)
+    .reduce((sum, _line, i) => sum + bingoLineBonus(i + 1), 0)
+  const total = Math.round((tilePoints + lineBonus) * 100) / 100
 
-  // Each scoring line pays its own boxes' total at its own multiplier.
-  let total = 0
-  const paidByLine = new Set<string>()
-  scoringLines.forEach((lineIdx, i) => {
-    let lineTotal = 0
-    for (const slot of BINGO_LINES[lineIdx]) {
-      const id = lineSlots[slot]?.id
-      if (id === undefined) continue
-      lineTotal += pointsById.get(id) ?? 0
-      paidByLine.add(id)
-    }
-    total += lineTotal * bingoLineMultiplier(i + 1)
-  })
-
-  // Everything else — boxes in no scoring line, including boxes that only
-  // appear in a 6th-or-later line — is paid once at face value.
-  for (const c of ordered) {
-    if (!paidByLine.has(c.id)) total += Number(c.points) || 0
-  }
-
-  return { total, tilePoints, lineBonus: total - tilePoints, bingos: lineOrder.length }
+  return { total, tilePoints, lineBonus, bingos: lineOrder.length }
 }

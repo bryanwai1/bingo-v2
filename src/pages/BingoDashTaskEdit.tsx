@@ -19,7 +19,8 @@ import {
   type CompletionInputs,
 } from '../lib/completionInputs'
 import { AitbMissionModule } from '../components/AitbMissionModule'
-import { BonusBar } from '../components/AitbBonusBar'
+import { CardBonusTimer } from '../components/CardBonusTimer'
+import { resolveBonusWindow } from '../lib/timeBonus'
 import { useBingoAuth } from '../hooks/useBingoAuth'
 import { aitbByName, AITB_POINTS, aitbToolUrl, aitbToolCaption } from '../lib/aitbActivities'
 import { useCardDrawConfig } from '../hooks/useCardDrawConfig'
@@ -456,7 +457,7 @@ export function BingoDashTaskEdit() {
                   {previewActivity.difficulty}
                 </span>
               </div>
-              <BonusBar elapsedMs={previewNow - previewStartedAt} activity={previewActivity} completed={false} bankedBonus={0} />
+              <CardBonusTimer elapsedMs={previewNow - previewStartedAt} window={resolveBonusWindow(task)} basePoints={task?.points ?? 0} completed={false} />
               <div className="rounded-2xl p-4 mb-6" style={{ background: 'rgba(255,255,255,0.05)', border: '2px solid rgba(255,255,255,0.1)' }}>
                 <h2 className="text-white font-black text-lg mb-2">{previewActivity.tagline}</h2>
                 <p className="text-gray-300 text-sm leading-relaxed">{previewActivity.description}</p>

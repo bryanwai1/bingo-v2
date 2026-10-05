@@ -8,6 +8,7 @@ import { CategoryIcon } from '../components/BingoTileFace'
 import { useBingoAuth } from '../hooks/useBingoAuth'
 import type { BingoTask, BingoTeam, BingoScan, BingoSettings, BingoSection, BingoCategory, BingoChallengeSection, BingoMember, BingoPhotoSubmission, BingoBoardCard, BingoDuel, BonusItem } from '../types/database'
 import { BINGO_LINES, buildBingoSlots, completedBingoLines, scoreWithBingoLines } from '../lib/bingoLines'
+import { boxPoints, resolveBonusWindow, DEFAULT_BONUS_FULL_MIN, DEFAULT_BONUS_TIMER_MIN } from '../lib/timeBonus'
 import { TileFace } from '../components/BingoTileFace'
 import { SCOREBOARD_THEMES, getScoreboardTheme } from '../lib/scoreboardThemes'
 import { Menu, MenuItem, MenuDivider } from '../components/AdminHeader'
@@ -18,7 +19,7 @@ import { CubeBoard } from '../components/CubeBoard'
 import { RunEventPanel, Step } from '../components/RunEventPanel'
 import { CONTEST_GAMES, getContestGame } from '../lib/contestGames'
 import { SupportInbox } from '../components/SupportInbox'
-import { aitbByName, aitbHeroUrlByName } from '../lib/aitbActivities'
+import { aitbHeroUrlByName } from '../lib/aitbActivities'
 import { LED_HEX, LED_KEYS } from '../lib/ledColors'
 import { duelBonusByTeam } from '../hooks/useBingoDuels'
 
@@ -2094,12 +2095,9 @@ export function BingoDashAdmin() {
   // "category X in the active board": the Complete Library view lists every
   // board, and matching against currentSectionId there silently touched
   // nothing when the group belonged to another board.
-  // Whole-number boards round on save. Doing it here rather than on the input
-  // means a pasted value or a bulk edit cannot slip a decimal through.
-  const roundPoints = useCallback(
-    (n: number) => currentBoard?.decimal_points ? Math.round(n * 100) / 100 : Math.round(n),
-    [currentBoard],
-  )
+  // Scores are whole numbers. Rounding here rather than on the input means a
+  // pasted value or a bulk edit cannot slip a decimal through.
+  const roundPoints = useCallback((n: number) => Math.round(n), [])
 
   // Bulk colour/points for a whole category, applied once on an explicit
   // Apply rather than on every keystroke and drag of a colour picker — the old
@@ -3893,66 +3891,53 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                                     )
                                   })()}
 
-                                  {/* ── AI Team Building timer ───────────────
-                                      AITB cards run a speed-bonus ladder that
-                                      counts up from check-in. Facilitators can
-                                      turn that clock off for an untimed run, or
-                                      rescale it to a different window. */}
-                                  {(!section.foreign || isOwner) && aitbByName(task.title) && (() => {
-                                    const activity = aitbByName(task.title)!
-                                    const on = task.aitb_timer_enabled !== false
-                                    const mins = task.aitb_timer_minutes ?? activity.mins
+                                  {/* ── Bonus timer ─────────────────────────
+                                      Every card pays up to 150% for a fast
+                                      finish. Blank fields follow the board
+                                      default (Board settings → Bonus Timer). */}
+                                  {(!section.foreign || isOwner) && (() => {
+                                    const w = resolveBonusWindow(task, currentBoard)
+                                    const own = task.bonus_full_minutes != null || task.bonus_timer_minutes != null
                                     const save = async (patch: Partial<BingoTask>) => {
                                       setTasks(prev => prev.map(t => t.id === task.id ? { ...t, ...patch } : t))
                                       const { error } = await supabase.from('bingo_tasks').update(patch).eq('id', task.id)
                                       if (error) alert('Timer not saved: ' + error.message)
                                     }
+                                    const input = (label: string, key: 'bonus_full_minutes' | 'bonus_timer_minutes', shown: number) => (
+                                      <label className="block">
+                                        <span className="block a-text-3 text-[10px] font-black uppercase tracking-wider mb-1">{label}</span>
+                                        <input
+                                          type="number" min={1} max={600} step={0.5}
+                                          defaultValue={task[key] ?? ''}
+                                          placeholder={String(shown)}
+                                          key={`${task.id}-${key}-${task[key] ?? 'def'}`}
+                                          onBlur={e => {
+                                            const raw = parseFloat(e.target.value)
+                                            const v = Number.isFinite(raw) ? Math.min(600, Math.max(1, raw)) : null
+                                            if (v !== (task[key] ?? null)) save({ [key]: v })
+                                          }}
+                                          className="w-20 bg-black/40 a-text text-xs px-2 py-1 rounded border border-white/25 text-center font-bold focus:outline-none focus:border-white/60"
+                                        />
+                                      </label>
+                                    )
                                     return (
-                                      <div className="mt-1.5">
-                                        <button
-                                          onClick={() => save({ aitb_timer_enabled: !on })}
-                                          title={on
-                                            ? 'Bonus clock is running for this card'
-                                            : 'Untimed — the bonus bar is hidden for players'}
-                                          className={`text-xs font-bold px-2 py-0.5 rounded-full transition-colors ${on ? 'a-chip-on' : 'a-chip-off'}`}
-                                        >
-                                          {on ? '⏱️ Timer ON' : '⏱️ Timer OFF'}
-                                        </button>
-                                        {on && (
-                                          <div className="mt-2 p-2 rounded-lg a-surface-2">
-                                            <label className="block a-text-3 text-[10px] font-black uppercase tracking-wider mb-1">
-                                              Minutes
-                                            </label>
-                                            <div className="flex items-center gap-2">
-                                              <input
-                                                type="number"
-                                                min={1}
-                                                max={180}
-                                                defaultValue={mins}
-                                                key={`${task.id}-aitbmin-${task.aitb_timer_minutes ?? 'def'}`}
-                                                onBlur={e => {
-                                                  const raw = parseInt(e.target.value)
-                                                  const v = Number.isFinite(raw) ? Math.min(180, Math.max(1, raw)) : activity.mins
-                                                  if (v === mins) return
-                                                  save({ aitb_timer_minutes: v === activity.mins ? null : v })
-                                                }}
-                                                className="w-20 bg-black/40 a-text text-xs px-2 py-1 rounded border border-white/25 text-center font-bold focus:outline-none focus:border-white/60"
-                                              />
-                                              {task.aitb_timer_minutes != null && (
-                                                <button
-                                                  onClick={() => save({ aitb_timer_minutes: null })}
-                                                  className="text-[10px] font-bold a-text-3 hover:text-teal-500"
-                                                >
-                                                  Reset to {activity.mins}
-                                                </button>
-                                              )}
-                                            </div>
-                                            <p className="a-text-3 text-[10px] mt-1 leading-snug">
-                                              Rescales the whole bonus ladder to this window.
-                                              Default for {activity.name} is {activity.mins} min.
-                                            </p>
-                                          </div>
-                                        )}
+                                      <div className="mt-1.5 p-2 rounded-lg a-surface-2">
+                                        <p className="a-text-3 text-[10px] font-black uppercase tracking-wider mb-1.5">
+                                          ⏱️ Bonus timer {own ? '(this card)' : '(board default)'}
+                                        </p>
+                                        <div className="flex items-end gap-2 flex-wrap">
+                                          {input('150% within', 'bonus_full_minutes', w.full)}
+                                          {input('Ends at', 'bonus_timer_minutes', w.timer)}
+                                          <span className="a-text-3 text-[10px] pb-1.5">min</span>
+                                          {own && (
+                                            <button
+                                              onClick={() => save({ bonus_full_minutes: null, bonus_timer_minutes: null })}
+                                              className="text-[10px] font-bold a-text-3 hover:text-teal-500 pb-1.5"
+                                            >
+                                              Reset to board default
+                                            </button>
+                                          )}
+                                        </div>
                                       </div>
                                     )
                                   })()}
@@ -4223,26 +4208,40 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
               <h1 className="text-3xl font-black a-text tracking-tight">Board settings</h1>
               <p className="a-text-2 mt-1.5 text-sm">Options for <strong>{currentBoard?.name}</strong>. Each row shows its current value.</p>
             </div>
-            <AdminSection icon="🔢" title="Points Format"
-          blurb="Whole numbers keep the projector easy to read. Decimals give you a tie-breaker when two teams finish level."
-          summary={<>{currentBoard?.decimal_points ? '0.00 — decimals' : '0 — whole numbers'}</>}>
-          <div className="flex gap-2">
-            {[false, true].map(dec => {
-              const on = !!currentBoard?.decimal_points === dec
-              return (
-                <button
-                  key={String(dec)}
-                  onClick={() => { if (!on) updateBoardSettings({ decimal_points: dec }) }}
-                  className="px-4 py-3 rounded-xl font-black text-sm transition-colors"
-                  style={on
-                    ? { background: 'var(--a-brand)', color: '#fff' }
-                    : { background: 'var(--a-surface-2)', color: 'var(--a-text-2)' }}
-                >
-                  {dec ? '100.25  Decimals' : '100  Whole numbers'}
-                </button>
-              )
-            })}
-          </div>
+            <AdminSection icon="⏱️" title="Bonus Timer"
+          blurb="Every card pays 150% of its points when a team finishes inside the full-bonus time, stepping down to base points when the timer runs out. Cards follow these numbers unless a card sets its own."
+          summary={<>{resolveBonusWindow(null, currentBoard).full} → {resolveBonusWindow(null, currentBoard).timer} min</>}>
+          {(() => {
+            const w = resolveBonusWindow(null, currentBoard)
+            const field = (label: string, value: number, key: 'default_bonus_full_minutes' | 'default_bonus_timer_minutes', fallback: number) => (
+              <label className="block">
+                <span className="block a-text-3 text-[10px] font-black uppercase tracking-wider mb-1">{label}</span>
+                <input
+                  type="number" min={1} max={600} step={0.5}
+                  defaultValue={value}
+                  key={`${currentSectionId}-${key}-${value}`}
+                  onBlur={e => {
+                    const raw = parseFloat(e.target.value)
+                    const v = Number.isFinite(raw) ? Math.min(600, Math.max(1, raw)) : fallback
+                    if (v !== value) void updateBoardSettings({ [key]: v })
+                  }}
+                  className="w-28 px-3 py-2 rounded-lg a-surface-2 a-text font-black text-center border border-white/20 focus:outline-none focus:border-white/60"
+                />
+              </label>
+            )
+            return (
+              <div>
+                <div className="flex flex-wrap gap-4 items-end">
+                  {field('150% if done within (min)', w.full, 'default_bonus_full_minutes', DEFAULT_BONUS_FULL_MIN)}
+                  {field('Bonus ends at (min)', w.timer, 'default_bonus_timer_minutes', DEFAULT_BONUS_TIMER_MIN)}
+                </div>
+                <p className="a-text-3 text-xs mt-3 leading-snug">
+                  Steps: 150% up to {w.full} min, then 140 / 130 / 120 / 110% in even steps, base points from {w.timer} min.
+                  The clock runs from the moment a team opens the card.
+                </p>
+              </div>
+            )
+          })()}
         </AdminSection>
 
             <AdminSection icon="🧊" title="Board Faces"
@@ -4910,7 +4909,7 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                         const pointsEarned = scoreWithBingoLines(
                           completedPlacements.map(t => ({
                             id: t.placementId,
-                            points: t.points ?? 0,
+                            points: boxPoints({ ...t, placement_id: t.placementId }, teamScans, currentBoard),
                             at: teamCompletedAt.get(t.placementId) ?? teamCompletedAt.get(t.id) ?? 0,
                           })),
                           teamLineSlots,
@@ -5054,7 +5053,7 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                                 <span className="text-[11px] font-black text-amber-500">{teamBingoLines}</span>
                                 <span className="text-[11px] a-text-3">bingos</span>
                                 {pointsEarned > 0 && (
-                                  <span className="text-[11px] a-text-3 font-bold">{Math.round(pointsEarned * 10) / 10}pts</span>
+                                  <span className="text-[11px] a-text-3 font-bold">{pointsEarned.toFixed(2)}pts</span>
                                 )}
                               </div>
                             </td>
@@ -5707,7 +5706,7 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
         const points = scoreWithBingoLines(
           completedPlacements.map(t => ({
             id: t.placementId,
-            points: t.points ?? 0,
+            points: boxPoints({ ...t, placement_id: t.placementId }, teamScans, currentBoard),
             at: modalCompletedAt.get(t.placementId) ?? modalCompletedAt.get(t.id) ?? 0,
           })),
           lineSlots,
@@ -5729,7 +5728,7 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
               <div className="px-5 py-3 border-b a-border grid grid-cols-3 gap-3">
                 <div className="text-center">
                   <p className="text-xs a-text-2 font-bold uppercase tracking-wider">Points</p>
-                  <p className="text-2xl font-black a-text">{Math.round(points * 10) / 10}</p>
+                  <p className="text-2xl font-black a-text">{points.toFixed(2)}</p>
                 </div>
                 <div className="text-center">
                   <p className="text-xs a-text-2 font-bold uppercase tracking-wider">Bingos</p>

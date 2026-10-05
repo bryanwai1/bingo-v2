@@ -1,5 +1,6 @@
 import { buildBingoSlots, scoreWithBingoLines } from './bingoLines'
 import { duelBonusByTeam } from '../hooks/useBingoDuels'
+import { boxPoints, round2, type BonusDefaults } from './timeBonus'
 import type { BingoTask, BingoTeam, BingoScan, BingoDuel } from '../types/database'
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -29,19 +30,19 @@ export interface TeamScoreInput {
   boardTasks: BoardTask[]
   /** Resolved duels for this board. */
   duels: BingoDuel[]
+  /** The board's default bonus window; cards without their own follow it. */
+  board?: BonusDefaults | null
 }
 
 export interface TeamScore {
   team: BingoTeam
-  /** Raw box points, before any line multiplier. */
+  /** Box points (time bonus included), before any line bonus. */
   tilePoints: number
   /** What the completed bingo lines added on top. */
   lineBonus: number
   /** Contest winnings. Never scaled by a line — a winning defender has no tile. */
   duelBonus: number
-  /** A hidden fraction per team so two teams on the same cards cannot tie. */
-  tiebreak: number
-  /** Scaled tiles + duel + tiebreak. This is the projector's default figure. */
+  /** Tiles + line bonus + duel. This is the projector's default figure. */
   basePoints: number
   /** The facilitator's manual award. */
   bonusPoints: number
@@ -58,7 +59,7 @@ export interface TeamScore {
   reachedAt: number
 }
 
-export function scoreTeams({ teams, scans, boardTasks, duels }: TeamScoreInput): TeamScore[] {
+export function scoreTeams({ teams, scans, boardTasks, duels, board }: TeamScoreInput): TeamScore[] {
   const duelBonuses = duelBonusByTeam(duels)
   const num = (v: unknown) => Number(v ?? 0) || 0
 
@@ -99,19 +100,19 @@ export function scoreTeams({ teams, scans, boardTasks, duels }: TeamScoreInput):
       completedAt.set(key, Math.min(completedAt.get(key) ?? Infinity, when))
     }
 
-    const { total: scaledTilePoints, tilePoints, lineBonus, bingos } = scoreWithBingoLines(
+    // Each box pays its base points scaled by how fast the team finished it.
+    const { total: tileAndLinePoints, tilePoints, lineBonus, bingos } = scoreWithBingoLines(
       completed.map(t => ({
         id: t.placement_id ?? t.id,
-        points: num(t.points),
+        points: boxPoints(t, teamScans, board),
         at: completedAt.get(t.placement_id ?? '') ?? completedAt.get(t.id) ?? 0,
       })),
       lineSlots,
     )
 
     const duelBonus = num(duelBonuses.get(team.id))
-    const tiebreak = num(team.tiebreak)
     const bonusPoints = num(team.bonus_points)
-    const basePoints = scaledTilePoints + duelBonus + tiebreak
+    const basePoints = round2(tileAndLinePoints + duelBonus)
 
     const lastScan = teamScans.reduce((latest, s) => {
       if (!s.completed || !boardTaskIds.has(s.task_id) || !s.completed_at) return latest
@@ -128,10 +129,9 @@ export function scoreTeams({ teams, scans, boardTasks, duels }: TeamScoreInput):
       tilePoints,
       lineBonus,
       duelBonus,
-      tiebreak,
       basePoints,
       bonusPoints,
-      total: basePoints + bonusPoints,
+      total: round2(basePoints + bonusPoints),
       bingos,
       tasksDone: completedIds.size,
       reachedAt: Math.max(lastScan, lastDuel) || Infinity,
@@ -164,13 +164,8 @@ export function rankTeams(input: TeamScoreInput, opts: { includeBonus?: boolean 
   return scoreTeams(input).sort((a, b) => compareTeamScores(a, b, opts))
 }
 
-/**
- * Whole numbers unless the board opted into decimals. Every team carries a
- * tiebreak fraction, so in decimal mode a bare 300 beside 300.5 would look
- * like a missing digit — hence always one decimal place there.
- */
-export function formatScore(v: unknown, decimals: boolean): string {
+/** Scores always show 2 decimal places, so 140 and 97.5 read as 140.00 and 97.50. */
+export function formatScore(v: unknown): string {
   const n = Number(v ?? 0) || 0
-  if (!decimals) return Math.round(n).toLocaleString()
-  return n.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 })
+  return n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }

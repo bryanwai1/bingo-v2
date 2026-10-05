@@ -92,10 +92,11 @@ export interface BoardTimer {
 export interface BingoSection extends BoardTimer {
   /** Cube faces in play: 1, 2 or 6. See src/lib/cubeFaces.ts */
   face_count?: number | null
-  // Whole numbers by default. Decimals are opt-in per board: a projector
-  // reads 1,247 faster than 1,247.50, so only turn it on when the scoring
-  // actually needs the precision.
-  decimal_points?: boolean | null
+  // Time-bonus window every card on this board follows unless it sets its own:
+  // 150% of base points inside `full` minutes, stepping down to base at `timer`.
+  // See src/lib/timeBonus.ts and supabase/scoreboard/20261006_time_bonus.sql.
+  default_bonus_full_minutes?: number | null
+  default_bonus_timer_minutes?: number | null
   /** midnight | arena | daylight — see src/lib/scoreboardThemes.ts */
   scoreboard_theme?: string | null
   id: string
@@ -172,6 +173,9 @@ export interface BingoTask {
   // duration. See supabase/aitb/020_aitb_card_timer.sql.
   aitb_timer_enabled?: boolean
   aitb_timer_minutes?: number | null
+  // Per-card override of the board's time-bonus window; null follows the board.
+  bonus_full_minutes?: number | null
+  bonus_timer_minutes?: number | null
   // Sign Splice cards only: whether Screen 4 asks for the shop name / lot
   // number, and whether it insists. See supabase/021_sign_splice_shop_entry.sql.
   sign_splice_shop_input?: 'hidden' | 'optional' | 'compulsory'

@@ -28,8 +28,9 @@ import { CardSample } from '../components/CardSample'
 import { RetroGamesSample } from '../components/RetroGamesSample'
 import { BundleCard } from '../components/BundleCard'
 import { AitbMissionModule } from '../components/AitbMissionModule'
-import { BonusBar } from '../components/AitbBonusBar'
-import { aitbByName, aitbToolUrl, aitbToolCaption, AITB_POINTS, aitbWithTimer } from '../lib/aitbActivities'
+import { CardBonusTimer } from '../components/CardBonusTimer'
+import { resolveBonusWindow, type BonusDefaults } from '../lib/timeBonus'
+import { aitbByName, aitbToolUrl, aitbToolCaption, AITB_POINTS } from '../lib/aitbActivities'
 import { normalizeUrl } from '../lib/normalizeUrl'
 import type { BingoScan, BingoTask } from '../types/database'
 
@@ -108,7 +109,11 @@ export function BingoDashParticipant() {
 
   const [task, setTask] = useState<BingoTask | null>(null)
   const [showSplash, setShowSplash] = useState(!isSnakeLadder)
-  const [scanRecord, setScanRecord] = useState<{ id: string; completed: boolean; answerOk: boolean; words: string[]; stepsDone: number[]; scannedAt: string } | null>(null)
+  const [scanRecord, setScanRecord] = useState<{ id: string; completed: boolean; answerOk: boolean; words: string[]; stepsDone: number[]; scannedAt: string; completedAt: string | null } | null>(null)
+  // The board's default bonus window, for cards that do not set their own.
+  const [bonusDefaults, setBonusDefaults] = useState<BonusDefaults | null>(null)
+  // Elapsed time at the last tick, so the timer can freeze on completion.
+  const lastElapsed = useRef(0)
   // Which of this card's inputs the team has already satisfied. Files count
   // once a marshal has approved them, which is why this is read back from the
   // submissions rather than from what was sent.
@@ -269,19 +274,23 @@ export function BingoDashParticipant() {
   const sectionId = team?.section_id ?? null
   useEffect(() => {
     if (isSnakeLadder || !sectionId) return
-    const applySettings = (data: { marshal_password?: string | null; photo_submissions_enabled?: boolean | null } | null) => {
+    const applySettings = (data: ({ marshal_password?: string | null; photo_submissions_enabled?: boolean | null } & BonusDefaults) | null) => {
       if (!data) return
+      setBonusDefaults({
+        default_bonus_full_minutes: data.default_bonus_full_minutes,
+        default_bonus_timer_minutes: data.default_bonus_timer_minutes,
+      })
       if (typeof data.marshal_password === 'string') setMarshalPassword(data.marshal_password)
       if (typeof data.photo_submissions_enabled === 'boolean') {
         setPhotoSubmissionsEnabled(data.photo_submissions_enabled)
       }
     }
-    supabase.from('bingo_sections').select('marshal_password, photo_submissions_enabled').eq('id', sectionId).single()
+    supabase.from('bingo_sections').select('marshal_password, photo_submissions_enabled, default_bonus_full_minutes, default_bonus_timer_minutes').eq('id', sectionId).single()
       .then(({ data }) => applySettings(data))
     const channel = supabase
       .channel('bingo-section-participant')
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'bingo_sections', filter: `id=eq.${sectionId}` }, (payload) => {
-        applySettings(payload.new as { marshal_password?: string | null; photo_submissions_enabled?: boolean | null })
+        applySettings(payload.new as { marshal_password?: string | null; photo_submissions_enabled?: boolean | null } & BonusDefaults)
       })
       .subscribe()
     return () => { supabase.removeChannel(channel) }
@@ -295,10 +304,7 @@ export function BingoDashParticipant() {
   // the bundle tile — a card is "an AITB card" purely by carrying one of
   // those names, whether it's played standalone or inside the bundle.
   const aitbBase = task ? aitbByName(task.title) : undefined
-  // A card can rescale or switch off the AITB bonus clock — see
-  // supabase/aitb/020_aitb_card_timer.sql.
-  const aitbActivity = aitbBase ? aitbWithTimer(aitbBase, task?.aitb_timer_minutes) : undefined
-  const aitbTimerOn = task?.aitb_timer_enabled !== false
+  const aitbActivity = aitbBase
 
   // The draw / typed words belong to the TEAM, not the phone that made them —
   // a roulette spin on one handset has to reach the teammate holding the other.
@@ -378,17 +384,18 @@ export function BingoDashParticipant() {
         if (scan) setScanRecord({
           id: scan.id, completed: scan.completed, answerOk: scan.answer_ok ?? false,
           words: scan.words ?? [], stepsDone: scan.steps_done ?? [], scannedAt: scan.scanned_at,
+          completedAt: scan.completed_at ?? null,
         })
       })
     }
   }, [isSnakeLadder, team, taskId, boardCardId, scanRecorded, recordScan])
 
-  // The AITB bonus ladder counts up live, same as the bundle mission.
+  // The bonus timer counts up live from the moment the card was opened.
   useEffect(() => {
-    if (!aitbActivity || !scanRecord || scanRecord.completed) return
+    if (!scanRecord || scanRecord.completed) return
     const t = setInterval(() => setNow(Date.now()), 1000)
     return () => clearInterval(t)
-  }, [aitbActivity, scanRecord?.completed, scanRecord?.id])
+  }, [scanRecord?.completed, scanRecord?.id])
 
   const toggleAitbStep = (i: number) => {
     if (!scanRecord || scanRecord.completed) return
@@ -963,6 +970,22 @@ export function BingoDashParticipant() {
           </div>
         )}
 
+        {/* Bonus timer — every card, from the moment the team opens it. */}
+        {scanRecord && !chainLocked && (() => {
+          const opened = new Date(scanRecord.scannedAt).getTime()
+          if (!scanRecord.completed) lastElapsed.current = Math.max(0, now - opened)
+          const elapsed = !scanRecord.completed ? lastElapsed.current
+            : scanRecord.completedAt ? Math.max(0, Date.parse(scanRecord.completedAt) - opened) : lastElapsed.current
+          return (
+            <CardBonusTimer
+              elapsedMs={elapsed}
+              window={resolveBonusWindow(task, bonusDefaults)}
+              basePoints={task.points ?? 0}
+              completed={scanRecord.completed}
+            />
+          )
+        })()}
+
         {/* AI Team Building brief — replaces the generic pages entirely: a
             live bonus timer, the real description + skill tag, then the
             module and a tickable mission checklist instead of swipeable
@@ -979,9 +1002,6 @@ export function BingoDashParticipant() {
                 </span>
               )}
             </div>
-            {aitbTimerOn && <BonusBar
-              elapsedMs={scanRecord.completed ? 0 : now - new Date(scanRecord.scannedAt).getTime()}
-              activity={aitbActivity} completed={scanRecord.completed} bankedBonus={0} />}
             <div className="rounded-2xl p-4 mb-6" style={{ background: 'rgba(255,255,255,0.05)', border: '2px solid rgba(255,255,255,0.1)' }}>
               <h2 className="text-white font-black text-lg mb-2">{aitbActivity.tagline}</h2>
               <p className="text-gray-300 text-sm leading-relaxed">{aitbActivity.description}</p>

@@ -1,3 +1,4 @@
+import { bonusPoints, resolveBonusWindow, MAX_BONUS_PCT, type BonusWindow } from './timeBonus'
 // AI Team Building — the 10 activities and their scoring, ported from the
 // company app. Kept byte-faithful on the numbers so a team's score here means
 // the same thing it did there.
@@ -143,7 +144,6 @@ export const AITB_ACTIVITIES: AitbActivity[] = [
 
 export const AITB_POINTS = { scan: 100, step: 100, complete: 300 } as const
 export const AITB_COMPLETE:   Record<AitbDifficulty, number> = { Easy: 200, Normal: 350, Hard: 500 }
-export const AITB_BONUS_MULT: Record<AitbDifficulty, number> = { Easy: 1, Normal: 1.4, Hard: 1.8 }
 
 export function aitbActivity(id: number) {
   return AITB_ACTIVITIES.find(a => a.id === id)
@@ -187,39 +187,24 @@ export function aitbByName(name: string) {
   return AITB_ACTIVITIES.find(a => a.name.toLowerCase() === n)
 }
 
-/** Speed bonus for finishing in `elapsedMs`, scaled by difficulty. */
-export function aitbSpeedBonus(elapsedMs: number, a: Pick<AitbActivity,'bonusTiers'|'difficulty'>): number {
-  const mins = elapsedMs / 60_000
-  const mult = AITB_BONUS_MULT[a.difficulty] ?? 1
-  for (const t of a.bonusTiers) if (mins <= t.uptoMin) return Math.round(t.pts * mult)
-  return 0
+/** Check-in + every step + completion: what an activity pays before any time bonus. */
+export function aitbBasePoints(a: Pick<AitbActivity, 'steps' | 'difficulty'>): number {
+  return AITB_POINTS.scan + a.steps.length * AITB_POINTS.step + AITB_COMPLETE[a.difficulty]
 }
 
-/**
- * Apply a card's timer override to an activity.
- *
- * Passing a minute count rescales the whole bonus ladder proportionally, so a
- * 20-minute activity run in 10 keeps the same shape of ladder — just twice as
- * tight. null leaves the activity untouched.
- */
-export function aitbWithTimer(a: AitbActivity, minutes?: number | null): AitbActivity {
-  if (!minutes || minutes <= 0 || minutes === a.mins || !a.mins) return a
-  const factor = minutes / a.mins
-  return {
-    ...a,
-    mins: minutes,
-    bonusTiers: a.bonusTiers.map(t => ({
-      ...t,
-      uptoMin: Math.max(0.5, Math.round(t.uptoMin * factor * 10) / 10),
-    })),
-  }
+/** Extra points for finishing in `elapsedMs`, on the same 150% ladder as every card. */
+export function aitbSpeedBonus(
+  elapsedMs: number,
+  a: Pick<AitbActivity, 'steps' | 'difficulty'>,
+  window: BonusWindow = resolveBonusWindow(),
+): number {
+  const base = aitbBasePoints(a)
+  return bonusPoints(base, elapsedMs, window) - base
 }
 
-/** Best possible score: check-in + every step + completion + top bonus. */
-export function aitbMaxPoints(a: AitbActivity): number {
-  return AITB_POINTS.scan + a.steps.length * AITB_POINTS.step
-    + AITB_COMPLETE[a.difficulty]
-    + Math.round((a.bonusTiers[0]?.pts ?? 0) * AITB_BONUS_MULT[a.difficulty])
+/** Best possible score: the base points at the top (150%) bonus. */
+export function aitbMaxPoints(a: Pick<AitbActivity, 'steps' | 'difficulty'>): number {
+  return aitbBasePoints(a) * MAX_BONUS_PCT / 100
 }
 
 // ── Interactive-module data (cups / roulette / cards) ─────────────────────
