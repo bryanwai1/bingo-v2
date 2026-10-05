@@ -238,6 +238,31 @@ export function BingoDashAwardAdmin() {
     setDraft(d => ({ ...d, slide_order: addSlide(d.slide_order, kind) }))
   }
 
+  // Hold-and-drag reorder. Pointer events (not HTML5 drag) so it works on touch too.
+  const [drag, setDrag] = useState<{ from: number; over: number } | null>(null)
+  const dragTarget = (clientY: number, from: number) => {
+    const rows = Array.from(document.querySelectorAll<HTMLElement>('[data-slide-row]'))
+    let over = 0
+    rows.forEach((r, i) => {
+      if (i === from) return
+      const b = r.getBoundingClientRect()
+      if (b.top + b.height / 2 < clientY) over++
+    })
+    return Math.min(over, rows.length - 1)
+  }
+  const dragMove = (e: React.PointerEvent) => {
+    if (drag) setDrag({ from: drag.from, over: dragTarget(e.clientY, drag.from) })
+  }
+  const dragEnd = () => {
+    if (drag && drag.over !== drag.from) {
+      const next = [...draft.slide_order]
+      const [item] = next.splice(drag.from, 1)
+      next.splice(drag.over, 0, item)
+      setDraft(d => ({ ...d, slide_order: next }))
+    }
+    setDrag(null)
+  }
+
   const doRemoveSlide = (id: AwardSlideId) => {
     setDraft(d => {
       const restPoints = { ...d.slide_points }
@@ -692,7 +717,7 @@ export function BingoDashAwardAdmin() {
                 Reset order
               </button>
             </div>
-            <p className="text-xs text-gray-400 mb-4">Reorder with arrows · Remove with ✕</p>
+            <p className="text-xs text-gray-400 mb-4">Hold ⠿ and drag to move · or use the arrows · Remove with ✕</p>
 
             <ol className="space-y-2">
               {slides.map((s, i) => {
@@ -717,8 +742,23 @@ export function BingoDashAwardAdmin() {
                 return (
                   <li
                     key={s.id}
-                    className="flex items-center gap-2 bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5"
+                    data-slide-row
+                    className={`flex items-center gap-2 bg-gray-50 border rounded-xl px-3 py-2.5 transition-shadow ${
+                      drag?.from === i ? 'opacity-50 border-amber-400'
+                        : drag && drag.over === i ? `border-gray-200 ${drag.over < drag.from ? 'shadow-[0_-3px_0_0_#f59e0b]' : 'shadow-[0_3px_0_0_#f59e0b]'}`
+                          : 'border-gray-200'}`}
                   >
+                    <button
+                      type="button"
+                      onPointerDown={e => { e.preventDefault(); e.currentTarget.setPointerCapture(e.pointerId); setDrag({ from: i, over: i }) }}
+                      onPointerMove={dragMove}
+                      onPointerUp={dragEnd}
+                      onPointerCancel={() => setDrag(null)}
+                      className="w-6 h-8 shrink-0 flex items-center justify-center text-gray-400 hover:text-gray-700 cursor-grab active:cursor-grabbing select-none"
+                      style={{ touchAction: 'none' }}
+                      title="Hold and drag to move"
+                      aria-label="Drag to reorder"
+                    >⠿</button>
                     <span
                       className="w-8 h-8 flex items-center justify-center rounded-lg font-black text-base shrink-0"
                       style={{ background: accent, color: '#111' }}
