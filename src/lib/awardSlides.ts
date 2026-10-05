@@ -27,7 +27,7 @@ export type PrizeKind =
   | 'third'
   | 'second'
   | 'first'
-type SingletonKind = 'main' | 'intro' | 'holding' | 'lineup' | 'scoreboard' | 'closing'
+type SingletonKind = 'main' | 'intro' | 'holding' | 'lineup' | 'scoreboard' | 'closing' | 'evaluation'
 export type AwardSlideKind = SingletonKind | PrizeKind
 
 /** Teams shown on a single consolation_group slide. */
@@ -40,7 +40,8 @@ function isSingletonKind(kind: string): kind is SingletonKind {
     kind === 'holding' ||
     kind === 'lineup' ||
     kind === 'scoreboard' ||
-    kind === 'closing'
+    kind === 'closing' ||
+    kind === 'evaluation'
   )
 }
 
@@ -100,6 +101,7 @@ export const SLIDE_LABELS: Record<AwardSlideKind, { label: string; emoji: string
   lineup:            { label: 'Team lineup',        emoji: '👥', accent: '#a5f3fc' },
   scoreboard:        { label: 'Full scoreboard',    emoji: '📊', accent: '#86efac' },
   closing:           { label: 'Closing slide',       emoji: '🎬', accent: '#fca5a5' },
+  evaluation:        { label: 'Evaluation',          emoji: '📝', accent: '#bae6fd' },
   first:             { label: 'Grand Champion',     emoji: '🏆', accent: '#fde047' },
   second:            { label: 'First Runner-Up',    emoji: '🥈', accent: '#e5e7eb' },
   third:             { label: 'Second Runner-Up',   emoji: '🥉', accent: '#f59e0b' },
@@ -243,7 +245,7 @@ function nextPrizeId(order: AwardSlideId[], kind: PrizeKind): AwardSlideId {
 
 /** Where each singleton belongs in a show, opener to finale. */
 const SINGLETON_RANK: Record<SingletonKind, number> = {
-  main: 0, intro: 1, holding: 2, lineup: 3, scoreboard: 90, closing: 99,
+  main: 0, intro: 1, holding: 2, lineup: 3, scoreboard: 90, closing: 99, evaluation: 100,
 }
 const singletonRank = (id: AwardSlideId) => (isSingletonKind(id) ? SINGLETON_RANK[id] : 50)
 
@@ -266,7 +268,7 @@ export function addSlide(order: AwardSlideId[], kind: AwardSlideKind): AwardSlid
 /** Reset to the default order, keeping any optional openers (intro, lineup) the show has. */
 export function resetSlideOrder(order: AwardSlideId[]): AwardSlideId[] {
   let out = defaultSlideOrder(countsFromOrder(order))
-  for (const extra of ['intro', 'lineup'] as const) {
+  for (const extra of ['intro', 'lineup', 'evaluation'] as const) {
     if (order.includes(extra)) out = addSlide(out, extra)
   }
   return out
@@ -389,6 +391,9 @@ export type SlideText = {
   logo?: string
   /** Backdrop behind the logo only (CSS colour); white when unset. */
   logo_bg?: string
+  /** Evaluation slide: uploaded QR code image URL. */
+  eval_qr?: string
+  evaluation?: SlideTextBlock
   intro?: SlideTextBlock
   holding?: SlideTextBlock
   lineup?: SlideTextBlock
@@ -402,6 +407,7 @@ export const SLIDE_TEXT_DEFAULTS = {
   holding: { pretitle: 'Ladies and Gentlemen', title: 'Presenting Awards', hint: '▶ Continue for the winners' },
   lineup: { pretitle: "Tonight's Contenders", title: '👥 MEET THE TEAMS' },
   scoreboard: { pretitle: 'Final Standings', title: '🏆 FULL SCOREBOARD' },
+  evaluation: { title: 'Bryan Wai Keong Parcio Ng' },
   closing: { pretitle: 'Thank You', subtitle: 'Thank you to all our teams', tagline: 'CONGRATULATIONS · SEE YOU NEXT TIME' },
 } as const
 

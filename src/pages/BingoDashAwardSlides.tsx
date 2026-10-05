@@ -277,10 +277,10 @@ function AwardShow({ sectionSlug }: { sectionSlug: string }) {
     .map(r => ranked[r - 1])
     .filter((x): x is RankedTeam => !!x)
 
-  const isHsbcSlide = current.kind === 'main' || current.kind === 'closing'
+  const isHsbcSlide = current.kind === 'main' || current.kind === 'closing' || current.kind === 'evaluation'
   const slideStyle = isHsbcSlide
     ? {
-        background: current.kind === 'main'
+        background: current.kind === 'main' || current.kind === 'evaluation'
           ? mainBackground(config?.main_bg)
           : mainBackground(text.closing?.bg),
         fontFamily: `-apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif`,
@@ -574,6 +574,7 @@ function AwardSlideRenderer({
   if (descriptor.kind === 'holding') return <HoldingSlide slideIdx={slideIdx} text={text} />
   if (descriptor.kind === 'lineup') return <LineupSlide slideIdx={slideIdx} teams={teams} text={text} />
   if (descriptor.kind === 'scoreboard') return <ScoreboardSlide slideIdx={slideIdx} ranked={ranked} decimals={decimals} text={text} />
+  if (descriptor.kind === 'evaluation') return <EvaluationSlide slideIdx={slideIdx} config={config} text={text} />
   if (descriptor.kind === 'closing') return <ClosingSlide slideIdx={slideIdx} config={config} text={text} />
   if (descriptor.kind === 'consolation_group') {
     return (
@@ -999,6 +1000,46 @@ function ScoreboardSlide({ slideIdx, ranked, decimals, text }: { slideIdx: numbe
             </div>
           </FitBoard>
         )}
+      </div>
+    </div>
+  )
+}
+
+// ── Evaluation slide: slogan, QR code, name, date ────────────────────────
+function ordinal(n: number): string {
+  const v = n % 100
+  if (v >= 11 && v <= 13) return 'th'
+  return ({ 1: 'st', 2: 'nd', 3: 'rd' } as Record<number, string>)[n % 10] ?? 'th'
+}
+
+function EvaluationSlide({ slideIdx, config, text }: { slideIdx: number; config: BingoAwardConfig | null; text: SlideText }) {
+  const slogan = config?.award_slogan?.trim() || ''
+  const name = slideTextValue(text, 'evaluation', 'title')
+  const qr = text.eval_qr
+  const now = new Date()
+  const day = now.getDate()
+  const month = now.toLocaleString('en-GB', { month: 'short' }).toUpperCase()
+  const pill = { background: '#fff', color: '#0f3a6b', border: '3px solid rgba(15,58,107,0.55)', boxShadow: '0 4px 14px rgba(0,0,0,0.18)' }
+
+  return (
+    <div key={slideIdx} className="absolute inset-0 flex flex-col items-center justify-center text-center px-6 gap-[3vh] award-slide-enter">
+      {slogan && (
+        <h1 className="font-black uppercase text-white leading-tight" style={{ fontSize: 'clamp(1.5rem, 4vw, 3.4rem)', textShadow: '0 3px 12px rgba(0,0,0,0.35)' }}>
+          {slogan}
+        </h1>
+      )}
+      <div className="rounded-[2rem] bg-white flex items-center justify-center" style={{ width: 'min(34vh, 80vw)', height: 'min(34vh, 80vw)', padding: '2.2vh' }}>
+        {qr
+          ? <img src={qr} alt="Evaluation QR code" className="w-full h-full object-contain" />
+          : <span className="text-gray-400 font-bold text-sm">Upload QR code in Award admin</span>}
+      </div>
+      <div className="flex flex-col items-center gap-[1.6vh]">
+        {name && (
+          <div className="rounded-full font-black uppercase px-[3vw] py-[1.2vh]" style={{ ...pill, fontSize: 'clamp(1rem, 2.4vw, 2rem)' }}>{name}</div>
+        )}
+        <div className="rounded-full font-black uppercase px-[2.4vw] py-[0.8vh]" style={{ ...pill, fontSize: 'clamp(0.8rem, 1.6vw, 1.3rem)' }}>
+          {day}<sup style={{ fontSize: '0.6em' }}>{ordinal(day).toUpperCase()}</sup> {month} {now.getFullYear()}
+        </div>
       </div>
     </div>
   )

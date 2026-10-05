@@ -72,6 +72,19 @@ export function BingoDashAwardAdmin() {
   const [configId, setConfigId] = useState<string | null>(null)
   const [draft, setDraft] = useState<DraftConfig>(EMPTY_DRAFT)
   const [teams, setTeams] = useState<BingoTeam[]>([])
+  // Main and place editors are always open; the other slide editors open on demand.
+  const [openEditors, setOpenEditors] = useState<Set<string>>(new Set())
+  const toggleEditor = (kind: string) => {
+    const alwaysOpen = kind === 'main' || kind === 'place'
+    if (!alwaysOpen) setOpenEditors(prev => {
+      const next = new Set(prev)
+      if (next.has(kind)) next.delete(kind); else next.add(kind)
+      return next
+    })
+    if (alwaysOpen || !openEditors.has(kind)) {
+      setTimeout(() => document.getElementById(`editor-${kind}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 50)
+    }
+  }
   const [loaded, setLoaded] = useState(false)
   const [saving, setSaving] = useState(false)
   const [savedAt, setSavedAt] = useState<number | null>(null)
@@ -180,6 +193,24 @@ export function BingoDashAwardAdmin() {
     }
   }
 
+  const qrFileRef = useRef<HTMLInputElement>(null)
+  const [uploadingQr, setUploadingQr] = useState(false)
+  const uploadQr = async (file: File) => {
+    if (file.size > 5 * 1024 * 1024) { alert(`${file.name} too large (max 5 MB).`); return }
+    if (!file.type.startsWith('image/')) { alert('Please choose an image file.'); return }
+    setUploadingQr(true)
+    try {
+      const ext = file.name.split('.').pop() || 'png'
+      const path = `bingo-media/award-photos/${section?.id ?? 'board'}-qr-${Date.now()}.${ext}`
+      const { error } = await supabase.storage.from('media').upload(path, file)
+      if (error) { alert(`Upload failed: ${error.message}`); return }
+      const url = supabase.storage.from('media').getPublicUrl(path).data.publicUrl
+      setDraft(d => ({ ...d, slide_text: { ...d.slide_text, eval_qr: url } }))
+    } finally {
+      setUploadingQr(false)
+    }
+  }
+
   const runShow = async () => {
     if (!section) return
     if (dirty && window.confirm('You have unsaved changes. Save them before running the show?')) {
@@ -193,6 +224,7 @@ export function BingoDashAwardAdmin() {
   const hasLineup = draft.slide_order.includes('lineup')
   const hasScoreboard = draft.slide_order.includes('scoreboard')
   const hasClosing = draft.slide_order.includes('closing')
+  const hasEvaluation = draft.slide_order.includes('evaluation')
 
   const moveSlide = (from: number, dir: -1 | 1) => {
     const to = from + dir
@@ -364,7 +396,7 @@ export function BingoDashAwardAdmin() {
       <div className="max-w-6xl mx-auto p-6 grid gap-6 lg:grid-cols-[1fr_1fr]">
         {/* Left: holding slide content */}
         <div className="space-y-6">
-          <section className="bg-white rounded-2xl border border-gray-200 p-6">
+          <section id="editor-main" className="bg-white rounded-2xl border border-gray-200 p-6">
             <h2 className="font-black text-gray-900 mb-4">Main slide (opener)</h2>
             <p className="text-xs text-gray-400 mb-4">The opening title card. Pick a colour, or Reset for the ceremony purple.</p>
 
@@ -474,7 +506,7 @@ export function BingoDashAwardAdmin() {
             </div>
           </section>
 
-          <section className="bg-white rounded-2xl border border-gray-200 p-6">
+          <section id="editor-place" className="bg-white rounded-2xl border border-gray-200 p-6">
             <h2 className="font-black text-gray-900 mb-1">Place slides (1st – 5th)</h2>
             <input
               ref={awardFileRef}
@@ -512,30 +544,82 @@ export function BingoDashAwardAdmin() {
             </p>
           </section>
 
+          {openEditors.has('intro') && (
           <SlideTextCard
             title="Intro slide"
             hint="Animated ceremony opener."
             fields={[['pretitle', 'Small line above'], ['title', 'Title'], ['subtitle', 'Line below']]}
             slide="intro" draft={draft} onChange={setText}
           />
+          )}
+          {openEditors.has('holding') && (
           <SlideTextCard
             title="Holding slide"
             hint="The reveal shown before the winners."
             fields={[['pretitle', 'Small line above'], ['title', 'Title'], ['hint', 'Hint at the bottom']]}
             slide="holding" draft={draft} onChange={setText}
           />
+          )}
+          {openEditors.has('lineup') && (
           <SlideTextCard
             title="Lineup slide"
             hint="Every team with its photo."
             fields={[['pretitle', 'Small line above'], ['title', 'Title']]}
             slide="lineup" draft={draft} onChange={setText}
           />
+          )}
+          {openEditors.has('scoreboard') && (
           <SlideTextCard
             title="Full scoreboard slide"
             hint="Every team ranked. It always fits all teams on screen."
             fields={[['pretitle', 'Small line above'], ['title', 'Title']]}
             slide="scoreboard" draft={draft} onChange={setText}
           />
+          )}
+          {openEditors.has('evaluation') && (
+          <SlideTextCard
+            title="Evaluation slide"
+            hint="Slogan on top (from the place slides), QR code, your name and today's date. Background follows the main slide."
+            fields={[['title', 'Name']]}
+            slide="evaluation" draft={draft} onChange={setText}
+          >
+            <label className="block text-sm font-semibold text-gray-700 mb-1 mt-3">QR code</label>
+            <input
+              ref={qrFileRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={e => {
+                const file = e.target.files?.[0]
+                e.target.value = ''
+                if (file) void uploadQr(file)
+              }}
+            />
+            <div className="flex items-center gap-3 flex-wrap">
+              <div className="w-20 h-20 rounded-lg bg-white border border-gray-200 p-1 flex items-center justify-center shrink-0">
+                {draft.slide_text.eval_qr
+                  ? <img src={draft.slide_text.eval_qr} alt="" className="max-w-full max-h-full object-contain" />
+                  : <span className="text-gray-400 text-[10px] font-bold">no QR</span>}
+              </div>
+              {draft.slide_text.eval_qr && (
+                <button
+                  onClick={() => setDraft(d => ({ ...d, slide_text: { ...d.slide_text, eval_qr: undefined } }))}
+                  className="px-3 py-1.5 rounded-lg border border-gray-300 text-sm font-bold text-gray-600 hover:bg-gray-50"
+                >
+                  Remove QR
+                </button>
+              )}
+              <button
+                onClick={() => qrFileRef.current?.click()}
+                disabled={uploadingQr}
+                className="px-3 py-1.5 rounded-lg border border-gray-300 text-sm font-bold text-gray-600 hover:bg-gray-50 disabled:opacity-50"
+              >
+                {uploadingQr ? 'Uploading…' : draft.slide_text.eval_qr ? 'Replace QR' : 'Upload QR'}
+              </button>
+            </div>
+          </SlideTextCard>
+          )}
+          {openEditors.has('closing') && (
           <SlideTextCard
             title="Closing slide"
             hint={draft.main_title ? `The end card. A blank title uses the main slide's (“${draft.main_title}”).` : 'The end card. A blank title uses the main slide’s title.'}
@@ -565,6 +649,7 @@ export function BingoDashAwardAdmin() {
               )}
             </div>
           </SlideTextCard>
+          )}
 
           <section className="bg-white rounded-2xl border border-gray-200 p-6">
             <h2 className="font-black text-gray-900 mb-2">Ceremony summary</h2>
@@ -604,6 +689,8 @@ export function BingoDashAwardAdmin() {
                         ? `${teams.length} team${teams.length === 1 ? '' : 's'} · grid w/ photos`
                         : s.kind === 'scoreboard'
                           ? `${teams.length} team${teams.length === 1 ? '' : 's'} ranked · final totals`
+                          : s.kind === 'evaluation'
+                            ? `QR · ${draft.slide_text.evaluation?.title || SLIDE_TEXT_DEFAULTS.evaluation.title}`
                           : s.kind === 'closing'
                             ? [draft.slide_text.closing?.title || draft.main_title, draft.slide_text.closing?.pretitle || SLIDE_TEXT_DEFAULTS.closing.pretitle].filter(Boolean).join(' · ')
                             : s.kind === 'consolation_group'
@@ -705,6 +792,8 @@ export function BingoDashAwardAdmin() {
                 sublabel={hasMain ? 'already added' : 'title card opener'}
                 accent="#fca5a5"
                 onClick={() => doAddSlide('main')}
+                onEdit={() => toggleEditor('main')}
+                editing={openEditors.has('main')}
               />
               <AddButton
                 disabled={hasIntro}
@@ -713,6 +802,8 @@ export function BingoDashAwardAdmin() {
                 sublabel={hasIntro ? 'already added' : 'animated opener'}
                 accent="#fde68a"
                 onClick={() => doAddSlide('intro')}
+                onEdit={() => toggleEditor('intro')}
+                editing={openEditors.has('intro')}
               />
               <AddButton
                 disabled={hasHolding}
@@ -721,6 +812,8 @@ export function BingoDashAwardAdmin() {
                 sublabel={hasHolding ? 'already added' : 'AWARDS title slide'}
                 accent="#fcd34d"
                 onClick={() => doAddSlide('holding')}
+                onEdit={() => toggleEditor('holding')}
+                editing={openEditors.has('holding')}
               />
               <AddButton
                 disabled={hasLineup}
@@ -729,6 +822,8 @@ export function BingoDashAwardAdmin() {
                 sublabel={hasLineup ? 'already added' : 'all teams + photos'}
                 accent="#a5f3fc"
                 onClick={() => doAddSlide('lineup')}
+                onEdit={() => toggleEditor('lineup')}
+                editing={openEditors.has('lineup')}
               />
               <AddButton
                 disabled={hasScoreboard}
@@ -737,6 +832,8 @@ export function BingoDashAwardAdmin() {
                 sublabel={hasScoreboard ? 'already added' : 'all teams ranked'}
                 accent="#86efac"
                 onClick={() => doAddSlide('scoreboard')}
+                onEdit={() => toggleEditor('scoreboard')}
+                editing={openEditors.has('scoreboard')}
               />
               <AddButton
                 disabled={hasClosing}
@@ -745,6 +842,18 @@ export function BingoDashAwardAdmin() {
                 sublabel={hasClosing ? 'already added' : 'thank-you end card'}
                 accent="#fca5a5"
                 onClick={() => doAddSlide('closing')}
+                onEdit={() => toggleEditor('closing')}
+                editing={openEditors.has('closing')}
+              />
+              <AddButton
+                disabled={hasEvaluation}
+                emoji="📝"
+                label="Evaluation"
+                sublabel={hasEvaluation ? 'already added' : 'QR code + name + date'}
+                accent="#bae6fd"
+                onClick={() => doAddSlide('evaluation')}
+                onEdit={() => toggleEditor('evaluation')}
+                editing={openEditors.has('evaluation')}
               />
               {(['first', 'second', 'third', 'fourth', 'fifth', 'consolation_group', 'consolation'] as PrizeKind[]).map(kind => {
                 const sublabel = kind === 'consolation_group'
@@ -758,6 +867,7 @@ export function BingoDashAwardAdmin() {
                     sublabel={sublabel}
                     accent={SLIDE_LABELS[kind].accent}
                     onClick={() => doAddSlide(kind)}
+                    onEdit={() => toggleEditor('place')}
                   />
                 )
               })}
@@ -770,7 +880,7 @@ export function BingoDashAwardAdmin() {
 }
 
 function AddButton({
-  disabled, emoji, label, sublabel, accent, onClick,
+  disabled, emoji, label, sublabel, accent, onClick, onEdit, editing,
 }: {
   disabled?: boolean
   emoji: string
@@ -778,24 +888,38 @@ function AddButton({
   sublabel: string
   accent: string
   onClick: () => void
+  onEdit?: () => void
+  editing?: boolean
 }) {
   return (
-    <button
-      onClick={onClick}
-      disabled={disabled}
-      className="flex items-center gap-3 p-3 rounded-xl border border-gray-200 bg-gray-50 hover:bg-white hover:border-amber-300 transition-colors text-left disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-gray-50 disabled:hover:border-gray-200"
-    >
-      <span
-        className="w-10 h-10 rounded-lg flex items-center justify-center text-xl shrink-0"
-        style={{ background: accent }}
+    <div className="relative">
+      <button
+        onClick={onClick}
+        disabled={disabled}
+        className="w-full flex items-center gap-3 p-3 pr-12 rounded-xl border border-gray-200 bg-gray-50 hover:bg-white hover:border-amber-300 transition-colors text-left disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-gray-50 disabled:hover:border-gray-200"
       >
-        {emoji}
-      </span>
-      <div className="min-w-0">
-        <p className="font-bold text-sm truncate">{label}</p>
-        <p className="text-[11px] text-gray-500 truncate">{sublabel}</p>
-      </div>
-    </button>
+        <span
+          className="w-10 h-10 rounded-lg flex items-center justify-center text-xl shrink-0"
+          style={{ background: accent }}
+        >
+          {emoji}
+        </span>
+        <div className="min-w-0">
+          <p className="font-bold text-sm truncate">{label}</p>
+          <p className="text-[11px] text-gray-500 truncate">{sublabel}</p>
+        </div>
+      </button>
+      {onEdit && (
+        <button
+          onClick={onEdit}
+          title={editing ? 'Hide editor' : 'Edit this slide'}
+          aria-label={`Edit ${label}`}
+          className={`absolute right-2 top-1/2 -translate-y-1/2 w-8 h-8 rounded-lg border flex items-center justify-center text-sm transition-colors ${editing ? 'bg-amber-100 border-amber-300 text-amber-700' : 'bg-white border-gray-200 text-gray-500 hover:bg-amber-50 hover:border-amber-300'}`}
+        >
+          ✏️
+        </button>
+      )}
+    </div>
   )
 }
 
@@ -814,7 +938,7 @@ function SlideTextCard({
 }) {
   const defaults = SLIDE_TEXT_DEFAULTS[slide] as SlideTextBlock
   return (
-    <section className="bg-white rounded-2xl border border-gray-200 p-6">
+    <section id={`editor-${slide}`} className="bg-white rounded-2xl border border-gray-200 p-6">
       <h2 className="font-black text-gray-900 mb-1">{title}</h2>
       <p className="text-xs text-gray-400 mb-3">{hint} Leave a field empty to use the text shown in grey.</p>
       {fields.map(([field, label], i) => (
