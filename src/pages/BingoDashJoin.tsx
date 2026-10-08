@@ -4,6 +4,8 @@ import { supabase } from '../lib/supabase'
 import { useTeamReviews, type ReviewFlag } from '../hooks/useTeamReviews'
 import { fetchBoardTasks } from '../lib/boardCards'
 import { ParticleBackground } from '../components/ParticleBackground'
+import { PlayerBackdrop } from '../components/PlayerBackdrop'
+import { normalizePlayerTheme, GRAB_GREEN, type PlayerTheme } from '../lib/playerThemes'
 import { TimeUpAlarm } from '../components/TimeUpAlarm'
 import { TileFace } from '../components/BingoTileFace'
 import { MyQrButton } from '../components/MyQrButton'
@@ -55,7 +57,9 @@ function JoinScreen({
   onJoinGroup,
   isObserver = false,
   invite = null,
+  theme,
 }: {
+  theme: PlayerTheme
   sectionName: string
   groups: BingoTeam[]
   memberCounts: Record<string, number>
@@ -65,6 +69,8 @@ function JoinScreen({
    *  known, so the newcomer only types a name and lands on that team. */
   invite?: { team: BingoTeam; password: string } | null
 }) {
+  const grab = theme === 'grab'
+  const accent = grab ? GRAB_GREEN : '#a855f7'
   const [step, setStep] = useState<'name' | 'group' | 'password'>('name')
   const [playerName, setPlayerName] = useState(() => localStorage.getItem(PLAYER_NAME_KEY) ?? '')
   const [password, setPassword] = useState('')
@@ -135,7 +141,7 @@ function JoinScreen({
 
   return (
     <div className="min-h-screen bg-gray-950 flex flex-col items-center justify-center relative overflow-hidden px-4 py-8">
-      <ParticleBackground />
+      <PlayerBackdrop theme={theme} />
 
       {/* Reachable before joining a team — see BingoDashHome. */}
       <div className="absolute top-4 right-4 z-20">
@@ -143,9 +149,10 @@ function JoinScreen({
       </div>
 
       <div className="relative z-10 text-center mb-10 animate-slide-up">
-        <div className="text-6xl mb-4">{isObserver ? '👁' : '🎯'}</div>
-        <h1 className="text-5xl font-black text-white tracking-tight">BINGO DASH</h1>
-        <p className="text-teal-400 mt-2 text-base font-bold">{sectionName}</p>
+        {grab && <p className="text-xs font-black uppercase tracking-[0.35em] mb-1" style={{ color: '#7CF0A8' }}>Grab</p>}
+        {!grab && <div className="text-6xl mb-4">{isObserver ? '👁' : '🎯'}</div>}
+        <h1 className={`text-5xl font-black text-white tracking-tight ${grab ? '[text-shadow:0_2px_16px_rgba(0,0,0,0.6)]' : ''}`}>{grab ? 'GAME DAY BINGO' : 'BINGO DASH'}</h1>
+        <p className="text-teal-400 mt-2 text-base font-bold" style={grab ? { color: '#7CF0A8' } : undefined}>{sectionName}</p>
         {isObserver
           ? <p className="text-blue-400 mt-1 text-sm font-semibold">Observer mode &middot; View only</p>
           : <p className="text-gray-400 mt-1 text-sm">Complete challenges &middot; Scan tiles &middot; Win</p>
@@ -184,7 +191,7 @@ function JoinScreen({
               placeholder="Your name"
               maxLength={40}
               className="w-full px-5 py-4 rounded-2xl border-2 text-lg font-bold focus:outline-none transition-colors text-center"
-              style={{ borderColor: trimmedName ? '#a855f7' : '#e5e7eb' }}
+              style={{ borderColor: trimmedName ? accent : '#e5e7eb' }}
               autoFocus
             />
 
@@ -199,7 +206,7 @@ function JoinScreen({
               type="submit"
               disabled={!trimmedName}
               className="w-full py-4 rounded-2xl text-white font-black text-xl transition-all duration-200 disabled:opacity-40 hover:scale-105 active:scale-95 mt-1"
-              style={{ backgroundColor: '#a855f7', boxShadow: '0 8px 24px #a855f744' }}
+              style={{ backgroundColor: accent, boxShadow: `0 8px 24px ${accent}44` }}
             >
               Continue →
             </button>
@@ -247,7 +254,7 @@ function JoinScreen({
             onChange={e => setSearch(e.target.value)}
             placeholder="Search groups..."
             className="w-full px-4 py-3 rounded-2xl border-2 text-base font-medium focus:outline-none transition-colors text-center mb-3"
-            style={{ borderColor: search ? '#a855f7' : '#e5e7eb' }}
+            style={{ borderColor: search ? accent : '#e5e7eb' }}
             autoFocus
             disabled={submitting}
           />
@@ -342,7 +349,7 @@ function JoinScreen({
               }}
               placeholder="• • • •"
               className="w-full px-5 py-4 rounded-2xl border-2 text-4xl font-black focus:outline-none transition-colors text-center tracking-[0.6em]"
-              style={{ borderColor: password.length === 4 ? '#a855f7' : '#e5e7eb' }}
+              style={{ borderColor: password.length === 4 ? accent : '#e5e7eb' }}
               autoFocus
               maxLength={4}
               disabled={submitting}
@@ -359,7 +366,7 @@ function JoinScreen({
               type="submit"
               disabled={password.length !== 4 || submitting}
               className="w-full py-4 rounded-2xl text-white font-black text-xl transition-all duration-200 disabled:opacity-40 hover:scale-105 active:scale-95 mt-1"
-              style={{ backgroundColor: '#a855f7', boxShadow: '0 8px 24px #a855f744' }}
+              style={{ backgroundColor: accent, boxShadow: `0 8px 24px ${accent}44` }}
             >
               {submitting ? 'Joining...' : 'Join Group →'}
             </button>
@@ -377,12 +384,12 @@ function JoinScreen({
 /* ── Bingo Tile ──────────────────────────────────────────────────────────────── */
 
 function BingoTile({
-  task, status, chained, review, isInBingoLine, display, onClick,
+  task, status, chained, review, isInBingoLine, display, autoContrast, onClick,
 }: {
   review?: ReviewFlag
   // chained: a card whose prerequisite this team has not finished — still
   // tappable, but greyed with a padlock.
-  task: BingoTask; status: TileStatus; chained: boolean; isInBingoLine: boolean; display: TileDisplay; onClick: () => void
+  task: BingoTask; status: TileStatus; chained: boolean; isInBingoLine: boolean; display: TileDisplay; autoContrast?: boolean; onClick: () => void
 }) {
   return (
     <button
@@ -441,7 +448,7 @@ function BingoTile({
         <div className="absolute top-1 right-1 z-10 w-2 h-2 rounded-full border-2 border-white/80" />
       )}
       {/* Icon or words — whichever this board is set to in the admin */}
-      <TileFace task={task} display={display} size="sm" />
+      <TileFace task={task} display={display} size="sm" autoContrast={autoContrast} />
     </button>
   )
 }
@@ -558,8 +565,10 @@ function BoardScreen({
   boardNote,
   boardNoteEvery,
   tileDisplay,
+  theme,
   onLeave,
 }: {
+  theme: PlayerTheme
   team: { id: string; name: string }
   sectionName: string
   sectionSlug: string
@@ -678,15 +687,15 @@ function BoardScreen({
   }, [popupLetters])
 
   return (
-    <div className="min-h-screen bg-gray-950 relative overflow-x-hidden">
-      <ParticleBackground />
+    <div className={`min-h-screen bg-gray-950 relative overflow-x-hidden ${theme === 'grab' ? 'grab-ui' : ''}`}>
+      <PlayerBackdrop theme={theme} />
 
       {popupLetters && <BingoPopup letters={popupLetters} onDismiss={() => setPopupLetters(null)} />}
 
       <header className="relative z-10 px-4 pt-5 pb-3">
         <div className="max-w-md mx-auto flex items-start justify-between gap-3">
           <div>
-            <p className="text-teal-400 text-[10px] font-black uppercase tracking-widest">Bingo Dash &middot; {sectionName}</p>
+            <p className="text-teal-400 text-[10px] font-black uppercase tracking-widest" style={theme === 'grab' ? { color: '#7CF0A8' } : undefined}>{theme === 'grab' ? 'Grab Game Day' : 'Bingo Dash'} &middot; {sectionName}</p>
             <h1 translate="no" className="text-white text-xl font-black tracking-tight leading-tight">{team.name}</h1>
             <div className="flex items-center gap-2 mt-0.5">
               <span className="text-green-400 text-xs font-bold">{completedCount}/{gridTasks.length} completed</span>
@@ -752,7 +761,7 @@ function BoardScreen({
               className="h-full rounded-full transition-all duration-700"
               style={{
                 width: gridTasks.length ? `${(completedCount / gridTasks.length) * 100}%` : '0%',
-                background: 'linear-gradient(90deg, #a855f7, #ec4899)',
+                background: theme === 'grab' ? `linear-gradient(90deg, ${GRAB_GREEN}, #7CF0A8)` : 'linear-gradient(90deg, #a855f7, #ec4899)',
               }}
             />
           </div>
@@ -779,6 +788,7 @@ function BoardScreen({
                     review={reviews[task.id]}
                     isInBingoLine={bingoSlots.has(i)}
                     display={tileDisplay}
+                    autoContrast={theme === 'grab'}
                     onClick={() => navigate(`/bingo-dash/task/${task.id}${task.placement_id ? `?box=${task.placement_id}` : ''}`)}
                   />
                 ) : (
@@ -1165,6 +1175,7 @@ export function BingoDashJoin() {
   }
 
   const timeUpOverlay = <TimeUpAlarm settings={section} />
+  const theme = normalizePlayerTheme(section?.player_theme)
 
   if (pageState === 'loading') {
     return (
@@ -1200,7 +1211,7 @@ export function BingoDashJoin() {
     return (
       <>
         <JoinScreen
-          sectionName={section.name} groups={groups} memberCounts={memberCounts} onJoinGroup={joinGroup} isObserver={isObserver}
+          theme={theme} sectionName={section.name} groups={groups} memberCounts={memberCounts} onJoinGroup={joinGroup} isObserver={isObserver}
           invite={(() => {
             const t = inviteTeamId ? groups.find(g => g.id === inviteTeamId) : null
             return t && /^\d{4}$/.test(invitePw) ? { team: t, password: invitePw } : null
@@ -1216,7 +1227,7 @@ export function BingoDashJoin() {
       return (
         <>
           <div className="min-h-screen bg-gray-950 flex flex-col items-center justify-center relative overflow-hidden px-4">
-            <ParticleBackground />
+            <PlayerBackdrop theme={theme} />
             <div className="relative z-10 text-center animate-slide-up">
               <div className="text-6xl mb-5">⏳</div>
               <h1 className="text-4xl font-black text-white tracking-tight mb-2">Game Not Started Yet</h1>
@@ -1257,6 +1268,7 @@ export function BingoDashJoin() {
           boardNote={section.board_note ?? ''}
           boardNoteEvery={section.board_note_every ?? 0}
           tileDisplay={normalizeTileDisplay(section.tile_display)}
+          theme={theme}
           onLeave={leaveTeam}
         />
         {/* Another team can challenge us at any moment — the banner has to reach

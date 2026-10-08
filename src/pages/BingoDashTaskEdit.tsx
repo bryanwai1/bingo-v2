@@ -1,4 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { AnswerBlocksEditor } from '../components/AnswerBlocksEditor'
+import { CardPasscodeBox } from '../components/CardPasscodeBox'
+import { revertBoardCopy } from '../lib/boardCopy'
+import { parseAnswerBlocks, blocksFromLegacy, isBlockComplete, type AnswerBlock } from '../lib/answerBlocks'
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useBingoTaskPages } from '../hooks/useBingoTaskPages'
@@ -96,7 +100,7 @@ export function BingoDashTaskEdit() {
   // Card details row (category / points / type) — the fields the old inline
   // create form collected, now editable here.
   const [categoryRows, setCategoryRows] = useState<{ name: string; sort_order: number }[]>([])
-  const [siblingCards, setSiblingCards] = useState<Pick<BingoTask, 'id' | 'title' | 'category' | 'color' | 'hex_code'>[]>([])
+  const [siblingCards, setSiblingCards] = useState<Pick<BingoTask, 'id' | 'title' | 'category' | 'color' | 'hex_code' | 'bonus_full_minutes' | 'bonus_timer_minutes'>[]>([])
   const [pointsValue, setPointsValue] = useState('0')
   const [editingTitle, setEditingTitle] = useState(false)
   const [titleValue, setTitleValue] = useState('')
@@ -127,13 +131,21 @@ export function BingoDashTaskEdit() {
     setTaskType(type as typeof taskType)
     const patch: Partial<BingoTask> = { task_type: type as BingoTask['task_type'], completion_inputs: next }
     // Dropping the typed answer clears the question with it.
-    if (!next.answer) { patch.answer_question = null; patch.answer_text = null; patch.answer_min = null }
+    if (!next.answer) { patch.answer_question = null; patch.answer_text = null; patch.answer_min = null; patch.answer_blocks = null }
     stage(patch)
   }
-  const [answerQuestion, setAnswerQuestion] = useState('')
-  const [answerText, setAnswerText] = useState('')
-  // Number answer with a floor; '' = normal letter-box answer.
-  const [answerMin, setAnswerMin] = useState('')
+  // Typed-answer questions. An older single-question card opens as blocks.
+  const [answerBlocks, setAnswerBlocks] = useState<AnswerBlock[]>([])
+  // A board's own copy of a library card: which box it fills, so it can go back to the library card.
+  const [copyBox, setCopyBox] = useState<{ id: string; boardName: string } | null>(null)
+  const [reverting, setReverting] = useState(false)
+  const [placedCount, setPlacedCount] = useState<number | null>(null)
+  const taskIdForPlacements = task?.id
+  useEffect(() => {
+    if (!taskIdForPlacements) return
+    supabase.from('bingo_board_cards').select('id', { count: 'exact', head: true }).eq('task_id', taskIdForPlacements)
+      .then(({ count }) => setPlacedCount(count ?? 0))
+  }, [taskIdForPlacements])
   const [completionWarning, setCompletionWarning] = useState('')
   // Chained cards: which card on this board has to be completed first.
   const [prereqId, setPrereqId] = useState<string>('')
@@ -155,6 +167,14 @@ export function BingoDashTaskEdit() {
     supabase.from('bingo_tasks').select('*').eq('id', taskId).single().then(({ data }) => {
       if (data) {
         setTask(data)
+        if (data.is_board_copy) {
+          supabase.from('bingo_board_cards').select('id, section_id').eq('task_id', data.id).limit(1).maybeSingle()
+            .then(async ({ data: pl }) => {
+              if (!pl) return
+              const { data: sec } = await supabase.from('bingo_sections').select('name').eq('id', pl.section_id).maybeSingle()
+              setCopyBox({ id: pl.id, boardName: sec?.name ?? 'this board' })
+            })
+        }
         setTitleValue(isNew ? '' : data.title)
         if (isNew) setEditingTitle(true)
         setPointsValue(String(data.points ?? 0))
@@ -164,13 +184,12 @@ export function BingoDashTaskEdit() {
           .then(({ data: rows }) => setCategoryRows((rows ?? []) as { name: string; sort_order: number }[]))
         setTaskType((data.task_type ?? 'standard') as 'standard' | 'answer' | 'photo' | 'video' | 'media')
         setInputs(effectiveInputs(data.task_type, data.completion_inputs))
-        setAnswerQuestion(data.answer_question ?? '')
-        setAnswerText(data.answer_text ?? '')
-        setAnswerMin(data.answer_min != null ? String(data.answer_min) : '')
+        const saved = parseAnswerBlocks(data.answer_blocks)
+        setAnswerBlocks(saved.length > 0 ? saved : blocksFromLegacy(data.answer_question, data.answer_text, data.answer_min))
         setCompletionWarning(data.completion_warning ?? '')
         setPrereqId(data.prerequisite_task_id ?? '')
         setMapsUrl(data.maps_url ?? '')
-        supabase.from('bingo_tasks').select('id, title, category, color, hex_code').eq('section_id', data.section_id).neq('id', data.id).order('title')
+        supabase.from('bingo_tasks').select('id, title, category, color, hex_code, bonus_full_minutes, bonus_timer_minutes').eq('section_id', data.section_id).neq('id', data.id).order('title')
           .then(({ data: rows }) => {
             const list = (rows ?? []) as typeof siblingCards
             setSiblingCards(list)
@@ -224,6 +243,9 @@ export function BingoDashTaskEdit() {
       category: name,
       hex_code: sibling?.hex_code ?? '#3B82F6',
       color: sibling?.color?.trim() || name || 'Blue',
+      // the bonus timer is a category setting too
+      bonus_full_minutes: sibling?.bonus_full_minutes ?? null,
+      bonus_timer_minutes: sibling?.bonus_timer_minutes ?? null,
     })
   }
 
@@ -295,17 +317,17 @@ export function BingoDashTaskEdit() {
 
   const handleAnswerSave = async () => {
     if (!task) return
-    const cleanedAnswerText = answerText.split('\n').map(l => l.trim()).filter(Boolean).join('\n')
     // Gated on the answer INPUT, not the legacy task_type: a photo + answer
-    // card is typed 'photo' and still has a question to keep.
-    const min = answerMin.trim() === '' ? null : Math.max(0, Math.round(Number(answerMin)))
+    // card is typed 'photo' and still has questions to keep. Blocks the server
+    // cannot check (no answer / no minimum) are dropped, and the legacy
+    // single-question columns are cleared so blocks are the one source of truth.
+    const blocks = inputs.answer ? answerBlocks.filter(isBlockComplete).map(b => ({ ...b, question: b.question.trim(), answer: b.kind === 'text' ? b.answer.trim() : '', min: b.kind === 'number' ? b.min : null })) : []
+    if (blocks.length !== answerBlocks.length) setAnswerBlocks(blocks)
     const payload = {
       task_type: taskType,
-      answer_question: inputs.answer ? answerQuestion.trim() || null : null,
-      answer_min: inputs.answer && min != null && Number.isFinite(min) ? min : null,
-      answer_text: inputs.answer && min == null ? cleanedAnswerText || null : null,
+      answer_blocks: blocks.length > 0 ? blocks : null,
+      answer_question: null, answer_min: null, answer_text: null,
     }
-    setAnswerText(cleanedAnswerText)
     stage(payload)
   }
 
@@ -363,6 +385,29 @@ export function BingoDashTaskEdit() {
   // The owner account has full write access (bingo_can_write / is_bingo_owner
   // allows it in RLS), so it edits any card in the shared library directly.
   const isMineTask = isOwner || (task.owner_id ?? null) === workingOwnerValue
+  // Shared library cards are edited by the platform owner only. Anyone else can edit a card
+  // nobody has placed yet (their own draft) and a board's own copy of a card.
+  const canEditCard = isOwner || !!task.is_board_copy || (placedCount ?? 0) === 0
+  if (isMineTask && !canEditCard) {
+    return (
+      <div className="min-h-screen bg-gray-950 flex items-center justify-center px-6">
+        <div className="max-w-md w-full bg-gray-900 border border-white/10 rounded-2xl p-8 text-center">
+          <p className="text-3xl mb-3">🔒</p>
+          <h1 className="text-white font-black text-xl mb-2">Library card, read only</h1>
+          <p className="text-gray-400 text-sm mb-6">
+            "{task.title}" is a shared library card, so only the owner can change it. To change it for your
+            board, open the card from your board: that gives your board its own copy to edit.
+          </p>
+          <button
+            onClick={() => navigate(backPath)}
+            className="px-5 py-2.5 bg-violet-600 text-white rounded-lg text-sm font-bold hover:bg-violet-700 transition-colors"
+          >
+            ← Back to admin
+          </button>
+        </div>
+      </div>
+    )
+  }
   if (!isMineTask) {
     return (
       <div className="min-h-screen bg-gray-950 flex items-center justify-center px-6">
@@ -636,6 +681,32 @@ export function BingoDashTaskEdit() {
           </div>
         )}
 
+        {task.is_board_copy && (
+          <div className="mb-6 rounded-xl border border-teal-400/50 bg-teal-50 px-5 py-4 flex flex-wrap items-center gap-3">
+            <div className="flex-1 min-w-[16rem]">
+              <p className="text-sm font-bold text-teal-800">Board copy{copyBox ? ` for ${copyBox.boardName}` : ''}</p>
+              <p className="text-xs text-teal-700 mt-0.5">
+                Everything you change here applies to this board only. The Card Library and other boards are not affected.
+              </p>
+            </div>
+            {copyBox && (
+              <button
+                disabled={reverting}
+                onClick={async () => {
+                  if (!window.confirm('Go back to the library card? This board loses its own changes to this card. Teams\' progress is kept.')) return
+                  setReverting(true)
+                  try { await revertBoardCopy(copyBox.id); navigate(backPath) }
+                  catch (err) { alert(err instanceof Error ? err.message : 'Could not reset the card.') }
+                  finally { setReverting(false) }
+                }}
+                className="px-4 py-2 rounded-lg border border-teal-500 text-teal-800 text-sm font-bold hover:bg-teal-100 disabled:opacity-50"
+              >
+                {reverting ? 'Resetting…' : 'Reset to library card'}
+              </button>
+            )}
+          </div>
+        )}
+
         {/* Card details: category / points / type */}
         <div className="mb-6 bg-white border border-gray-200 rounded-xl p-5">
           <div className="flex flex-col md:flex-row gap-4">
@@ -885,64 +956,13 @@ export function BingoDashTaskEdit() {
             {inputs.answer && (
               <>
                 <p className="mb-4 text-xs text-gray-500 rounded-lg bg-gray-50 border border-gray-200 px-3 py-2 leading-relaxed">
-                  <span className="font-bold text-gray-700">Three ways a Text input can work:</span>{' '}
-                  save <span className="font-semibold">answers</span> below and the team fills letter boxes that check themselves;
-                  set a <span className="font-semibold">minimum number</span> and one number is checked on the spot;
-                  or leave both empty and the team writes <span className="font-semibold">free text</span> that goes to you to approve, like a photo.
+                  <span className="font-bold text-gray-700">Questions the team answers.</span>{' '}
+                  Each block is a <span className="font-semibold">question</span> with either a
+                  <span className="font-semibold"> text answer</span> or a <span className="font-semibold">minimum number</span>.
+                  The card passes when every question is right. Add none and the team writes free text that goes to you to approve, like a photo.
                 </p>
-                <div className="mb-5">
-                  <label className="block text-sm font-semibold text-gray-700 mb-1.5">Question / Prompt</label>
-                  <input
-                    type="text"
-                    value={answerQuestion}
-                    onChange={e => setAnswerQuestion(e.target.value)}
-                    placeholder="e.g. Guess the word from the images!"
-                    className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-violet-500"
-                  />
-                </div>
-
-                <div className="mb-5">
-                  <label className="block text-sm font-semibold text-gray-700 mb-1.5">Minimum number (auto-pass)</label>
-                  <input
-                    type="number" min={0} value={answerMin}
-                    onChange={e => setAnswerMin(e.target.value)}
-                    placeholder="e.g. 18000 - leave empty for a text answer"
-                    className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-violet-500"
-                  />
-                  <p className="text-xs text-gray-400 mt-1">
-                    Set this and the participant types one number; the server passes it when it is at least this value. The answers below are then ignored.
-                  </p>
-                </div>
-
-                <div className={`mb-5${answerMin.trim() ? ' opacity-40 pointer-events-none' : ''}`}>
-                  <label className="block text-sm font-semibold text-gray-700 mb-1.5">Answers (one per line)</label>
-                  <textarea
-                    value={answerText}
-                    onChange={e => setAnswerText(e.target.value)}
-                    placeholder={"APPLE\nBANANA\nCHERRY"}
-                    rows={4}
-                    className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-violet-500"
-                  />
-                  <p className="text-xs text-gray-400 mt-1">Each line becomes a separate text input for the participant.</p>
-                </div>
-
-                {/* Live preview */}
-                {answerText.trim() && (
-                  <div className="mb-5 p-4 rounded-xl border border-dashed border-gray-300 bg-gray-50">
-                    <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">Preview</p>
-                    {answerQuestion && <p className="text-sm font-bold text-gray-700 mb-3 text-center">{answerQuestion}</p>}
-                    <div className="flex flex-col gap-2">
-                      {answerText.trim().split('\n').filter(Boolean).map((line, i) => (
-                        <div key={i} className="flex items-center gap-2">
-                          <span className="text-xs text-gray-400 w-5 text-right">{i + 1}.</span>
-                          <div className="flex-1 px-3 py-2 bg-white border border-gray-200 rounded-lg text-sm text-gray-300 font-mono tracking-widest">
-                            {line.toUpperCase()}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
+                <AnswerBlocksEditor blocks={answerBlocks} onChange={setAnswerBlocks} />
+                <CardPasscodeBox taskId={task.id} />
               </>
             )}
 

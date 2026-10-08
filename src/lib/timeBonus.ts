@@ -14,6 +14,13 @@ import type { BingoScan } from '../types/database'
 export const DEFAULT_BONUS_FULL_MIN = 10
 export const DEFAULT_BONUS_TIMER_MIN = 25
 export const MAX_BONUS_PCT = 150
+
+/** One-click starting points for a bonus window, in minutes. */
+export const BONUS_PRESETS = [
+  { label: 'Quick', full: 5, timer: 15, hint: 'Short stations' },
+  { label: 'Standard', full: DEFAULT_BONUS_FULL_MIN, timer: DEFAULT_BONUS_TIMER_MIN, hint: 'The default' },
+  { label: 'Relaxed', full: 15, timer: 40, hint: 'Longer stations' },
+] as const
 const BASE_PCT = 100
 /** Landmarks between full and timer: 140, 130, 120, 110 (the glide hits each exactly). */
 const LANDMARKS = 5

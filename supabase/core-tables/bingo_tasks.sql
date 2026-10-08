@@ -39,6 +39,8 @@ create table public.bingo_tasks (
   -- (tracked) core-tables/042_answer_min.sql — number answer that passes
   -- when value >= answer_min (checked by check_answer_min).
   answer_min          integer,
+  -- (tracked) core-tables/20261006_answer_blocks.sql — several typed questions per card.
+  answer_blocks       jsonb,
 
   -- (tracked) media-photos/20260421_bingo_features.sql, misc-small-tweaks/20260428_bingo_tasks_maps_label.sql
   maps_url            text,

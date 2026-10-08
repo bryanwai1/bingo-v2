@@ -22,6 +22,8 @@ import { InstructionPage } from '../components/InstructionPage'
 import { PageNavigator } from '../components/PageNavigator'
 import { SwipeablePages } from '../components/SwipeablePages'
 import { ParticleBackground } from '../components/ParticleBackground'
+import { PlayerBackdrop } from '../components/PlayerBackdrop'
+import { normalizePlayerTheme, GRAB_GREEN, type PlayerTheme } from '../lib/playerThemes'
 import { TileFace } from '../components/BingoTileFace'
 import { SpeedEditTargets } from '../components/SpeedEditTargets'
 import { SampleTreeApp } from '../components/SampleTreeApp'
@@ -231,11 +233,14 @@ function DemoBar({
 
 // The picked group is held by the projector (not here) so a group chosen on the
 // paired phone lands on the same "Enter Password" step as a click on screen.
-function JoinScreen({ selected, onSelect, onJoin }: {
+function JoinScreen({ selected, onSelect, onJoin, theme }: {
+  theme: PlayerTheme
   selected: string | null
   onSelect: (groupName: string | null) => void
   onJoin: (groupName: string) => void
 }) {
+  const grab = theme === 'grab'
+  const accent = grab ? GRAB_GREEN : '#a855f7'
   const step = selected ? 2 : 1
   const [search, setSearch] = useState('')
   const [password, setPassword] = useState('')
@@ -262,12 +267,22 @@ function JoinScreen({ selected, onSelect, onJoin }: {
 
   return (
     <div className="min-h-[80vh] bg-gray-950 flex flex-col items-center justify-center relative overflow-hidden px-4 py-8">
-      <ParticleBackground />
+      <PlayerBackdrop theme={theme} />
 
       <div className="relative z-10 text-center mb-8 animate-slide-up">
-        <div className="text-6xl mb-4">🎯</div>
-        <h1 className="text-5xl font-black text-white tracking-tight">BINGO DASH</h1>
-        <p className="text-gray-400 mt-3 text-lg">Complete challenges · Scan tiles · Win</p>
+        {grab ? (
+          <>
+            <p className="text-xs font-black uppercase tracking-[0.35em]" style={{ color: '#7CF0A8' }}>Grab</p>
+            <h1 className="text-5xl font-black text-white tracking-tight mt-1 [text-shadow:0_2px_16px_rgba(0,0,0,0.6)]">GAME DAY BINGO</h1>
+            <p className="text-white/80 mt-3 text-lg [text-shadow:0_1px_8px_rgba(0,0,0,0.6)]">Complete challenges · Scan tiles · Win</p>
+          </>
+        ) : (
+          <>
+            <div className="text-6xl mb-4">🎯</div>
+            <h1 className="text-5xl font-black text-white tracking-tight">BINGO DASH</h1>
+            <p className="text-gray-400 mt-3 text-lg">Complete challenges · Scan tiles · Win</p>
+          </>
+        )}
       </div>
 
       {step === 1 && (
@@ -284,7 +299,7 @@ function JoinScreen({ selected, onSelect, onJoin }: {
             onChange={e => setSearch(e.target.value)}
             placeholder="Search groups..."
             className="w-full px-4 py-3 rounded-2xl border-2 text-base font-medium text-gray-900 focus:outline-none transition-colors text-center mb-3"
-            style={{ borderColor: search ? '#a855f7' : '#e5e7eb' }}
+            style={{ borderColor: search ? accent : '#e5e7eb' }}
           />
 
           <div className="flex flex-col gap-2 max-h-[50vh] overflow-y-auto overscroll-contain pr-1">
@@ -341,7 +356,7 @@ function JoinScreen({ selected, onSelect, onJoin }: {
                  text-white the pre-filled password rendered white-on-white -
                  present in the DOM, invisible to the room. */
               className="w-full px-5 py-4 rounded-2xl border-2 text-4xl font-black text-gray-900 focus:outline-none transition-colors text-center tracking-[0.6em]"
-              style={{ borderColor: password.length === 4 ? '#a855f7' : '#e5e7eb' }}
+              style={{ borderColor: password.length === 4 ? accent : '#e5e7eb' }}
               maxLength={4}
             />
 
@@ -362,7 +377,7 @@ function JoinScreen({ selected, onSelect, onJoin }: {
               type="submit"
               disabled={password.length !== 4}
               className="w-full py-4 rounded-2xl text-white font-black text-xl transition-all duration-200 disabled:opacity-40 hover:scale-105 active:scale-95 mt-1"
-              style={{ backgroundColor: '#a855f7', boxShadow: '0 8px 24px #a855f744' }}
+              style={{ backgroundColor: accent, boxShadow: `0 8px 24px ${accent}44` }}
             >
               Join Group →
             </button>
@@ -376,8 +391,9 @@ function JoinScreen({ selected, onSelect, onJoin }: {
 // ── Bingo Tile ────────────────────────────────────────────────────────────────
 
 function BingoTile({
-  task, status, chained, isInBingoLine, display, glowing, onClick,
+  task, status, chained, isInBingoLine, display, glowing, autoContrast, onClick,
 }: {
+  autoContrast?: boolean
   task: BingoTask
   status: TileStatus
   /** A chained card whose prerequisite this demo team has not finished —
@@ -449,7 +465,7 @@ function BingoTile({
       )}
 
       {/* Icon or words — whichever this board is set to in the admin */}
-      <TileFace task={task} display={display} />
+      <TileFace task={task} display={display} autoContrast={autoContrast} />
 
       {/* Points chip — top-left corner, clear of the title and the top-right scanned ring */}
       {(task.points ?? 0) > 0 && (
@@ -612,6 +628,7 @@ const BoardScreen = forwardRef<BoardScreenHandle, {
   const boardNote = section?.board_note ?? ''
   const boardNoteEvery = section?.board_note_every ?? 0
   const tileDisplay = normalizeTileDisplay(section?.tile_display)
+  const theme = normalizePlayerTheme(section?.player_theme)
 
   // Which cube face this player is looking at — matches the real player view
   // (Front/Right/Back/Left/Top/Bottom); a one-face board never shows the tabs.
@@ -702,15 +719,15 @@ const BoardScreen = forwardRef<BoardScreenHandle, {
   useEffect(() => { onChatChange?.(chatOpen) }, [onChatChange, chatOpen])
 
   return (
-    <div className="min-h-[80vh] bg-gray-950 relative overflow-x-hidden">
-      <ParticleBackground />
+    <div className={`min-h-[80vh] bg-gray-950 relative overflow-x-hidden ${theme === 'grab' ? 'grab-ui' : ''}`}>
+      <PlayerBackdrop theme={theme} />
 
       {popupLetters && <BingoPopup letters={popupLetters} onDismiss={closePopup} />}
 
       <header className="relative z-10 px-4 pt-5 pb-3">
         <div className="board-col flex items-start justify-between gap-3">
           <div>
-            <p className="text-purple-400 text-[10px] font-black uppercase tracking-widest">Bingo Dash</p>
+            <p className="text-purple-400 text-[10px] font-black uppercase tracking-widest" style={theme === 'grab' ? { color: '#7CF0A8' } : undefined}>{theme === 'grab' ? 'Grab Game Day' : 'Bingo Dash'}</p>
             <h1 className="text-white text-xl font-black tracking-tight leading-tight">{teamName}</h1>
             <div className="flex items-center gap-2 mt-0.5">
               <span className="text-green-400 text-xs font-bold">{completedCount}/{visibleTasks.length} completed</span>
@@ -790,7 +807,7 @@ const BoardScreen = forwardRef<BoardScreenHandle, {
               className="h-full rounded-full transition-all duration-700"
               style={{
                 width: gridTasks.length ? `${(completedCount / gridTasks.length) * 100}%` : '0%',
-                background: 'linear-gradient(90deg, #a855f7, #ec4899)',
+                background: theme === 'grab' ? `linear-gradient(90deg, ${GRAB_GREEN}, #7CF0A8)` : 'linear-gradient(90deg, #a855f7, #ec4899)',
               }}
             />
           </div>
@@ -843,6 +860,7 @@ const BoardScreen = forwardRef<BoardScreenHandle, {
                     chained={isChainLocked(task)}
                     isInBingoLine={bingoSlots.has(i)}
                     display={tileDisplay}
+                    autoContrast={theme === 'grab'}
                     glowing={glowSlots.has(i)}
                     onClick={() => {
                       if (glowMode) onToggleGlow(i)
@@ -2350,6 +2368,7 @@ function SampleProjector() {
         />
       ) : !teamName ? (
         <JoinScreen
+          theme={normalizePlayerTheme(selectedSection?.player_theme)}
           selected={pendingGroup}
           onSelect={setPendingGroup}
           onJoin={name => { setTeamName(name); setPendingGroup(null) }}
@@ -2927,7 +2946,7 @@ function SampleController({ code, readOnly = false }: { code: string; readOnly?:
             /* Mirrors the group list and, once the presenter picks one, the
                "Enter Password" step - JoinScreen derives that from `selected`
                and pre-fills the demo password exactly as on the big screen. */
-            <JoinScreen selected={pendingGroup} onSelect={() => {}} onJoin={() => {}} />
+            <JoinScreen theme={normalizePlayerTheme(watchSection?.player_theme)} selected={pendingGroup} onSelect={() => {}} onJoin={() => {}} />
           ) : gridTasks.length > 0 ? (
             /* Wait for the tasks before mounting the board. BoardScreen seeds
                its "already celebrated" baseline on its first run, so mounting

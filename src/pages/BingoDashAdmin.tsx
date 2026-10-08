@@ -8,9 +8,13 @@ import { CategoryIcon } from '../components/BingoTileFace'
 import { useBingoAuth } from '../hooks/useBingoAuth'
 import type { BingoTask, BingoTeam, BingoScan, BingoSettings, BingoSection, BingoCategory, BingoChallengeSection, BingoMember, BingoPhotoSubmission, BingoBoardCard, BingoDuel, BonusItem } from '../types/database'
 import { BINGO_LINES, buildBingoSlots, completedBingoLines, scoreWithBingoLines } from '../lib/bingoLines'
-import { boxPoints, resolveBonusWindow, DEFAULT_BONUS_FULL_MIN, DEFAULT_BONUS_TIMER_MIN } from '../lib/timeBonus'
+import { boxPoints, resolveBonusWindow, BONUS_PRESETS, DEFAULT_BONUS_FULL_MIN, DEFAULT_BONUS_TIMER_MIN } from '../lib/timeBonus'
 import { TileFace } from '../components/BingoTileFace'
 import { SCOREBOARD_THEMES, getScoreboardTheme } from '../lib/scoreboardThemes'
+import { PLAYER_THEMES, normalizePlayerTheme } from '../lib/playerThemes'
+import { TileIconPicker } from '../components/TileIconPicker'
+import { BonusTimerPreview } from '../components/BonusTimerPreview'
+import { ensureBoardCopy } from '../lib/boardCopy'
 import { Menu, MenuItem, MenuDivider } from '../components/AdminHeader'
 import { AdminSection } from '../components/AdminSection'
 import { AdminSidebar, type AdminView } from '../components/AdminSidebar'
@@ -214,6 +218,12 @@ function BoardTile({
         <div className="absolute inset-0 a-surface/30 z-30 rounded-lg pointer-events-none" />
       )}
 
+      {task.is_board_copy && (
+        <span className="absolute bottom-0.5 left-0.5 z-10 pointer-events-none text-[7px] bg-black/60 a-text rounded px-1 py-px leading-tight font-bold" title="This board has its own copy of this card">
+          COPY
+        </span>
+      )}
+
       {/* Category badge */}
       {task.category && (
         <div className="absolute top-0.5 left-0.5 right-0.5 z-10 pointer-events-none">
@@ -280,9 +290,25 @@ function BoardTile({
  * no undo. They also seeded themselves from `group.tasks[0]`, presenting the
  * first card's value as if it were the whole group's.
  */
-function BulkApplyPanel({ group, onApply }: {
+/** The bonus window to preview: what was typed, else what the cards share, else the default. */
+function previewWindow(bFull: string, bTimer: string, uFull?: number | null, uTimer?: number | null) {
+  const m = (v: string) => { const x = parseFloat(v); return Number.isFinite(x) ? Math.min(600, Math.max(1, x)) : undefined }
+  const full = m(bFull) ?? uFull ?? DEFAULT_BONUS_FULL_MIN
+  const timer = Math.max(full, m(bTimer) ?? uTimer ?? DEFAULT_BONUS_TIMER_MIN)
+  return { full, timer }
+}
+/** What "Apply to all" can change on every card of a category. undefined = leave alone; a bonus of null = board default. */
+type BulkPatch = { hex?: string; points?: number; bonusFull?: number | null; bonusTimer?: number | null }
+type BulkColumns = { hex_code?: string; points?: number; bonus_full_minutes?: number | null; bonus_timer_minutes?: number | null }
+
+function BulkApplyPanel({ group, onApply, iconKey, onIcon, scope = 'library' }: {
+  /** 'board': the cards listed are this board's own placements (each gets its own copy first). */
+  scope?: 'library' | 'board'
   group: { label: string; key: string; tasks: BingoTask[] }
-  onApply: (tasks: BingoTask[], patch: { hex?: string; points?: number }) => void | Promise<void>
+  onApply: (tasks: BingoTask[], patch: BulkPatch) => void | Promise<void>
+  /** The category's fallback icon (null = chosen from the category name). */
+  iconKey: string | null
+  onIcon: (key: string | null) => void | Promise<void>
 }) {
   const [open, setOpen] = useState(false)
   const n = group.tasks.length
@@ -298,66 +324,206 @@ function BulkApplyPanel({ group, onApply }: {
   const counts = new Map<string, number>()
   for (const t of group.tasks) if (t.hex_code) counts.set(t.hex_code, (counts.get(t.hex_code) ?? 0) + 1)
   const startHex = uniformHex ?? [...counts].sort((x, y) => y[1] - x[1])[0]?.[0] ?? '#3B82F6'
+  const fullSet = new Set(group.tasks.map(t => t.bonus_full_minutes ?? null))
+  const timerSet = new Set(group.tasks.map(t => t.bonus_timer_minutes ?? null))
+  const uniformFull = fullSet.size === 1 ? [...fullSet][0] : undefined
+  const uniformTimer = timerSet.size === 1 ? [...timerSet][0] : undefined
 
   const [hex, setHex] = useState<string>(startHex)
-  const [pts, setPts] = useState<string>(uniformPoints !== null ? String(uniformPoints) : '')
+  const [pts, setPts] = useState('')
+  // Bonus timer: blank leaves each card as it is; "board default" clears them.
+  const [bFull, setBFull] = useState('')
+  const [bTimer, setBTimer] = useState('')
+  const [bReset, setBReset] = useState(false)
+  const [replay, setReplay] = useState(0)
+  const [icon, setIcon] = useState<string | null>(iconKey)
+  const [iconChanged, setIconChanged] = useState(false)
+  const [showIcons, setShowIcons] = useState(false)
+  const [busy, setBusy] = useState(false)
 
-  if (!open) {
-    return (
-      <button
-        onClick={() => {
-          setHex(startHex)
-          setPts(uniformPoints !== null ? String(uniformPoints) : '')
-          setOpen(true)
-        }}
-        title={`Set colour or points for all ${n} ${group.label} card${n === 1 ? '' : 's'} at once`}
-        className="flex-shrink-0 px-2.5 py-1 rounded-lg border a-border a-surface-2 a-text-2 text-[11px] font-bold hover:a-surface transition-colors"
-      >
-        Apply to all {n}
-      </button>
-    )
+  const openDialog = () => {
+    setHex(startHex)
+    setPts(uniformPoints !== null ? String(uniformPoints) : '')
+    setBFull(uniformFull != null ? String(uniformFull) : '')
+    setBTimer(uniformTimer != null ? String(uniformTimer) : '')
+    setBReset(false)
+    setReplay(r => r + 1)
+    setIcon(iconKey); setIconChanged(false); setShowIcons(false)
+    setOpen(true)
   }
+  const close = () => { if (!busy) setOpen(false) }
+
+  const trigger = (
+    <button
+      onClick={openDialog}
+      title={`Change colour, points, bonus timer or icon for all ${n} ${group.label} card${n === 1 ? '' : 's'} at once`}
+      className="flex-shrink-0 px-2.5 py-1 rounded-lg border a-border a-surface-2 a-text-2 text-[11px] font-bold hover:a-surface transition-colors"
+    >
+      {scope === 'board' ? <>Apply to all {n} on this board</> : <>Apply to all {n}</>}
+    </button>
+  )
+  if (!open) return trigger
 
   const ptsNum = pts.trim() === '' ? null : Math.max(0, parseFloat(pts) || 0)
+  const mins = (v: string) => {
+    const x = parseFloat(v)
+    return Number.isFinite(x) ? Math.min(600, Math.max(1, x)) : undefined
+  }
+  const canIcon = group.key !== '__none__' && scope !== 'board'
+  const input = 'px-2.5 py-1.5 text-sm border a-border a-surface a-text rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500'
+
+  const apply = async () => {
+    setBusy(true)
+    try {
+      // A force apply: the colour shown always goes to every card, so the
+      // group can be re-synced even when nothing was edited.
+      const patch: BulkPatch = { hex }
+      if (ptsNum !== null) patch.points = ptsNum
+      if (bReset) { patch.bonusFull = null; patch.bonusTimer = null }
+      else {
+        const f = mins(bFull), t = mins(bTimer)
+        if (f !== undefined) patch.bonusFull = f
+        if (t !== undefined) patch.bonusTimer = t
+      }
+      await onApply(group.tasks, patch)
+      if (canIcon && iconChanged) await onIcon(icon)
+      setOpen(false)
+    } finally { setBusy(false) }
+  }
+
+  const row = (label: string, hint: string | null, body: React.ReactNode) => (
+    <div className="flex items-start gap-4 py-3 border-t a-border first:border-t-0">
+      <div className="w-28 flex-shrink-0 pt-1.5">
+        <p className="text-sm font-bold a-text">{label}</p>
+        {hint && <p className="text-[11px] a-text-3 leading-snug mt-0.5">{hint}</p>}
+      </div>
+      <div className="flex-1 min-w-0">{body}</div>
+    </div>
+  )
 
   return (
-    <div className="flex-shrink-0 flex items-center gap-2 flex-wrap a-surface-2 border a-border rounded-xl px-2.5 py-1.5">
-      <span className="text-[11px] a-text-3 font-bold uppercase tracking-wider">All {n}</span>
+    <>
+      {trigger}
+      <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 px-4" onClick={close}>
+        <div className="a-surface rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto animate-bounce-in"
+          role="dialog" aria-label={`Apply to all ${group.label} cards`} onClick={e => e.stopPropagation()}
+          onKeyDown={e => { if (e.key === 'Escape') close() }}>
+          <div className="px-6 py-4 border-b a-border flex items-center justify-between">
+            <div>
+              <h3 className="text-lg font-bold a-text">{group.label}</h3>
+              <p className="text-xs a-text-3 mt-0.5">
+                {scope === 'board'
+                  ? `Applies to the ${n} card${n === 1 ? '' : 's'} on this board only. The Card Library and other boards are not affected.`
+                  : `Applies to all ${n} library card${n === 1 ? '' : 's'} in this category. Boards that already have their own copy keep their values.`}
+              </p>
+            </div>
+            <button onClick={close} className="a-text-2 hover:a-text text-2xl font-light" aria-label="Close">&times;</button>
+          </div>
 
-      <input type="color" value={hex}
-        onChange={e => setHex(e.target.value)}
-        className="w-7 h-7 rounded cursor-pointer border a-border"
-        title="Colour to apply" />
-      <input type="text" value={hex}
-        onChange={e => setHex(e.target.value)}
-        placeholder={uniformHex ? undefined : 'Mixed'}
-        className="w-[5.5rem] px-1.5 py-0.5 text-xs border a-border a-surface a-text rounded font-mono focus:outline-none focus:ring-1 focus:ring-teal-500"
-        title="Exact hex code to apply" />
+          <div className="px-6 py-2">
+            {row('Colour', null, (
+              <div className="flex items-center gap-2">
+                <input type="color" value={hex} onChange={e => setHex(e.target.value)}
+                  className="w-10 h-9 rounded cursor-pointer border a-border" title="Colour to apply" />
+                <input type="text" value={hex} onChange={e => setHex(e.target.value)}
+                  placeholder={uniformHex ? undefined : 'Mixed'}
+                  className={`${input} w-28 font-mono`} title="Exact hex code to apply" />
+              </div>
+            ))}
 
-      <input type="number" min={0} step="0.1" value={pts}
-        onChange={e => setPts(e.target.value)}
-        placeholder={uniformPoints !== null ? String(uniformPoints) : 'Mixed'}
-        className="w-16 px-1.5 py-0.5 text-xs border a-border a-surface a-text rounded text-center font-bold focus:outline-none focus:ring-1 focus:ring-teal-500"
-        title="Points to apply" />
-      <span className="text-[11px] a-text-3">pts</span>
+            {row('Points', 'Per card', (
+              <input type="number" min={0} step="0.1" value={pts} onChange={e => setPts(e.target.value)}
+                placeholder={uniformPoints !== null ? String(uniformPoints) : 'Mixed'}
+                className={`${input} w-28 text-center font-bold`} />
+            ))}
 
-      <button
-        onClick={async () => {
-          // A force apply: the colour shown always goes to every card, so the
-          // group can be re-synced even when nothing was edited.
-          const patch: { hex?: string; points?: number } = { hex }
-          if (ptsNum !== null) patch.points = ptsNum
-          await onApply(group.tasks, patch)
-          setOpen(false)
-        }}
-        disabled={!/^#[0-9a-fA-F]{6}$/.test(hex)}
-        className="px-3 py-1 rounded-lg bg-teal-600 text-white text-[11px] font-black disabled:opacity-40"
-      >
-        Apply to {n} card{n === 1 ? '' : 's'}
-      </button>
-      <button onClick={() => setOpen(false)}
-        className="px-2 py-1 a-text-3 text-[11px] font-bold hover:a-text">Cancel</button>
-    </div>
+            {row('Bonus timer', 'Rewards teams that finish a card quickly', (
+              <div>
+                {/* One-click starting points, so nobody has to guess a sensible window. */}
+                <div className={`flex flex-wrap gap-1.5 mb-3 ${bReset ? 'opacity-40 pointer-events-none' : ''}`}>
+                  {BONUS_PRESETS.map(({ label, full: f, timer: t, hint }) => (
+                    <button key={label} type="button" title={hint}
+                      onClick={() => { setBFull(String(f)); setBTimer(String(t)); setBReset(false); setReplay(r => r + 1) }}
+                      className={`px-2.5 py-1 rounded-full border text-[11px] font-bold transition-colors ${
+                        Number(bFull) === f && Number(bTimer) === t
+                          ? 'bg-teal-600 border-teal-600 text-white' : 'a-border a-surface-2 a-text-2 hover:border-teal-500'}`}>
+                      {label} <span className="font-normal opacity-80">{f}→{t} min</span>
+                    </button>
+                  ))}
+                </div>
+
+                <div className={`flex items-end gap-2 flex-wrap ${bReset ? 'opacity-40' : ''}`}>
+                  <label className="block">
+                    <span className="block text-[10px] font-black uppercase tracking-wider a-text-3 mb-1">Full bonus until</span>
+                    <input type="number" min={1} max={600} step={0.5} value={bFull} disabled={bReset}
+                      onChange={e => setBFull(e.target.value)}
+                      placeholder={uniformFull === undefined ? 'Mixed' : 'default'}
+                      className={`${input} w-24 text-center font-bold`} />
+                  </label>
+                  <label className="block">
+                    <span className="block text-[10px] font-black uppercase tracking-wider a-text-3 mb-1">Bonus ends at</span>
+                    <input type="number" min={1} max={600} step={0.5} value={bTimer} disabled={bReset}
+                      onChange={e => setBTimer(e.target.value)}
+                      placeholder={uniformTimer === undefined ? 'Mixed' : 'default'}
+                      className={`${input} w-24 text-center font-bold`} />
+                  </label>
+                  <span className="text-sm a-text-3 pb-2">min</span>
+                </div>
+
+                <label className="flex items-center gap-2 mt-2 text-xs a-text-2 cursor-pointer">
+                  <input type="checkbox" checked={bReset} onChange={e => setBReset(e.target.checked)} />
+                  Use the board default instead
+                </label>
+
+                {bReset ? (
+                  <p className="text-xs a-text-3 mt-3">These cards will follow the timer set in Board settings.</p>
+                ) : (() => {
+                  const { full, timer } = previewWindow(bFull, bTimer, uniformFull, uniformTimer)
+                  return (
+                    <>
+                      <BonusTimerPreview key={replay} full={full} timer={timer} base={ptsNum ?? uniformPoints ?? 100} />
+                      {mins(bTimer) !== undefined && mins(bFull) !== undefined && mins(bTimer)! < mins(bFull)! && (
+                        <p className="text-xs text-amber-600 font-bold mt-2">"Bonus ends at" must be later than "Full bonus until".</p>
+                      )}
+                    </>
+                  )
+                })()}
+              </div>
+            ))}
+
+            {canIcon && row('Icon', 'Fallback for cards with no icon of their own', (
+              <div>
+                <button type="button" onClick={() => setShowIcons(v => !v)} aria-expanded={showIcons}
+                  className="w-full flex items-center gap-3 px-3 py-2 rounded-lg border a-border hover:border-teal-500 transition-colors text-left">
+                  <span className="w-9 h-9 rounded-lg flex items-center justify-center text-white flex-shrink-0" style={{ backgroundColor: hex }}>
+                    <CategoryIcon category={group.label} iconKey={icon} className="w-5 h-5" />
+                  </span>
+                  <span className="flex-1 text-sm a-text-3">{icon ? 'Custom icon' : 'Auto (from the category name)'}</span>
+                  <span className="text-xs font-bold text-teal-600">{showIcons ? 'Hide' : 'Change'}</span>
+                </button>
+                {showIcons && (
+                  <div className="mt-3">
+                    <TileIconPicker compact value={icon} category={group.label} color={hex}
+                      onChange={key => { setIcon(key); setIconChanged(true); setShowIcons(false) }} />
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+
+          <div className="px-6 py-4 border-t a-border flex gap-3">
+            <button onClick={() => void apply()} disabled={busy || !/^#[0-9a-fA-F]{6}$/.test(hex)}
+              className="flex-1 py-2.5 bg-teal-600 text-white rounded-xl font-bold hover:bg-teal-700 disabled:opacity-50 transition-colors">
+              {busy ? 'Applying…' : `Apply to ${n} card${n === 1 ? '' : 's'}`}
+            </button>
+            <button onClick={close} disabled={busy}
+              className="px-5 py-2.5 a-surface-2 a-text-3 rounded-xl font-bold hover:a-surface transition-colors">
+              Cancel
+            </button>
+          </div>
+        </div>
+      </div>
+    </>
   )
 }
 
@@ -368,6 +534,7 @@ function CategoryGroupBlock({
   boardCountByTask,
   navigate,
   saveCategoryInline, applyBulkToCategory, setTaskPoints,
+  categoryIconFor, onCategoryIcon, boardBulk, canEditLibrary, canEditTask,
   renameCategoryByLabel,
   setQrTask, copyLink, duplicateTask, openTileEdit, deleteTask,
 }: {
@@ -382,7 +549,14 @@ function CategoryGroupBlock({
   boardCountByTask: Map<string, number>
   navigate: (path: string) => void
   saveCategoryInline: (taskId: string, cat: string) => void
-  applyBulkToCategory: (tasks: BingoTask[], patch: { hex?: string; points?: number }) => void | Promise<void>
+  applyBulkToCategory: (tasks: BingoTask[], patch: BulkPatch) => void | Promise<void>
+  categoryIconFor: (tasks: BingoTask[]) => string | null
+  onCategoryIcon: (tasks: BingoTask[], label: string, key: string | null) => void
+  /** Board tab: Apply to all acts on the cards placed on this board (each gets its own copy). */
+  boardBulk?: { tasks: BingoTask[]; apply: (tasks: BingoTask[], patch: BulkPatch) => void | Promise<void> }
+  /** Only the platform owner changes shared library cards. */
+  canEditLibrary: boolean
+  canEditTask: (t: BingoTask) => boolean
   setTaskPoints: (id: string, pts: number) => void
   renameCategoryByLabel: (label: string, newName: string) => void
   setQrTask: (t: BingoTask) => void
@@ -422,7 +596,15 @@ function CategoryGroupBlock({
         )}
         <span className="text-xs a-text-3 font-medium">{group.tasks.length}</span>
         <div className="flex-1 h-px a-surface/10" />
-        <BulkApplyPanel group={group} onApply={applyBulkToCategory} />
+        {boardBulk
+          ? (boardBulk.tasks.length > 0 && (
+              <BulkApplyPanel scope="board" group={{ ...group, tasks: boardBulk.tasks }} onApply={boardBulk.apply}
+                iconKey={null} onIcon={() => undefined} />
+            ))
+          : (canEditLibrary && (
+              <BulkApplyPanel group={group} onApply={applyBulkToCategory}
+                iconKey={categoryIconFor(group.tasks)} onIcon={k => onCategoryIcon(group.tasks, group.label, k)} />
+            ))}
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
@@ -446,6 +628,7 @@ function CategoryGroupBlock({
                 <select
                   autoFocus
                   defaultValue={task.category || ''}
+                  disabled={!canEditTask(task)}
                   onChange={e => saveCategoryInline(task.id, e.target.value)}
                   onBlur={() => setEditingCategoryId(null)}
                   className="w-full a-surface-2 a-text text-xs px-2 py-1 rounded border a-border focus:outline-none mt-2"
@@ -475,6 +658,7 @@ function CategoryGroupBlock({
                     defaultValue={task.points ?? 0}
                     key={task.id + '-pts-' + (task.points ?? 0)}
                     className="w-10 bg-transparent text-white text-[10px] font-black text-center focus:outline-none"
+                    disabled={!canEditTask(task)}
                     onBlur={e => setTaskPoints(task.id, Math.max(0, parseFloat(e.target.value) || 0))}
                     onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
                     title="Edit points for this card"
@@ -507,12 +691,12 @@ function CategoryGroupBlock({
                 title="Duplicate this card in this section">
                 ⎘ Copy
               </button>
-              <button onClick={() => openTileEdit(task)}
+              <button hidden={!canEditTask(task)} onClick={() => openTileEdit(task)}
                 className="px-3 py-1.5 a-surface-2 border a-border rounded-lg a-text text-xs font-bold hover:a-surface transition-colors"
                 title="Quick edit — title, category and points">
                 Quick edit
               </button>
-              <button onClick={() => deleteTask(task.id, task.title)}
+              <button hidden={!canEditTask(task)} onClick={() => deleteTask(task.id, task.title)}
                 className="px-3 py-1.5 bg-red-500/10 border border-red-500/30 rounded-lg text-red-600 text-xs font-bold hover:bg-red-500/20 transition-colors">
                 Delete
               </button>
@@ -697,6 +881,9 @@ export function BingoDashAdmin() {
 
   // Tile editor modal
   const [editingTile, setEditingTile] = useState<BingoTask | null>(null)
+  // Quick-edit icon: the card's own board icon (null = follow the category), picker hidden until asked for.
+  const [tileIcon, setTileIcon] = useState<string | null>(null)
+  const [showIconPicker, setShowIconPicker] = useState(false)
   const [tileTitle, setTileTitle] = useState('')
   const [tileHex, setTileHex] = useState('#3B82F6')
   const [tileCategory, setTileCategory] = useState('')
@@ -907,7 +1094,25 @@ export function BingoDashAdmin() {
   )
   // Which board is "live for players" from this account's point of view.
   const activeBoardPointer = isOwner ? (settings?.active_section_id ?? null) : myActiveBoard
-  const scopedTasks = currentSectionId ? tasks.filter(t => t.section_id === currentSectionId) : []
+  // The shared library is edited by the owner on the board named "Default" - nowhere else.
+  // On any other board, a card's edits go to that board's own copy.
+  const onDefaultBoard = (sections.find(s => s.id === currentSectionId)?.name ?? '').trim().toLowerCase() === 'default'
+  const canEditLibrary = isOwner && onDefaultBoard
+  // A board's own copies of cards (is_board_copy) live in `tasks` so its grid can read them,
+  // but they are never part of the Card Library. Outside the Default board a library card
+  // shows this board's copy of it when there is one, so the list matches what the board uses.
+  const libraryTasks = useMemo(() => {
+    const copies = new Map<string, BingoTask>()
+    if (!canEditLibrary) {
+      for (const t of tasks) if (t.is_board_copy && t.cloned_from && t.section_id === currentSectionId) copies.set(t.cloned_from, t)
+    }
+    return tasks.filter(t => !t.is_board_copy).map(t => {
+      const c = copies.get(t.id)
+      return c ? { ...t, title: c.title, color: c.color, hex_code: c.hex_code, points: c.points, category: c.category,
+        tile_icon: c.tile_icon, bonus_full_minutes: c.bonus_full_minutes, bonus_timer_minutes: c.bonus_timer_minutes } : t
+    })
+  }, [tasks, currentSectionId, canEditLibrary])
+  const scopedTasks = currentSectionId ? libraryTasks.filter(t => t.section_id === currentSectionId) : []
   const scopedTeams = currentSectionId
     ? teams.filter(t => t.section_id === currentSectionId).sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }))
     : []
@@ -964,6 +1169,18 @@ export function BingoDashAdmin() {
     return m
   }, [boardCards])
 
+  // The board's own placement of a card (its copy once forked), or the placement it was listed under.
+  const placementOf = (t: BingoTask): PlacedCard | undefined =>
+    (t as Partial<PlacedCard>).placementId ? (t as PlacedCard) : gridTasks.find(p => p.id === t.id || p.cloned_from === t.id)
+  // Shared (library) cards: only the owner on the Default board. Anyone else can still build a card
+  // nobody has placed yet. A card listed from a board (it has a placement) is that board's, not the library's.
+  const canChangeShared = (t: BingoTask) =>
+    !(t as Partial<PlacedCard>).placementId && (
+      canEditLibrary || (!isOwner && isMineRow(t.owner_id) && !t.is_board_copy && (boardCountByTask.get(t.id) ?? 0) === 0))
+  // A card on a board can always be edited: the edit goes to that board's own copy.
+  const canEditTask = (t: BingoTask) => canChangeShared(t) || !!placementOf(t)
+  const canEditTaskOnBoard = canEditTask
+
   // Sparse 25-slot layout: each placed task sits at slot = sort_order (0-24).
   // Any legacy placement whose slot is out of range or colliding is placed in
   // the next available slot so existing data migrates gracefully.
@@ -1007,8 +1224,11 @@ export function BingoDashAdmin() {
     if (myBoards.length === 0) return              // still loading
     if (!myBoards.some(b => b.id === libraryCompartmentFilter)) {
       setLibraryCompartmentFilter('all')
+    } else if (currentSectionId && libraryCompartmentFilter !== currentSectionId) {
+      // The library only offers the shared library and the board you are on.
+      setLibraryCompartmentFilter(currentSectionId)
     }
-  }, [libraryCompartmentFilter, myBoards])
+  }, [libraryCompartmentFilter, myBoards, currentSectionId])
 
   const libraryWriteSectionId = libraryCompartmentFilter !== 'all'
     ? libraryCompartmentFilter
@@ -1032,7 +1252,7 @@ export function BingoDashAdmin() {
   // otherwise the oldest (the original).
   const addListTasks = (() => {
     const search = addListSearch.trim().toLowerCase()
-    let list = tasks.slice()
+    let list = libraryTasks.slice()
     if (addListSectionFilter === 'current') list = list.filter(t => t.section_id === currentSectionId)
     else if (addListSectionFilter !== 'all') list = list.filter(t => t.section_id === addListSectionFilter)
     else {
@@ -1059,7 +1279,7 @@ export function BingoDashAdmin() {
   })()
 
   const addListCategories = (() => {
-    let base = tasks.slice()
+    let base = libraryTasks.slice()
     if (addListSectionFilter === 'current') base = base.filter(t => t.section_id === currentSectionId)
     else if (addListSectionFilter !== 'all') base = base.filter(t => t.section_id === addListSectionFilter)
     return [...new Set(base.map(t => t.category).filter(Boolean))].sort() as string[]
@@ -1158,7 +1378,7 @@ export function BingoDashAdmin() {
     // still reads every card, since that is the catalogue.
     const groups = mineSections.map(section => {
       const sectionTasks = libraryCompartmentFilter === 'all'
-        ? tasks.filter(t => t.section_id === section.id && isMineRow(t.owner_id))
+        ? libraryTasks.filter(t => t.section_id === section.id && isMineRow(t.owner_id))
         : boardTasksForSection(section.id)
       return { section: { id: section.id, name: section.name, foreign: false }, categories: byCategory(sectionTasks), totalTasks: sectionTasks.length }
     })
@@ -1167,7 +1387,7 @@ export function BingoDashAdmin() {
 
     if (isOwner) {
       const byAccount = new Map<string, BingoTask[]>()
-      for (const t of tasks) {
+      for (const t of libraryTasks) {
         if (!t.owner_id) continue
         if (!byAccount.has(t.owner_id)) byAccount.set(t.owner_id, [])
         byAccount.get(t.owner_id)!.push(t)
@@ -1237,7 +1457,7 @@ export function BingoDashAdmin() {
       // nothing — they keep the single flat catalogue.
       if (isOwner) {
         return [{
-          section: { id: LIBRARY_ALL_ID, name: 'Complete Library', foreign: false },
+          section: { id: LIBRARY_ALL_ID, name: 'Shared Library (Full)', foreign: false },
           categories: byCategory(flat),
           totalTasks: flat.length,
         }]
@@ -1269,7 +1489,7 @@ export function BingoDashAdmin() {
     }
 
     return groups
-  }, [tasks, myBoards, libraryCompartmentFilter, boardTasksForSection, isOwner, isMineRow, myOwnerValue, sections, accountEmails])
+  }, [libraryTasks, myBoards, libraryCompartmentFilter, boardTasksForSection, isOwner, isMineRow, myOwnerValue, sections, accountEmails])
 
   // Every category present in the current library view, for the filter dropdown.
   // Declared-but-empty categories are included too: a category created via
@@ -1920,6 +2140,7 @@ export function BingoDashAdmin() {
       points: task.points, in_grid: false,
       task_type: task.task_type,
       answer_question: task.answer_question, answer_text: task.answer_text,
+      answer_min: task.answer_min ?? null, answer_blocks: task.answer_blocks ?? null, tile_icon: task.tile_icon ?? null,
       completion_warning: task.completion_warning, require_marshal: task.require_marshal,
       maps_url: task.maps_url, maps_label: task.maps_label,
       // Contending settings travel with the card — a copied contest card that
@@ -2031,21 +2252,31 @@ export function BingoDashAdmin() {
     setTileHex(task.hex_code)
     setTileCategory(task.category || '')
     setTilePoints(String(task.points ?? 0))
+    setTileIcon(task.tile_icon ?? null)
+    setShowIconPicker(false)
   }
 
   // The Move modal only edits title / category / points; type, colour and
   // section live in the full card editor.
+  const tilePlacementId = (editingTile as Partial<PlacedCard> | null)?.placementId ?? null
   const saveTile = async () => {
     if (!editingTile || !tileTitle.trim()) return
     setTileSaving(true)
     try {
+      // Opened from a tile on a board: write to this board's own copy of the card.
+      // Opened from the library or the card gallery: write to the shared card.
+      let targetId = editingTile.id
+      if (tilePlacementId) targetId = await ensureBoardCopy(tilePlacementId)
       const updates: Partial<BingoTask> = {
         title: tileTitle.trim(),
         category: tileCategory.trim(),
         points: roundPoints(Math.max(0, parseFloat(tilePoints) || 0)),
+        tile_icon: tileIcon,
       }
-      await supabase.from('bingo_tasks').update(updates).eq('id', editingTile.id)
-      setTasks(prev => prev.map(t => t.id === editingTile.id ? { ...t, ...updates } : t))
+      const { error: upErr } = await supabase.from('bingo_tasks').update(updates).eq('id', targetId)
+      if (upErr) throw upErr
+      if (tilePlacementId) await fetchAll()
+      else setTasks(prev => prev.map(t => t.id === editingTile.id ? { ...t, ...updates } : t))
       setEditingTile(null)
     } catch (err) {
       notify('Could not save: ' + (err instanceof Error ? err.message : 'Unknown error'), 'error')
@@ -2106,21 +2337,26 @@ export function BingoDashAdmin() {
   // the toast can offer a real undo.
   const applyBulkToCategory = useCallback(async (
     tasksInGroup: BingoTask[],
-    patch: { hex?: string; points?: number },
+    patch: BulkPatch,
   ) => {
     const ids = tasksInGroup.map(t => t.id)
     if (ids.length === 0) return
-    const next: { hex_code?: string; points?: number } = {}
+    const next: BulkColumns = {}
     if (patch.hex !== undefined) next.hex_code = patch.hex
     if (patch.points !== undefined) next.points = roundPoints(patch.points)
+    // null = back to the board default
+    if (patch.bonusFull !== undefined) next.bonus_full_minutes = patch.bonusFull
+    if (patch.bonusTimer !== undefined) next.bonus_timer_minutes = patch.bonusTimer
     if (Object.keys(next).length === 0) return
 
     // Snapshot BEFORE the optimistic update, and only the fields being changed
-    // — restoring a field we never touched could clobber a concurrent edit.
+    // - restoring a field we never touched could clobber a concurrent edit.
     const before = tasksInGroup.map(t => ({
       id: t.id,
       hex_code: t.hex_code,
       points: t.points ?? 0,
+      bonus_full_minutes: t.bonus_full_minutes ?? null,
+      bonus_timer_minutes: t.bonus_timer_minutes ?? null,
     }))
 
     const idSet = new Set(ids)
@@ -2133,11 +2369,13 @@ export function BingoDashAdmin() {
       run: async () => {
         // Cards in a group can have had different values, so restore by
         // distinct previous value rather than one blanket update.
-        const buckets = new Map<string, { patch: { hex_code?: string; points?: number }; ids: string[] }>()
+        const buckets = new Map<string, { patch: BulkColumns; ids: string[] }>()
         for (const b of before) {
-          const restore: { hex_code?: string; points?: number } = {}
+          const restore: BulkColumns = {}
           if (patch.hex !== undefined) restore.hex_code = b.hex_code
           if (patch.points !== undefined) restore.points = b.points
+          if (patch.bonusFull !== undefined) restore.bonus_full_minutes = b.bonus_full_minutes
+          if (patch.bonusTimer !== undefined) restore.bonus_timer_minutes = b.bonus_timer_minutes
           const key = JSON.stringify(restore)
           const bucket = buckets.get(key) ?? { patch: restore, ids: [] }
           bucket.ids.push(b.id)
@@ -2154,6 +2392,100 @@ export function BingoDashAdmin() {
       },
     })
   }, [roundPoints, notify])
+
+  // The icon a whole category falls back to when a card has none of its own.
+  const categoryIconOf = (sectionId: string | null | undefined, name: string | null | undefined): string | null =>
+    categories.find(c => c.section_id === sectionId && c.name === (name ?? '').trim())?.tile_icon ?? null
+  const saveCategoryIcon = async (sectionId: string, name: string, key: string | null) => {
+    const row = categories.find(c => c.section_id === sectionId && c.name === name)
+    if (row) {
+      setCategories(prev => prev.map(c => c.id === row.id ? { ...c, tile_icon: key } : c))
+      const { error } = await supabase.from('bingo_categories').update({ tile_icon: key }).eq('id', row.id)
+      if (error) {
+        setCategories(prev => prev.map(c => c.id === row.id ? { ...c, tile_icon: row.tile_icon ?? null } : c))
+        notify('Could not save the category icon: ' + error.message, 'error')
+      }
+      return
+    }
+    // A category that only exists as text on cards has no row yet: make one.
+    const maxOrder = categories.filter(c => c.section_id === sectionId).reduce((m, c) => Math.max(m, c.sort_order), -1)
+    const { data, error } = await supabase.from('bingo_categories')
+      .insert({ section_id: sectionId, name, sort_order: maxOrder + 1, tile_icon: key }).select().single()
+    if (error || !data) { notify('Could not save the category icon: ' + (error?.message ?? 'unknown'), 'error'); return }
+    setCategories(prev => [...prev, data as BingoCategory])
+  }
+
+  // Board-tab versions of the edits above: for a card placed on this board they change this
+  // board's own copy; anything else is a shared card and edits it directly.
+  const applyBulkToBoardCards = async (placed: BingoTask[], patch: BulkPatch) => {
+    try {
+      const copies: BingoTask[] = []
+      for (const t of placed) {
+        const placementId = (t as PlacedCard).placementId
+        copies.push({ ...t, id: placementId ? await ensureBoardCopy(placementId) : t.id })
+      }
+      await applyBulkToCategory(copies, patch)
+      await fetchAll()
+    } catch (err) {
+      notify('Could not apply: ' + (err instanceof Error ? err.message : 'Unknown error'), 'error')
+    }
+  }
+  const boardEditPlaced = async (pl: PlacedCard, patch: Partial<BingoTask>) => {
+    try {
+      const copyId = await ensureBoardCopy(pl.placementId)
+      const { error } = await supabase.from('bingo_tasks').update(patch).eq('id', copyId)
+      if (error) throw error
+      await fetchAll()
+    } catch (err) {
+      notify('Could not save: ' + (err instanceof Error ? err.message : 'Unknown error'), 'error')
+    }
+  }
+  const boardEdit = async (taskId: string, patch: Partial<BingoTask>, fallback: () => void | Promise<void>) => {
+    const placement = gridTasks.find(p => p.id === taskId)
+    if (!placement) { await fallback(); return }
+    await boardEditPlaced(placement, patch)
+  }
+  const openPlacedCard = async (pl: PlacedCard, from: string) => {
+    try {
+      const copyId = await ensureBoardCopy(pl.placementId)
+      await fetchAll()
+      navigate(`/bingo-dash/admin/task/${copyId}?from=${from}&box=${pl.placementId}`)
+    } catch (err) {
+      notify('Could not open the card: ' + (err instanceof Error ? err.message : 'Unknown error'), 'error')
+    }
+  }
+  const boardNavigate = async (path: string) => {
+    const m = /^\/bingo-dash\/admin\/task\/([^?]+)\?from=board$/.exec(path)
+    const placement = m ? gridTasks.find(p => p.id === m[1]) : undefined
+    if (!placement) { navigate(path); return }
+    await openPlacedCard(placement, 'board')
+  }
+  // Cards-tab versions: the owner on the Default board edits the shared card; everywhere else the board's own copy.
+  const inBoardMode = (t: BingoTask) => !canEditLibrary || !!(t as Partial<PlacedCard>).placementId
+  const libSaveCategory = (t: BingoTask, cat: string) => {
+    const pl = placementOf(t)
+    if (pl && inBoardMode(t)) return boardEditPlaced(pl, { category: cat.trim() })
+    if (canChangeShared(t)) return saveCategoryInline(t.id, cat)
+  }
+  const libSetPoints = (t: BingoTask, pts: number) => {
+    const pl = placementOf(t)
+    if (pl && inBoardMode(t)) return boardEditPlaced(pl, { points: roundPoints(pts) })
+    if (canChangeShared(t)) return setTaskPoints(t.id, pts)
+  }
+  const libQuickEdit = (t: BingoTask) => {
+    const pl = placementOf(t)
+    if (pl && inBoardMode(t)) openTileEdit(pl)
+    else if (canChangeShared(t)) openTileEdit(t)
+  }
+  const libOpenCard = (t: BingoTask) => {
+    const pl = placementOf(t)
+    if (pl && (activeTab === 'board' || inBoardMode(t))) void openPlacedCard(pl, activeTab)
+    else if (canChangeShared(t)) openCardForEdit(t.id, activeTab)
+  }
+  const boardSetTaskPoints = (taskId: string, pointsRaw: number) =>
+    boardEdit(taskId, { points: roundPoints(pointsRaw) }, () => setTaskPoints(taskId, pointsRaw))
+  const boardSaveCategoryInline = (taskId: string, categoryName: string) =>
+    boardEdit(taskId, { category: categoryName.trim() }, () => saveCategoryInline(taskId, categoryName))
 
   const setTaskPoints = async (taskId: string, pointsRaw: number) => {
     const points = roundPoints(pointsRaw)
@@ -2181,6 +2513,8 @@ export function BingoDashAdmin() {
         title: formTitle.trim(), color: colorName, hex_code: hex,
         category: formCategory.trim(), sort_order: nextOrder, points: formPoints,
         task_type: formTaskType,
+        bonus_full_minutes: sibling?.bonus_full_minutes ?? null,
+        bonus_timer_minutes: sibling?.bonus_timer_minutes ?? null,
       })
       setFormTitle(''); setFormCategory(''); setFormPoints(0)
       setFormTaskType('standard')
@@ -2725,7 +3059,7 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
             className="fixed z-[61] w-44 rounded-xl border a-border p-1.5 flex flex-col gap-0.5"
             style={{ top: cardMenuPos.top, right: cardMenuPos.right, background: 'var(--a-surface)', boxShadow: 'var(--a-shadow-1)' }}
           >
-            <div className="flex items-center gap-1 px-2 py-1.5">
+            <div hidden={!canChangeShared(task)} className="flex items-center gap-1 px-2 py-1.5">
               <span className="text-[10px] font-black uppercase tracking-wider a-text-3 mr-1">Light</span>
               <button onClick={() => { setLed(task.id, null); setCardMenuId(null) }}
                 title="Off" aria-label="Light off"
@@ -2738,7 +3072,7 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                            outlineOffset: 1 }} />
               ))}
             </div>
-            <button role="menuitem" onClick={() => { setCardMenuId(null); openCardForEdit(task.id, activeTab) }}
+            <button role="menuitem" hidden={!canEditTask(task)} onClick={() => { setCardMenuId(null); libOpenCard(task) }}
               className="text-left px-2 py-1.5 rounded-lg text-xs font-bold a-text hover:a-surface-2">✎ Edit</button>
             <button role="menuitem" onClick={() => { setCardMenuId(null); setQrTask(task) }}
               className="text-left px-2 py-1.5 rounded-lg text-xs font-bold a-text hover:a-surface-2">▦ QR code</button>
@@ -2748,9 +3082,9 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
             </button>
             <button role="menuitem" onClick={() => { setCardMenuId(null); duplicateTask(task) }}
               className="text-left px-2 py-1.5 rounded-lg text-xs font-bold a-text hover:a-surface-2">⎘ Duplicate</button>
-            <button role="menuitem" onClick={() => { setCardMenuId(null); openTileEdit(task) }}
+            <button role="menuitem" hidden={!canEditTask(task)} onClick={() => { setCardMenuId(null); libQuickEdit(task) }}
               className="text-left px-2 py-1.5 rounded-lg text-xs font-bold a-text hover:a-surface-2">✐ Quick edit</button>
-            <button role="menuitem" onClick={() => { setCardMenuId(null); deleteTask(task.id, task.title) }}
+            <button role="menuitem" hidden={!canChangeShared(task)} onClick={() => { setCardMenuId(null); deleteTask(task.id, task.title) }}
               className="text-left px-2 py-1.5 rounded-lg text-xs font-bold text-red-400 hover:a-surface-2">🗑 Delete</button>
           </div>
         </>
@@ -3479,9 +3813,9 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
               onClick={() => setLibraryCompartmentFilter('all')}
               className={`px-3 py-1.5 rounded-full text-xs font-bold transition-colors ${libraryCompartmentFilter === 'all' ? 'a-surface a-text' : 'a-surface-2 a-text-3 hover:a-surface-2'}`}
             >
-              Complete Library ({sharedLibraryCount})
+              Shared Library (Full) ({sharedLibraryCount})
             </button>
-            {myBoards.map(s => (
+            {myBoards.filter(s => s.id === currentSectionId).map(s => (
               <button
                 key={s.id}
                 onClick={() => setLibraryCompartmentFilter(s.id)}
@@ -3523,9 +3857,16 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
               compartment lists only the cards PLACED on that board — so a card
               you just created is invisible under its own chip until you place
               it. */}
+          {!canEditLibrary && (
+            <div className="mb-3 rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-2.5 text-xs a-text-2">
+              🔒 The shared library is read only on this board.{' '}
+              {isOwner ? 'To change the shared cards, switch to the “Default” board.' : 'Only the owner can change it.'}{' '}
+              Changes you make to a card that is on this board stay on this board.
+            </div>
+          )}
           <p className="a-text-3 text-[11px] font-bold mb-3">
             {libraryCompartmentFilter === 'all'
-              ? 'Every card you own, plus cards shared with you. Placing one copies it onto the current board.'
+              ? 'The full shared library. Add a card to a board to use it; each board then edits its own copy.'
               : `Cards placed on ${myBoards.find(b => b.id === libraryCompartmentFilter)?.name ?? 'this board'} — ${boardTasksForSection(libraryCompartmentFilter).length} of 25. Cards you own but have not placed here live in Complete Library.`}
           </p>
 
@@ -3564,7 +3905,7 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                   <p>Nothing placed on this board yet.</p>
                   <button onClick={() => setLibraryCompartmentFilter('all')}
                     className="mt-2 px-3 py-1.5 rounded-lg border a-border a-surface-2 text-xs font-bold hover:a-surface">
-                    Cards you own but haven’t placed here are in Complete Library →
+                    Cards you own but haven’t placed here are in Shared Library (Full) →
                   </button>
                 </>
               )}
@@ -3676,7 +4017,7 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                         <p className="a-text-2 text-sm">Nothing placed on this board yet.</p>
                         <button onClick={() => setLibraryCompartmentFilter('all')}
                           className="mt-2 px-3 py-1.5 rounded-lg border a-border a-surface-2 text-xs font-bold hover:a-surface">
-                          Cards you own but haven’t placed here are in Complete Library →
+                          Cards you own but haven’t placed here are in Shared Library (Full) →
                         </button>
                       </div>
                     ) : (
@@ -3707,7 +4048,19 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                             <h3 className="text-xs font-black a-text-2 uppercase tracking-widest">{group.label}</h3>
                             <span className="text-xs a-text-2 font-medium">{group.tasks.length}</span>
                             <div className="flex-1 h-px a-surface-2" />
-                              <BulkApplyPanel group={group} onApply={applyBulkToCategory} />
+                              {canEditLibrary && libraryCompartmentFilter === 'all'
+                                ? (
+                                <BulkApplyPanel group={group} onApply={applyBulkToCategory}
+                                iconKey={categoryIconOf(group.tasks[0]?.section_id, group.label)}
+                                onIcon={k => { const sid = group.tasks[0]?.section_id; if (sid) void saveCategoryIcon(sid, group.label, k) }} />
+                                )
+                                : (() => {
+                                    const placed = group.tasks.map(placementOf).filter((x): x is PlacedCard => !!x)
+                                    return placed.length > 0 ? (
+                                      <BulkApplyPanel scope="board" group={{ ...group, tasks: placed }} onApply={applyBulkToBoardCards}
+                                        iconKey={null} onIcon={() => undefined} />
+                                    ) : null
+                                  })()}
                           </div>
 
                           {/* Cards grid */}
@@ -3791,7 +4144,8 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                                     <select
                                       autoFocus
                                       defaultValue={task.category || ''}
-                                      onChange={e => saveCategoryInline(task.id, e.target.value)}
+                                      disabled={!canEditTask(task)}
+                  onChange={e => libSaveCategory(task, e.target.value)}
                                       onBlur={() => setEditingCategoryId(null)}
                                       className="w-full bg-black/20 text-white text-xs px-2 py-1 rounded border border-white/30 focus:outline-none focus:border-white/60 mt-2"
                                     >
@@ -3824,7 +4178,8 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                                           defaultValue={task.points ?? 0}
                                           key={task.id + '-pts-' + (task.points ?? 0)}
                                           className="w-10 bg-transparent a-text text-[10px] font-black text-center focus:outline-none"
-                                          onBlur={e => setTaskPoints(task.id, Math.max(0, parseFloat(e.target.value) || 0))}
+                                          disabled={!canEditTask(task)}
+                    onBlur={e => libSetPoints(task, Math.max(0, parseFloat(e.target.value) || 0))}
                                           onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
                                           title="Edit points for this card"
                                         />
@@ -3851,6 +4206,7 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                                   </p>
                                   {(!section.foreign || isOwner) && (
                                     <button
+                                      disabled={!canChangeShared(task)}
                                       onClick={async () => {
                                         const newVal = !task.require_marshal
                                         setTasks(prev => prev.map(t => t.id === task.id ? { ...t, require_marshal: newVal } : t))
@@ -3882,62 +4238,11 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                                             : `${c.total} puzzle${c.total === 1 ? '' : 's'}${missing > 0 ? ` · ${missing} missing an image` : ' · all have images'}`}
                                         </p>
                                         <button
-                                          onClick={() => openCardForEdit(task.id, activeTab)}
+                                          onClick={() => libOpenCard(task)}
                                           className="mt-1.5 w-full py-1.5 rounded-lg text-[11px] font-bold a-chip-btn transition-colors"
                                         >
                                           Edit puzzles →
                                         </button>
-                                      </div>
-                                    )
-                                  })()}
-
-                                  {/* ── Bonus timer ─────────────────────────
-                                      Every card pays up to 150% for a fast
-                                      finish. Blank fields follow the board
-                                      default (Board settings → Bonus Timer). */}
-                                  {(!section.foreign || isOwner) && (() => {
-                                    const w = resolveBonusWindow(task, currentBoard)
-                                    const own = task.bonus_full_minutes != null || task.bonus_timer_minutes != null
-                                    const save = async (patch: Partial<BingoTask>) => {
-                                      setTasks(prev => prev.map(t => t.id === task.id ? { ...t, ...patch } : t))
-                                      const { error } = await supabase.from('bingo_tasks').update(patch).eq('id', task.id)
-                                      if (error) alert('Timer not saved: ' + error.message)
-                                    }
-                                    const input = (label: string, key: 'bonus_full_minutes' | 'bonus_timer_minutes', shown: number) => (
-                                      <label className="block">
-                                        <span className="block a-text-3 text-[10px] font-black uppercase tracking-wider mb-1">{label}</span>
-                                        <input
-                                          type="number" min={1} max={600} step={0.5}
-                                          defaultValue={task[key] ?? ''}
-                                          placeholder={String(shown)}
-                                          key={`${task.id}-${key}-${task[key] ?? 'def'}`}
-                                          onBlur={e => {
-                                            const raw = parseFloat(e.target.value)
-                                            const v = Number.isFinite(raw) ? Math.min(600, Math.max(1, raw)) : null
-                                            if (v !== (task[key] ?? null)) save({ [key]: v })
-                                          }}
-                                          className="w-20 bg-black/40 a-text text-xs px-2 py-1 rounded border border-white/25 text-center font-bold focus:outline-none focus:border-white/60"
-                                        />
-                                      </label>
-                                    )
-                                    return (
-                                      <div className="mt-1.5 p-2 rounded-lg a-surface-2">
-                                        <p className="a-text-3 text-[10px] font-black uppercase tracking-wider mb-1.5">
-                                          ⏱️ Bonus timer {own ? '(this card)' : '(board default)'}
-                                        </p>
-                                        <div className="flex items-end gap-2 flex-wrap">
-                                          {input('150% within', 'bonus_full_minutes', w.full)}
-                                          {input('Ends at', 'bonus_timer_minutes', w.timer)}
-                                          <span className="a-text-3 text-[10px] pb-1.5">min</span>
-                                          {own && (
-                                            <button
-                                              onClick={() => save({ bonus_full_minutes: null, bonus_timer_minutes: null })}
-                                              className="text-[10px] font-bold a-text-3 hover:text-teal-500 pb-1.5"
-                                            >
-                                              Reset to board default
-                                            </button>
-                                          )}
-                                        </div>
                                       </div>
                                     )
                                   })()}
@@ -3950,6 +4255,7 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                                   {(!section.foreign || isOwner) && (
                                     <div className="mt-1.5">
                                       <button
+                                        disabled={!canChangeShared(task)}
                                         onClick={async () => {
                                           const newVal = !task.is_contest
                                           setTasks(prev => prev.map(t => t.id === task.id ? { ...t, is_contest: newVal } : t))
@@ -4064,7 +4370,7 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                                         : '○ Light'}
                                     </button>
                                   )}
-                                  <button onClick={() => openCardForEdit(task.id, 'library')}
+                                  <button hidden={!canEditTask(task)} onClick={() => libOpenCard(task)}
                                     className="px-3 py-1.5 a-chip-btn rounded-lg text-xs font-bold transition-colors">Edit</button>
                                   <button onClick={() => setQrTask(task)}
                                     className="px-3 py-1.5 a-chip-btn rounded-lg text-xs font-bold transition-colors">QR</button>
@@ -4075,10 +4381,10 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                                   <button onClick={() => duplicateTask(task)}
                                     className="px-3 py-1.5 a-chip-btn rounded-lg text-xs font-bold transition-colors"
                                     title="Duplicate this card">⎘ Copy</button>
-                                  <button onClick={() => openTileEdit(task)}
+                                  <button hidden={!canEditTask(task)} onClick={() => libQuickEdit(task)}
                                     className="px-3 py-1.5 a-chip-btn rounded-lg text-xs font-bold transition-colors"
                                     title="Quick edit — title, category and points">Quick edit</button>
-                                  <button onClick={() => deleteTask(task.id, task.title)}
+                                  <button hidden={!canChangeShared(task)} onClick={() => deleteTask(task.id, task.title)}
                                     className="px-3 py-1.5 a-chip-danger transition-colors">Delete</button>
                                   {/* No ⋯ menu here: every one of its items is
                                       already a button in this strip. It stays in
@@ -4235,10 +4541,19 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                   {field('150% if done within (min)', w.full, 'default_bonus_full_minutes', DEFAULT_BONUS_FULL_MIN)}
                   {field('Bonus ends at (min)', w.timer, 'default_bonus_timer_minutes', DEFAULT_BONUS_TIMER_MIN)}
                 </div>
-                <p className="a-text-3 text-xs mt-3 leading-snug">
-                  Steps: 150% up to {w.full} min, then 140 / 130 / 120 / 110% in even steps, base points from {w.timer} min.
-                  The clock runs from the moment a team opens the card.
-                </p>
+                <div className="flex flex-wrap gap-1.5 mt-4">
+                  {BONUS_PRESETS.map(({ label, full: f, timer: t, hint }) => (
+                    <button key={label} type="button" title={hint}
+                      onClick={() => void updateBoardSettings({ default_bonus_full_minutes: f, default_bonus_timer_minutes: t })}
+                      className={`px-2.5 py-1 rounded-full border text-[11px] font-bold transition-colors ${
+                        w.full === f && w.timer === t
+                          ? 'bg-teal-600 border-teal-600 text-white' : 'a-border a-surface-2 a-text-2 hover:border-teal-500'}`}>
+                      {label} <span className="font-normal opacity-80">{f}→{t} min</span>
+                    </button>
+                  ))}
+                </div>
+                <BonusTimerPreview full={w.full} timer={w.timer} />
+                <p className="a-text-3 text-xs mt-2 leading-snug">The clock runs from the moment a team opens the card.</p>
               </div>
             )
           })()}
@@ -4407,6 +4722,30 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
         
         </AdminSection>
 
+        {/* ── Player Look (join / waiting / board backdrop) ─────────────────── */}
+        <AdminSection icon="🎨" title="Player Look"
+          blurb="The backdrop and branding players see on join, waiting and board screens."
+          summary={<>{PLAYER_THEMES.find(t => t.value === normalizePlayerTheme(currentBoard?.player_theme))?.label}</>}>
+          <div className="p-4 rounded-lg border a-border a-surface/50 flex flex-wrap gap-2">
+            {PLAYER_THEMES.map(opt => {
+              const on = normalizePlayerTheme(currentBoard?.player_theme) === opt.value
+              return (
+                <button
+                  key={opt.value}
+                  onClick={() => { if (!on) updateBoardSettings({ player_theme: opt.value }) }}
+                  disabled={timerSaving}
+                  className={`px-4 py-3 rounded-lg text-left border transition-colors disabled:opacity-40 ${
+                    on ? 'bg-teal-500 border-teal-500 a-text' : 'a-bg a-border a-text-2 hover:border-teal-500'
+                  }`}
+                >
+                  <p className="text-sm font-bold">{opt.label}</p>
+                  <p className={`text-[11px] mt-0.5 ${on ? 'a-text/75' : 'a-text-3'}`}>{opt.hint}</p>
+                </button>
+              )
+            })}
+          </div>
+        </AdminSection>
+
         {/* ── Tile Display (icon vs words on the player board) ───────────────── */}
         <AdminSection icon="🔡" title="Tile Display"
           blurb="Whether grid tiles show a category icon or the challenge name."
@@ -4454,7 +4793,7 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                           className="relative w-[70px] h-[70px] rounded-xl overflow-hidden flex items-center justify-center"
                           style={{ backgroundColor: t.hex_code, boxShadow: `0 3px 10px ${t.hex_code}55` }}
                         >
-                          <TileFace task={t} display={mode} />
+                          <TileFace task={{ ...t, category_icon: categoryIconOf(t.section_id, t.category) }} display={mode} />
                         </div>
                       ))}
                     </div>
@@ -4712,15 +5051,20 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                   scanStatsByTask={scanStatsByTask}
                   copiedId={copiedId}
                   boardCountByTask={boardCountByTask}
-                  navigate={navigate}
-                  saveCategoryInline={saveCategoryInline}
+                  navigate={boardNavigate}
+                  saveCategoryInline={boardSaveCategoryInline}
                   applyBulkToCategory={applyBulkToCategory}
-                  setTaskPoints={setTaskPoints}
+                            boardBulk={{ tasks: gridTasks.filter(p => group.key === '__none__' ? !p.category : p.category === group.label), apply: applyBulkToBoardCards }}
+                            canEditLibrary={isOwner}
+                            canEditTask={canEditTaskOnBoard}
+                            categoryIconFor={tasks => categoryIconOf(tasks[0]?.section_id, tasks[0]?.category)}
+                            onCategoryIcon={(tasks, label, key) => { const sid = tasks[0]?.section_id; if (sid) void saveCategoryIcon(sid, label, key) }}
+                  setTaskPoints={boardSetTaskPoints}
                   renameCategoryByLabel={renameCategoryByLabel}
                   setQrTask={setQrTask}
                   copyLink={copyLink}
                   duplicateTask={duplicateTask}
-                  openTileEdit={openTileEdit}
+                  openTileEdit={t => openTileEdit(placementOf(t) ?? t)}
                   deleteTask={deleteTask}
                 />
               ))}
@@ -4759,15 +5103,20 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                             scanStatsByTask={scanStatsByTask}
                             copiedId={copiedId}
                             boardCountByTask={boardCountByTask}
-                            navigate={navigate}
-                            saveCategoryInline={saveCategoryInline}
+                            navigate={boardNavigate}
+                            saveCategoryInline={boardSaveCategoryInline}
                             applyBulkToCategory={applyBulkToCategory}
-                            setTaskPoints={setTaskPoints}
+                            boardBulk={{ tasks: gridTasks.filter(p => group.key === '__none__' ? !p.category : p.category === group.label), apply: applyBulkToBoardCards }}
+                            canEditLibrary={isOwner}
+                            canEditTask={canEditTaskOnBoard}
+                            categoryIconFor={tasks => categoryIconOf(tasks[0]?.section_id, tasks[0]?.category)}
+                            onCategoryIcon={(tasks, label, key) => { const sid = tasks[0]?.section_id; if (sid) void saveCategoryIcon(sid, label, key) }}
+                            setTaskPoints={boardSetTaskPoints}
                             renameCategoryByLabel={renameCategoryByLabel}
                             setQrTask={setQrTask}
                             copyLink={copyLink}
                             duplicateTask={duplicateTask}
-                            openTileEdit={openTileEdit}
+                            openTileEdit={t => openTileEdit(placementOf(t) ?? t)}
                             deleteTask={deleteTask}
                           />
                         ))
@@ -5522,6 +5871,13 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
               <button onClick={() => setEditingTile(null)} className="a-text-2 hover:a-text text-2xl font-light">&times;</button>
             </div>
             <div className="p-6 flex flex-col gap-4">
+              <p className={`text-xs rounded-lg px-3 py-2 border ${tilePlacementId ? 'border-teal-500/40 bg-teal-500/10 a-text-2' : 'a-border a-surface-2 a-text-3'}`}>
+                {tilePlacementId
+                  ? (editingTile.is_board_copy
+                      ? 'This board has its own copy of this card. Changes apply to this board only.'
+                      : 'Saving makes a copy of this card for this board. Changes apply to this board only; the Card Library and other boards are not affected.')
+                  : 'Library card. Changes apply to every board that still uses it (boards with their own copy keep theirs).'}
+              </p>
               <div>
                 <label className="block text-sm font-medium a-text-3 mb-1">Title</label>
                 <input type="text" value={tileTitle} onChange={e => setTileTitle(e.target.value)} autoFocus
@@ -5553,6 +5909,41 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                     className="w-full px-3 py-2 rounded-lg border a-border focus:outline-none focus:ring-2 focus:ring-teal-500 text-center font-bold" />
                 </div>
               </div>
+              <div>
+                <label className="block text-sm font-medium a-text-3 mb-1">Board icon</label>
+                <button type="button" onClick={() => setShowIconPicker(v => !v)}
+                  className="w-full flex items-center gap-3 px-3 py-2 rounded-lg border a-border hover:border-teal-500 transition-colors text-left"
+                  aria-expanded={showIconPicker}>
+                  <span className="w-10 h-10 rounded-lg flex items-center justify-center text-white flex-shrink-0" style={{ backgroundColor: tileHex }}>
+                    <CategoryIcon category={tileCategory} iconKey={tileIcon ?? categoryIconOf(editingTile.section_id, tileCategory)} className="w-6 h-6" />
+                  </span>
+                  <span className="flex-1 text-sm a-text-3">{tileIcon ? 'Custom icon' : 'Auto (category icon)'}</span>
+                  <span className="text-xs font-bold text-teal-600">{showIconPicker ? 'Hide' : 'Change'}</span>
+                </button>
+                {showIconPicker && (
+                  <div className="mt-3">
+                    <TileIconPicker compact value={tileIcon} category={tileCategory} color={tileHex}
+                      onChange={key => { setTileIcon(key); setShowIconPicker(false) }} />
+                  </div>
+                )}
+              </div>
+              {tilePlacementId && (
+                <button type="button" disabled={tileSaving}
+                  onClick={async () => {
+                    setTileSaving(true)
+                    try {
+                      const id = await ensureBoardCopy(tilePlacementId)
+                      await fetchAll()
+                      setEditingTile(null)
+                      navigate(`/bingo-dash/admin/task/${id}?from=board&box=${tilePlacementId}`)
+                    } catch (err) {
+                      notify('Could not open the card: ' + (err instanceof Error ? err.message : 'Unknown error'), 'error')
+                    } finally { setTileSaving(false) }
+                  }}
+                  className="text-left px-4 py-2.5 rounded-lg border a-border hover:border-teal-500 text-sm font-bold a-text-2 transition-colors disabled:opacity-50">
+                  Edit instructions, photos, answers… <span className="text-xs font-normal a-text-3">(this board's copy)</span>
+                </button>
+              )}
               <div className="flex gap-3 pt-2">
                 <button onClick={saveTile} disabled={tileSaving || !tileTitle.trim()}
                   className="flex-1 py-2.5 bg-teal-600 a-text rounded-xl font-bold hover:bg-violet-700 disabled:opacity-50 transition-colors">

@@ -46,7 +46,11 @@ create table public.bingo_sections (
   -- (tracked) cube-board/012_cube_board.sql, widened by cube-board/015_flexible_faces.sql
   -- How many cube faces are in play: a flat board is 1. Points scale with it.
   face_count              int not null default 1
-    constraint bingo_sections_face_count_check check (face_count between 1 and 6)
+    constraint bingo_sections_face_count_check check (face_count between 1 and 6),
+
+  -- (tracked) core-tables/20261006_player_theme.sql
+  player_theme            text not null default 'default'
+    constraint bingo_sections_player_theme_check check (player_theme in ('default', 'grab'))
 );
 
 comment on column public.bingo_sections.scoreboard_theme is 'midnight | arena | daylight — how the projector looks for this board.';

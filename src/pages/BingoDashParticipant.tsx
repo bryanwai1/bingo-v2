@@ -1,4 +1,5 @@
 import { useEffect, useState, useRef, useCallback, useMemo } from 'react'
+import { parseAnswerBlocks } from '../lib/answerBlocks'
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useBingoDashTeam } from '../hooks/useBingoDashTeam'
@@ -205,6 +206,15 @@ export function BingoDashParticipant() {
     letterRefs.current[rowIdx]?.[charIdx]?.focus()
   }, [])
 
+  // A QR printed for a library card still points at the library card. If this
+  // team's board has its own copy of it, open that copy instead.
+  useEffect(() => {
+    if (!taskId || !team?.section_id || boardCardId) return
+    supabase.from('bingo_tasks').select('id').eq('cloned_from', taskId).eq('is_board_copy', true)
+      .eq('section_id', team.section_id).limit(1).maybeSingle()
+      .then(({ data }) => { if (data?.id) navigate(`/bingo-dash/task/${data.id}`, { replace: true }) })
+  }, [taskId, team?.section_id, boardCardId, navigate])
+
   useEffect(() => {
     if (!taskId) return
     supabase.from('bingo_tasks').select('*').eq('id', taskId).single().then(({ data }) => {
@@ -354,6 +364,44 @@ export function BingoDashParticipant() {
     (row, i) => normalize(answerInputs[i] ?? '') === normalize(row)
   )
   const numberMode = !!inputs.answer && task?.answer_min != null
+  // Several typed questions (answer_blocks); the server checks them all at once.
+  const answerBlocks = useMemo(() => parseAnswerBlocks(task?.answer_blocks), [task?.answer_blocks])
+  const blocksMode = !!inputs.answer && answerBlocks.length > 0
+  const [blockValues, setBlockValues] = useState<string[]>([])
+  const [blockResults, setBlockResults] = useState<boolean[] | null>(null)
+  const [blocksBusy, setBlocksBusy] = useState(false)
+  // A card can reveal a passcode (the box code) once the answer is right. The
+  // server hands it over only for a scan whose answer_ok is true.
+  const [revealedPasscode, setRevealedPasscode] = useState<string | null>(null)
+  const answerOkNow = !!scanRecord?.answerOk
+  const scanIdNow = scanRecord?.id
+  useEffect(() => {
+    if (!answerOkNow || !scanIdNow || !inputs.answer) return
+    let live = true
+    supabase.rpc('get_card_passcode', { p_scan: scanIdNow }).then(({ data }) => {
+      if (live && typeof data === 'string' && data) setRevealedPasscode(data)
+    })
+    return () => { live = false }
+  }, [answerOkNow, scanIdNow, inputs.answer])
+  const checkBlocks = async () => {
+    if (!scanRecord || blocksBusy) return
+    setBlocksBusy(true)
+    try {
+      const { data, error } = await supabase.rpc('check_answer_blocks', {
+        p_scan: scanRecord.id, p_values: answerBlocks.map((_, i) => blockValues[i] ?? ''),
+      })
+      if (error) { alert('Could not check your answers: ' + error.message); return }
+      const res = data as { passed?: boolean; results?: boolean[] } | null
+      if (res?.passed) {
+        setBlockResults(null)
+        setScanRecord(prev => (prev ? { ...prev, answerOk: true } : prev))
+      } else {
+        setBlockResults(Array.isArray(res?.results) ? res.results : [])
+      }
+    } finally {
+      setBlocksBusy(false)
+    }
+  }
 
   /** Send the number to Postgres; only it knows whether the floor is met,
    *  and it marks the scan's answer_ok itself. */
@@ -532,10 +580,10 @@ export function BingoDashParticipant() {
    * Inferred rather than flagged: a card that collects a typed answer, carries
    * a draw, and has no answer of its own can only mean the drawn item holds it.
    */
-  const needsDrawnAnswer = !!(inputs.answer && !task?.answer_text && task?.answer_min == null && drawConfig)
+  const needsDrawnAnswer = !!(inputs.answer && !blocksMode && !task?.answer_text && task?.answer_min == null && drawConfig)
   // Text input with only a question: nothing to match against, so whatever
   // the team writes goes to the admin like a link does.
-  const freeTextMode = !!(inputs.answer && !task?.answer_text && task?.answer_min == null && !drawConfig)
+  const freeTextMode = !!(inputs.answer && !blocksMode && !task?.answer_text && task?.answer_min == null && !drawConfig)
   // Free text alongside a photo/video: one Submit button sends both.
   const combinedText = freeTextMode && !!(inputs.photo || inputs.video) && !freeTextSent && !approvedKinds.text
 
@@ -587,14 +635,14 @@ export function BingoDashParticipant() {
   // A card can ask for several things at once, so a correct answer no longer
   // finishes the card on its own — it satisfies one input, and the tile turns
   // green when every compulsory one is in.
-  const answerSatisfied = answerMatches || (numberMode && !!scanRecord?.answerOk)
+  const answerSatisfied = answerMatches || ((numberMode || blocksMode) && !!scanRecord?.answerOk)
   useEffect(() => {
     if (isSnakeLadder) return
     if (!answerSatisfied || !scanRecord || scanRecord.completed || completing) return
     setCompleting(true)
     ;(async () => {
       // A number answer is already marked by check_answer_min.
-      if (!numberMode) {
+      if (!numberMode && !blocksMode) {
         await markAnswerOk(scanRecord.id)
         setScanRecord(prev => (prev ? { ...prev, answerOk: true } : prev))
       }
@@ -1444,6 +1492,60 @@ export function BingoDashParticipant() {
                 </div>
               )}
 
+              {revealedPasscode && (
+                <div className="mb-6 p-5 rounded-2xl bg-green-400/15 border-2 border-green-400/60 text-center">
+                  <p className="text-green-300 text-xs font-black uppercase tracking-widest mb-1">Correct! Your passcode</p>
+                  <p className="text-white text-4xl font-black tracking-[0.35em] pl-[0.35em] tabular-nums" translate="no">{revealedPasscode}</p>
+                  <p className="text-green-300/70 text-xs font-bold mt-2">Use it to open the box.</p>
+                </div>
+              )}
+
+              {/* Several typed questions: one Check button for all of them. */}
+              {blocksMode && (
+                <div className="mb-6 flex flex-col gap-4">
+                  {scanRecord?.answerOk ? (
+                    <div className="p-4 rounded-2xl bg-green-400/15 border border-green-400/40 text-center">
+                      <p className="text-green-300 font-black">✓ All answers correct</p>
+                    </div>
+                  ) : (
+                    <>
+                      {answerBlocks.map((b, i) => {
+                        const wrong = blockResults != null && blockResults[i] === false
+                        const right = blockResults != null && blockResults[i] === true
+                        return (
+                          <div key={b.id}>
+                            {b.question && (
+                              <p className="text-white font-black text-base mb-2 leading-snug">
+                                {answerBlocks.length > 1 && <span className="text-white/50 mr-1.5">{i + 1}.</span>}{b.question}
+                              </p>
+                            )}
+                            <input
+                              type="text" inputMode={b.kind === 'number' ? 'numeric' : 'text'} autoComplete="off"
+                              value={blockValues[i] ?? ''}
+                              onChange={e => { const v = e.target.value; setBlockValues(prev => { const n = [...prev]; n[i] = v; return n }); setBlockResults(null) }}
+                              onKeyDown={e => { if (e.key === 'Enter') void checkBlocks() }}
+                              placeholder={b.kind === 'number' ? 'Enter a number' : 'Type your answer'}
+                              className={`w-full px-4 py-3 rounded-2xl bg-white/10 border-2 text-white placeholder-white/30 text-sm font-bold focus:outline-none ${
+                                wrong ? 'border-red-400/70' : right ? 'border-green-400/70' : 'border-white/25 focus:border-white/50'
+                              }`}
+                            />
+                            {wrong && <p className="text-red-300 text-xs font-bold mt-1">Not right yet</p>}
+                          </div>
+                        )
+                      })}
+                      <button
+                        onClick={() => void checkBlocks()}
+                        disabled={blocksBusy || answerBlocks.some((_, i) => !(blockValues[i] ?? '').trim())}
+                        className="w-full py-3.5 rounded-2xl font-black uppercase tracking-wider transition-all active:scale-95 disabled:opacity-40"
+                        style={{ backgroundColor: task.hex_code, color: '#000' }}
+                      >
+                        {blocksBusy ? 'Checking…' : answerBlocks.length > 1 ? 'Check my answers' : 'Check my answer'}
+                      </button>
+                    </>
+                  )}
+                </div>
+              )}
+
               {/* A number with a floor comes before the evidence: the team
                   proves the count first, then sends the screenshots. */}
               {numberMode && !needsDrawnAnswer && (
@@ -1711,7 +1813,7 @@ export function BingoDashParticipant() {
                 </>
               )}
 
-              {inputs.answer && !numberMode && !freeTextMode && !needsDrawnAnswer && (
+              {inputs.answer && !blocksMode && !numberMode && !freeTextMode && !needsDrawnAnswer && (
                 <>
                   {task.answer_question && (
                     <p className="text-white font-black text-lg mb-4 text-center leading-snug">

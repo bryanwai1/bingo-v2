@@ -17,7 +17,17 @@ export async function fetchBoardTasks(sectionId: string): Promise<BingoTask[]> {
     .select('*')
     .in('id', placements.map(p => p.task_id))
   if (!tasks) return []
-  const byId = new Map<string, BingoTask>(tasks.map(t => [t.id, t]))
+  // A category can carry a fallback icon for cards with none of their own.
+  // Best effort: if the column is not there yet the cards just use the old icons.
+  const { data: cats } = await supabase.from('bingo_categories')
+    .select('section_id, name, tile_icon').in('section_id', [...new Set(tasks.map(t => t.section_id))])
+  const catIcon = new Map<string, string>()
+  for (const c of (cats ?? []) as { section_id: string; name: string; tile_icon: string | null }[]) {
+    if (c.tile_icon) catIcon.set(`${c.section_id}|${c.name}`, c.tile_icon)
+  }
+  const byId = new Map<string, BingoTask>(tasks.map(t => [t.id, {
+    ...t, category_icon: catIcon.get(`${t.section_id}|${(t.category ?? '').trim()}`) ?? null,
+  }]))
   return (placements as BingoBoardCard[])
     .filter(p => byId.has(p.task_id))
     .map(p => ({ ...byId.get(p.task_id)!, sort_order: p.slot, in_grid: true, placement_id: p.id }))

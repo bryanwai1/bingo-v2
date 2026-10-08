@@ -4,7 +4,7 @@ import { supabase } from '../lib/supabase'
 import { useTeamReviews, type ReviewFlag } from '../hooks/useTeamReviews'
 import { fetchBoardTasks } from '../lib/boardCards'
 import { useBingoDashTeam } from '../hooks/useBingoDashTeam'
-import { ParticleBackground } from '../components/ParticleBackground'
+import { PlayerBackdrop } from '../components/PlayerBackdrop'
 import { TimeUpAlarm } from '../components/TimeUpAlarm'
 import { TileFace } from '../components/BingoTileFace'
 import { IncomingDuelBanner } from '../components/ContestCard'
@@ -15,6 +15,7 @@ import { ForestWaitingScreen } from '../components/ForestWaitingScreen'
 import { WaitingTiger } from '../components/WaitingTiger'
 import { activeFaces, faceName, faceColor, normaliseFaceCount } from '../lib/cubeFaces'
 import { tasksForFace } from '../lib/boardCards'
+import { normalizePlayerTheme, GRAB_GREEN, type PlayerTheme } from '../lib/playerThemes'
 import { normalizeTileDisplay, withCategoryColors, type TileDisplay } from '../lib/bingoTileDisplay'
 import type { BingoTask, BingoScan, BingoSection, BingoTeam, BoardTimer } from '../types/database'
 
@@ -50,7 +51,9 @@ const BINGO_WORD = 'BINGO'
 
 // ── Join Screen (search group → password) ─────────────────────────────────────
 
-function JoinScreen({ onJoin }: { onJoin: (teamId: string, password: string) => Promise<void> }) {
+function JoinScreen({ onJoin, theme }: { onJoin: (teamId: string, password: string) => Promise<void>; theme: PlayerTheme }) {
+  const grab = theme === 'grab'
+  const accent = grab ? GRAB_GREEN : '#a855f7'
   const [step, setStep] = useState<1 | 2>(1)
   const [groups, setGroups] = useState<BingoTeam[]>([])
   const [groupsLoading, setGroupsLoading] = useState(true)
@@ -99,7 +102,7 @@ function JoinScreen({ onJoin }: { onJoin: (teamId: string, password: string) => 
 
   return (
     <div className="min-h-screen bg-gray-950 flex flex-col items-center justify-center relative overflow-hidden px-4 py-8">
-      <ParticleBackground />
+      <PlayerBackdrop theme={theme} />
 
       {/* The join screen is the first thing a player sees, so the language
           choice has to be reachable before they are in a team — not only on
@@ -109,9 +112,19 @@ function JoinScreen({ onJoin }: { onJoin: (teamId: string, password: string) => 
       </div>
 
       <div className="relative z-10 text-center mb-10 animate-slide-up">
-        <div className="text-6xl mb-4">🎯</div>
-        <h1 className="text-5xl font-black text-white tracking-tight">BINGO DASH</h1>
-        <p className="text-gray-400 mt-3 text-lg">Complete challenges · Scan tiles · Win</p>
+        {grab ? (
+          <>
+            <p className="text-xs font-black uppercase tracking-[0.35em]" style={{ color: '#7CF0A8' }}>Grab</p>
+            <h1 className="text-5xl font-black text-white tracking-tight mt-1 [text-shadow:0_2px_16px_rgba(0,0,0,0.6)]">GAME DAY BINGO</h1>
+            <p className="text-white/80 mt-3 text-lg [text-shadow:0_1px_8px_rgba(0,0,0,0.6)]">Complete challenges · Scan tiles · Win</p>
+          </>
+        ) : (
+          <>
+            <div className="text-6xl mb-4">🎯</div>
+            <h1 className="text-5xl font-black text-white tracking-tight">BINGO DASH</h1>
+            <p className="text-gray-400 mt-3 text-lg">Complete challenges · Scan tiles · Win</p>
+          </>
+        )}
       </div>
 
       {step === 1 && (
@@ -128,7 +141,7 @@ function JoinScreen({ onJoin }: { onJoin: (teamId: string, password: string) => 
             onChange={e => setSearch(e.target.value)}
             placeholder="Search groups..."
             className="w-full px-4 py-3 rounded-2xl border-2 text-base font-medium focus:outline-none transition-colors text-center mb-3"
-            style={{ borderColor: search ? '#a855f7' : '#e5e7eb' }}
+            style={{ borderColor: search ? accent : '#e5e7eb' }}
             autoFocus
           />
 
@@ -202,7 +215,7 @@ function JoinScreen({ onJoin }: { onJoin: (teamId: string, password: string) => 
               }}
               placeholder="• • • •"
               className="w-full px-5 py-4 rounded-2xl border-2 text-4xl font-black focus:outline-none transition-colors text-center tracking-[0.6em]"
-              style={{ borderColor: password.length === 4 ? '#a855f7' : '#e5e7eb' }}
+              style={{ borderColor: password.length === 4 ? accent : '#e5e7eb' }}
               autoFocus
               maxLength={4}
               disabled={submitting}
@@ -219,7 +232,7 @@ function JoinScreen({ onJoin }: { onJoin: (teamId: string, password: string) => 
               type="submit"
               disabled={password.length !== 4 || submitting}
               className="w-full py-4 rounded-2xl text-white font-black text-xl transition-all duration-200 disabled:opacity-40 hover:scale-105 active:scale-95 mt-1"
-              style={{ backgroundColor: '#a855f7', boxShadow: '0 8px 24px #a855f744' }}
+              style={{ backgroundColor: accent, boxShadow: `0 8px 24px ${accent}44` }}
             >
               {submitting ? 'Joining...' : 'Join Group →'}
             </button>
@@ -245,6 +258,7 @@ function BingoTile({
   review,
   isInBingoLine,
   display,
+  autoContrast,
   onClick,
 }: {
   task: BingoTask
@@ -256,6 +270,7 @@ function BingoTile({
   chained: boolean
   isInBingoLine: boolean
   display: TileDisplay
+  autoContrast?: boolean
   onClick: () => void
 }) {
   return (
@@ -324,7 +339,7 @@ function BingoTile({
       )}
 
       {/* Icon or words — whichever this board is set to in the admin */}
-      <TileFace task={task} display={display} />
+      <TileFace task={task} display={display} autoContrast={autoContrast} />
 
       {/* Points badge */}
       {(task.points ?? 0) > 0 && (
@@ -457,10 +472,12 @@ function BoardScreen({
   faceCountProp,
   inviteUrl,
   chatSectionId,
+  theme,
   onLeave,
 }: {
   /** Board id for the support chat anchored under the team name. */
   chatSectionId?: string | null
+  theme: PlayerTheme
   team: { id: string; name: string }
   /** Link a teammate scans to join this team directly (see BingoDashJoin). */
   inviteUrl?: string | null
@@ -591,8 +608,8 @@ function BoardScreen({
   }, [popupLetters])
 
   return (
-    <div className="min-h-screen bg-gray-950 relative overflow-x-hidden">
-      <ParticleBackground />
+    <div className={`min-h-screen bg-gray-950 relative overflow-x-hidden ${theme === 'grab' ? 'grab-ui' : ''}`}>
+      <PlayerBackdrop theme={theme} />
 
       {/* Bingo celebration popup */}
       {popupLetters && (
@@ -603,7 +620,7 @@ function BoardScreen({
       <header className="relative z-10 px-4 pt-5 pb-3">
         <div className="board-col flex items-start justify-between gap-3">
           <div>
-            <p className="text-teal-400 text-[10px] font-black uppercase tracking-widest">Bingo Dash</p>
+            <p className="text-teal-400 text-[10px] font-black uppercase tracking-widest" style={theme === 'grab' ? { color: '#7CF0A8' } : undefined}>{theme === 'grab' ? 'Grab Game Day' : 'Bingo Dash'}</p>
             <h1 translate="no" className="text-white text-xl font-black tracking-tight leading-tight">{team.name}</h1>
             <div className="flex items-center gap-2 mt-0.5">
               <span className="text-green-400 text-xs font-bold">{completedCount}/{visibleTasks.length} completed</span>
@@ -662,7 +679,7 @@ function BoardScreen({
               className="h-full rounded-full transition-all duration-700"
               style={{
                 width: gridTasks.length ? `${(completedCount / gridTasks.length) * 100}%` : '0%',
-                background: 'linear-gradient(90deg, #a855f7, #ec4899)',
+                background: theme === 'grab' ? `linear-gradient(90deg, ${GRAB_GREEN}, #7CF0A8)` : 'linear-gradient(90deg, #a855f7, #ec4899)',
               }}
             />
           </div>
@@ -718,6 +735,7 @@ function BoardScreen({
                     review={reviews[task.id]}
                     isInBingoLine={bingoSlots.has(i)}
                     display={tileDisplay}
+                    autoContrast={theme === 'grab'}
                     onClick={() => navigate(`/bingo-dash/task/${task.id}${task.placement_id ? `?box=${task.placement_id}` : ''}`)}
                   />
                 ) : (
@@ -900,10 +918,12 @@ export function BingoDashHome() {
     )
   }
 
+  const theme = normalizePlayerTheme(section?.player_theme)
+
   if (!isRegistered) {
     return (
       <>
-        <JoinScreen onJoin={async (teamId, pwd) => { await joinTeamById(teamId, pwd) }} />
+        <JoinScreen theme={theme} onJoin={async (teamId, pwd) => { await joinTeamById(teamId, pwd) }} />
         <TimeUpAlarm settings={section} />
       </>
     )
@@ -918,7 +938,7 @@ export function BingoDashHome() {
           {/* Players can sit on this screen for several minutes before a
               facilitator starts, so it needs to be somewhere pleasant to wait
               rather than a spinner on black. */}
-          <ForestWaitingScreen />
+          {theme === 'grab' ? <PlayerBackdrop theme={theme} /> : <ForestWaitingScreen />}
           <div
             className="absolute inset-0 pointer-events-none"
             style={{ zIndex: 5, background: 'linear-gradient(to bottom, rgba(4,15,12,0.60) 0%, rgba(4,15,12,0.28) 42%, rgba(4,15,12,0.75) 100%)' }}
@@ -953,7 +973,7 @@ export function BingoDashHome() {
           {/* The tiger stands and walks off the moment the board goes live,
               so the wait ends with something happening rather than a jump cut. */}
           <div className="relative z-10 w-full">
-            <WaitingTiger />
+            {theme !== 'grab' && <WaitingTiger />}
           </div>
         </div>
         <TimeUpAlarm settings={section} />
@@ -966,6 +986,7 @@ export function BingoDashHome() {
       <BoardScreen
         team={team!}
         chatSectionId={sectionId}
+        theme={theme}
         inviteUrl={team && section?.slug && team.password && localStorage.getItem('bingo-dash-member-role') !== 'observer'
           ? `${window.location.origin}/bingo-dash/play/${section.slug}?team=${team.id}&pw=${team.password}`
           : null}

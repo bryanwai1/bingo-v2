@@ -99,6 +99,8 @@ export interface BingoSection extends BoardTimer {
   default_bonus_timer_minutes?: number | null
   /** midnight | arena | daylight — see src/lib/scoreboardThemes.ts */
   scoreboard_theme?: string | null
+  /** default | grab — see src/lib/playerThemes.ts */
+  player_theme?: string | null
   id: string
   name: string
   slug: string
@@ -132,6 +134,8 @@ export interface BingoCategory {
   name: string
   sort_order: number
   created_at: string
+  /** Fallback board icon for cards in this category that have no icon of their own. */
+  tile_icon?: string | null
 }
 
 export interface BingoTask {
@@ -158,6 +162,14 @@ export interface BingoTask {
   // Number answer with a floor: set, the answer input is one number that
   // passes when >= this (server-checked). Null = letter-box exact answer.
   answer_min?: number | null
+  /** Board tile icon key (see ICONS in BingoTileFace); null = icon from the category. */
+  tile_icon?: string | null
+  /** Not a column: the card's category's fallback icon, attached when a board is loaded. */
+  category_icon?: string | null
+  /** True for a card copy owned by one board (fork_card_for_board). Hidden from the Card Library. */
+  is_board_copy?: boolean
+  /** Several typed questions on one card; see src/lib/answerBlocks.ts. */
+  answer_blocks?: unknown
   completion_warning: string | null
   require_marshal: boolean
   // Chained cards: id of the card a team must finish before this one opens.

@@ -905,3 +905,11 @@ html.admin-dark {
   [style*="--led"] { animation: none !important;
     box-shadow: 0 0 0 1.5px var(--led), 0 0 14px -2px var(--led), var(--a-shadow-1) !important; }
 }
+
+/* Grab player theme: the stadium art is busy, so lift the greys the standard
+   dark theme uses for secondary text and give all text a soft shadow. */
+.grab-ui { text-shadow: 0 1px 4px rgba(0, 0, 0, 0.7); }
+.grab-ui .text-gray-400,
+.grab-ui .text-gray-500,
+.grab-ui .text-gray-600 { color: #f3f4f6; }
+.grab-ui .bg-gray-600 { background-color: #f3f4f6; }
