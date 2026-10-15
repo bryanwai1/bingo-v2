@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
+import { useBingoAuth } from '../hooks/useBingoAuth'
 import type { BingoSection, BingoTeam } from '../types/database'
 import {
   DEFAULT_PRIZE_COUNTS,
@@ -68,6 +69,7 @@ const EMPTY_DRAFT: DraftConfig = {
 export function BingoDashAwardAdmin() {
   const { sectionSlug } = useParams<{ sectionSlug: string }>()
   const navigate = useNavigate()
+  const { workingOwnerValue } = useBingoAuth()
   const [section, setSection] = useState<BingoSection | null>(null)
   const [configId, setConfigId] = useState<string | null>(null)
   const [draft, setDraft] = useState<DraftConfig>(EMPTY_DRAFT)
@@ -103,7 +105,8 @@ export function BingoDashAwardAdmin() {
         .eq('slug', sectionSlug)
         .maybeSingle()
       if (cancelled) return
-      if (!sec) { setLoaded(true); return }
+      // Someone else's board is treated as not found.
+      if (!sec || (sec.owner_id ?? null) !== workingOwnerValue) { setLoaded(true); return }
       setSection(sec)
       const { data: cfg } = await supabase
         .from('bingo_award_configs')
@@ -238,29 +241,106 @@ export function BingoDashAwardAdmin() {
     setDraft(d => ({ ...d, slide_order: addSlide(d.slide_order, kind) }))
   }
 
-  // Hold-and-drag reorder. Pointer events (not HTML5 drag) so it works on touch too.
-  const [drag, setDrag] = useState<{ from: number; over: number } | null>(null)
-  const dragTarget = (clientY: number, from: number) => {
-    const rows = Array.from(document.querySelectorAll<HTMLElement>('[data-slide-row]'))
-    let over = 0
-    rows.forEach((r, i) => {
-      if (i === from) return
-      const b = r.getBoundingClientRect()
-      if (b.top + b.height / 2 < clientY) over++
-    })
-    return Math.min(over, rows.length - 1)
+  // Drag-and-drop reorder. Pointer events (not HTML5 drag) so the row follows the
+  // pointer, scales up, and the others slide aside. A mouse grabs the row at
+  // once; a finger holds for a moment first, so the list can still be scrolled.
+  const SLIDE_ROW_GAP = 8
+  const [drag, setDrag] = useState<{ from: number; over: number; dy: number; dropping: boolean } | null>(null)
+  const dragGeo = useRef<{ heights: number[]; centers: number[]; startY: number } | null>(null)
+  const holdTimer = useRef<number | null>(null)
+  const holdOrigin = useRef({ x: 0, y: 0 })
+  const cancelHold = () => {
+    if (holdTimer.current !== null) { window.clearTimeout(holdTimer.current); holdTimer.current = null }
   }
+  const beginDrag = (el: HTMLElement, pointerId: number, from: number, pageY: number) => {
+    const rects = Array.from(document.querySelectorAll<HTMLElement>('[data-slide-row]')).map(r => r.getBoundingClientRect())
+    dragGeo.current = {
+      heights: rects.map(r => r.height),
+      centers: rects.map(r => r.top + r.height / 2 + window.scrollY),
+      startY: pageY,
+    }
+    try { el.setPointerCapture(pointerId) } catch { /* pointer already gone */ }
+    setDrag({ from, over: from, dy: 0, dropping: false })
+  }
+  const dragStart = (e: React.PointerEvent<HTMLElement>, from: number) => {
+    if ((e.target as HTMLElement).closest('button,input,a,label')) return
+    if (e.pointerType === 'mouse') {
+      if (e.button !== 0) return
+      e.preventDefault()
+      beginDrag(e.currentTarget, e.pointerId, from, e.pageY)
+      return
+    }
+    // Touch / pen: press and hold, unless the finger moves first (that is a scroll).
+    const el = e.currentTarget
+    const { pointerId, pageY } = e
+    holdOrigin.current = { x: e.clientX, y: e.clientY }
+    cancelHold()
+    holdTimer.current = window.setTimeout(() => {
+      holdTimer.current = null
+      beginDrag(el, pointerId, from, pageY)
+    }, 280)
+  }
+  // Once a touch drag is live the page must not scroll under the finger.
+  const dragging = drag !== null
+  useEffect(() => {
+    if (!dragging) return
+    const block = (ev: TouchEvent) => { ev.preventDefault() }
+    document.addEventListener('touchmove', block, { passive: false })
+    return () => document.removeEventListener('touchmove', block)
+  }, [dragging])
   const dragMove = (e: React.PointerEvent) => {
-    if (drag) setDrag({ from: drag.from, over: dragTarget(e.clientY, drag.from) })
+    if (holdTimer.current !== null) {
+      // Moved before the hold finished: the person is scrolling, not dragging.
+      if (Math.hypot(e.clientX - holdOrigin.current.x, e.clientY - holdOrigin.current.y) > 8) cancelHold()
+      return
+    }
+    const g = dragGeo.current
+    if (!drag || !g || drag.dropping) return
+    const dy = e.pageY - g.startY
+    const c = g.centers[drag.from] + dy
+    let over = drag.from
+    if (dy > 0) {
+      for (let j = drag.from + 1; j < g.centers.length; j++) { if (c > g.centers[j]) over = j; else break }
+    } else {
+      for (let j = drag.from - 1; j >= 0; j--) { if (c < g.centers[j]) over = j; else break }
+    }
+    // Near the top/bottom edge of the screen the page follows the drag.
+    if (e.clientY < 70) window.scrollBy(0, -14)
+    else if (e.clientY > window.innerHeight - 70) window.scrollBy(0, 14)
+    setDrag({ ...drag, over, dy })
   }
   const dragEnd = () => {
-    if (drag && drag.over !== drag.from) {
-      const next = [...draft.slide_order]
-      const [item] = next.splice(drag.from, 1)
-      next.splice(drag.over, 0, item)
-      setDraft(d => ({ ...d, slide_order: next }))
-    }
-    setDrag(null)
+    cancelHold()
+    const g = dragGeo.current
+    if (!drag || !g || drag.dropping) return
+    const { from, over } = drag
+    // Settle the held row onto the slot it is leaving room for, then commit.
+    let settle = 0
+    if (over > from) for (let j = from + 1; j <= over; j++) settle += g.heights[j] + SLIDE_ROW_GAP
+    else if (over < from) for (let j = over; j < from; j++) settle -= g.heights[j] + SLIDE_ROW_GAP
+    setDrag({ ...drag, dy: settle, dropping: true })
+    window.setTimeout(() => {
+      if (over !== from) {
+        setDraft(d => {
+          const next = [...d.slide_order]
+          const [item] = next.splice(from, 1)
+          next.splice(over, 0, item)
+          return { ...d, slide_order: next }
+        })
+      }
+      setDrag(null)
+    }, 200)
+  }
+  /** Where row `i` sits while a drag is in flight: the held row follows the
+   *  pointer, the rows it passes slide one row-height out of its way. */
+  const rowOffset = (i: number) => {
+    const g = dragGeo.current
+    if (!drag || !g) return 0
+    if (i === drag.from) return drag.dy
+    const h = g.heights[drag.from] + SLIDE_ROW_GAP
+    if (drag.from < drag.over && i > drag.from && i <= drag.over) return -h
+    if (drag.from > drag.over && i >= drag.over && i < drag.from) return h
+    return 0
   }
 
   const doRemoveSlide = (id: AwardSlideId) => {
@@ -717,7 +797,7 @@ export function BingoDashAwardAdmin() {
                 Reset order
               </button>
             </div>
-            <p className="text-xs text-gray-400 mb-4">Hold ⠿ and drag to move · or use the arrows · Remove with ✕</p>
+            <p className="text-xs text-gray-400 mb-4">Drag a slide to reorder · or use the arrows · Remove with ✕</p>
 
             <ol className="space-y-2">
               {slides.map((s, i) => {
@@ -743,22 +823,21 @@ export function BingoDashAwardAdmin() {
                   <li
                     key={s.id}
                     data-slide-row
-                    className={`flex items-center gap-2 bg-gray-50 border rounded-xl px-3 py-2.5 transition-shadow ${
-                      drag?.from === i ? 'opacity-50 border-amber-400'
-                        : drag && drag.over === i ? `border-gray-200 ${drag.over < drag.from ? 'shadow-[0_-3px_0_0_#f59e0b]' : 'shadow-[0_3px_0_0_#f59e0b]'}`
-                          : 'border-gray-200'}`}
+                    onPointerDown={e => dragStart(e, i)}
+                    onPointerMove={dragMove}
+                    onPointerUp={dragEnd}
+                    onPointerCancel={() => { cancelHold(); setDrag(null) }}
+                    className={`relative flex items-center gap-2 border rounded-xl px-3 py-2.5 select-none ${
+                      drag?.from === i ? 'bg-white border-amber-400 shadow-xl' : 'bg-gray-50 border-gray-200'}`}
+                    style={drag ? {
+                      transform: `translateY(${rowOffset(i)}px)${drag.from === i ? ' scale(1.03)' : ''}`,
+                      transition: drag.from === i && !drag.dropping
+                        ? 'box-shadow 150ms, background-color 150ms'
+                        : 'transform 200ms cubic-bezier(0.2, 0.8, 0.2, 1), box-shadow 200ms',
+                      zIndex: drag.from === i ? 30 : undefined,
+                      cursor: 'grabbing',
+                    } : { cursor: 'grab' }}
                   >
-                    <button
-                      type="button"
-                      onPointerDown={e => { e.preventDefault(); e.currentTarget.setPointerCapture(e.pointerId); setDrag({ from: i, over: i }) }}
-                      onPointerMove={dragMove}
-                      onPointerUp={dragEnd}
-                      onPointerCancel={() => setDrag(null)}
-                      className="w-6 h-8 shrink-0 flex items-center justify-center text-gray-400 hover:text-gray-700 cursor-grab active:cursor-grabbing select-none"
-                      style={{ touchAction: 'none' }}
-                      title="Hold and drag to move"
-                      aria-label="Drag to reorder"
-                    >⠿</button>
                     <span
                       className="w-8 h-8 flex items-center justify-center rounded-lg font-black text-base shrink-0"
                       style={{ background: accent, color: '#111' }}

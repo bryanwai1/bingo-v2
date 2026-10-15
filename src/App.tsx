@@ -61,6 +61,14 @@ export default function App() {
             <Route path="/bingo-dash/crew" element={<RequireBingoAdmin><BingoDashCrew /></RequireBingoAdmin>} />
             <Route path="/bingo-dash/account" element={<RequireBingoAdmin><BingoDashAccount /></RequireBingoAdmin>} />
             <Route path="/bingo-dash/events" element={<RequireBingoAdmin><BingoDashEvents /></RequireBingoAdmin>} />
+            {/* Slides show a board's name, teams and scores, so each account only
+                gets its own boards — see useBingoAuth().workingOwnerValue. */}
+            <Route path="/bingo-dash/slides" element={<RequireBingoAdmin game="bingo"><BingoDashSlidesHub /></RequireBingoAdmin>} />
+            <Route path="/bingo-dash/slides/awards" element={<RequireBingoAdmin game="bingo"><BingoDashAwardSlides /></RequireBingoAdmin>} />
+            <Route path="/bingo-dash/slides/awards/:sectionSlug" element={<RequireBingoAdmin game="bingo"><BingoDashAwardSlides /></RequireBingoAdmin>} />
+            <Route path="/bingo-dash/slides/awards/:sectionSlug/admin" element={<RequireBingoAdmin game="bingo"><BingoDashAwardAdmin /></RequireBingoAdmin>} />
+            <Route path="/bingo-dash/slides/briefing" element={<RequireBingoAdmin game="bingo"><BingoDashBriefingSlides /></RequireBingoAdmin>} />
+            <Route path="/bingo-dash/slides/briefing/:sectionSlug" element={<RequireBingoAdmin game="bingo"><BingoDashBriefingSlides /></RequireBingoAdmin>} />
             <Route path="/bingo-dash/login" element={<RequireBingoAdmin><Navigate to="/bingo-dash/admin" replace /></RequireBingoAdmin>} />
             {/* Crew pass landing — deliberately NOT gated: helpers arrive
                 signed out and the page signs them in itself */}
@@ -74,12 +82,6 @@ export default function App() {
           <Route path="/bingo-dash/play/:sectionSlug" element={<BingoDashJoin />} />
           <Route path="/bingo-dash/sample" element={<BingoDashSample />} />
           <Route path="/bingo-dash/colmar-intro" element={<BingoDashColmarIntro />} />
-          <Route path="/bingo-dash/slides" element={<BingoDashSlidesHub />} />
-          <Route path="/bingo-dash/slides/awards" element={<BingoDashAwardSlides />} />
-          <Route path="/bingo-dash/slides/awards/:sectionSlug" element={<BingoDashAwardSlides />} />
-          <Route path="/bingo-dash/slides/awards/:sectionSlug/admin" element={<BingoDashAwardAdmin />} />
-          <Route path="/bingo-dash/slides/briefing" element={<BingoDashBriefingSlides />} />
-          <Route path="/bingo-dash/slides/briefing/:sectionSlug" element={<BingoDashBriefingSlides />} />
           <Route path="/bingo-dash/team/:teamId/members" element={<BingoDashTeamMembers />} />
           <Route path="/bingo-dash/teams/:sectionSlug" element={<BingoDashAllTeamsMembers />} />
 

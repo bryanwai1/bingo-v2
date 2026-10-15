@@ -3,12 +3,16 @@ import { useNavigate, useParams } from 'react-router-dom'
 import { QRCodeSVG } from 'qrcode.react'
 import { supabase } from '../lib/supabase'
 import { useFullscreen } from '../hooks/useFullscreen'
+import { useBingoAuth } from '../hooks/useBingoAuth'
 import { ParticleBackground } from '../components/ParticleBackground'
 import type { BingoSection } from '../types/database'
+import { bonusCheckpoints, bonusPoints, resolveBonusWindow, type BonusWindow } from '../lib/timeBonus'
 
 /**
  * BINGO DASH — Participant briefing deck.
- * Opener + dark holding slide + how-to-play content slides + Observer QR closer.
+ * Opener + dark holding slide + how-to-play content slides (rules, line bonus,
+ * speed bonus, submissions), a sample-board link, the player-join QR, and the
+ * Observer QR closer. Only this account's own boards are listed.
  * Route: /bingo-dash/slides/briefing                       (section picker)
  *        /bingo-dash/slides/briefing/:sectionSlug          (deck for that section)
  */
@@ -23,10 +27,12 @@ function SectionPicker() {
   const [sections, setSections] = useState<BingoSection[]>([])
   const [activeId, setActiveId] = useState<string | null>(null)
   const navigate = useNavigate()
+  const { workingOwnerValue } = useBingoAuth()
 
   useEffect(() => {
+    // Every board is readable, so keep only this account's own.
     supabase.from('bingo_sections').select('*').order('sort_order').then(({ data }) => {
-      if (data) setSections(data)
+      if (data) setSections(data.filter(s => (s.owner_id ?? null) === workingOwnerValue))
     })
     supabase.from('bingo_settings').select('active_section_id').limit(1).maybeSingle()
       .then(({ data }) => { if (data) setActiveId(data.active_section_id) })
@@ -97,11 +103,13 @@ type SlideKind =
   | 'step1-roam'
   | 'step2-card'
   | 'step3-bingo'
-  | 'step4-time'
+  | 'step4-speed'
+  | 'step5-time'
   | 'roles'
   | 'submissions'
   | 'how-to-submit'
   | 'preview-clue'
+  | 'join-qr'
   | 'qr-wish'
 
 const SLIDES: SlideKind[] = [
@@ -110,11 +118,13 @@ const SLIDES: SlideKind[] = [
   'step1-roam',
   'step2-card',
   'step3-bingo',
-  'step4-time',
+  'step4-speed',
+  'step5-time',
   'roles',
   'submissions',
   'how-to-submit',
   'preview-clue',
+  'join-qr',
   'qr-wish',
 ]
 
@@ -124,10 +134,15 @@ function BriefingShow({ sectionSlug }: { sectionSlug: string }) {
   const [section, setSection] = useState<BingoSection | null>(null)
   const [loaded, setLoaded] = useState(false)
   const [slideIdx, setSlideIdx] = useState(0)
+  const { workingOwnerValue } = useBingoAuth()
 
   useEffect(() => {
     supabase.from('bingo_sections').select('*').eq('slug', sectionSlug).maybeSingle()
-      .then(({ data }) => { setSection(data ?? null); setLoaded(true) })
+      .then(({ data }) => {
+        // Someone else's board is treated as not found.
+        setSection(data && (data.owner_id ?? null) === workingOwnerValue ? data : null)
+        setLoaded(true)
+      })
     // Live-sync board edits (timer, name, …) made in admin while the deck is open
     const channel = supabase
       .channel(`bingo-briefing-${sectionSlug}`)
@@ -171,7 +186,7 @@ function BriefingShow({ sectionSlug }: { sectionSlug: string }) {
     )
   }
 
-  const isAccentSlide = kind === 'main' || kind === 'qr-wish'
+  const isAccentSlide = kind === 'main'
   const slideStyle = isAccentSlide
     ? {
         background: 'linear-gradient(135deg, #7c3aed 0%, #3b0764 100%)',
@@ -188,7 +203,7 @@ function BriefingShow({ sectionSlug }: { sectionSlug: string }) {
       onClick={() => setSlideIdx(i => Math.min(totalSlides - 1, i + 1))}
       style={slideStyle}
     >
-      <SlideRenderer key={safeIdx} kind={kind} slideIdx={safeIdx} sectionSlug={sectionSlug} sectionName={section.name} timerSeconds={section.timer_seconds ?? 0} />
+      <SlideRenderer key={safeIdx} kind={kind} slideIdx={safeIdx} sectionSlug={sectionSlug} sectionName={section.name} timerSeconds={section.timer_seconds ?? 0} bonusWindow={resolveBonusWindow(null, section)} />
 
       {/* Top nav */}
       <div className="absolute top-5 left-6 right-6 flex items-center justify-between text-[11px] text-white/60 font-semibold uppercase tracking-[0.25em] z-40">
@@ -242,8 +257,8 @@ function BriefingShow({ sectionSlug }: { sectionSlug: string }) {
 }
 
 // ── Slide router ─────────────────────────────────────────────────────────
-function SlideRenderer({ kind, slideIdx, sectionSlug, sectionName, timerSeconds }: {
-  kind: SlideKind; slideIdx: number; sectionSlug: string; sectionName: string; timerSeconds: number
+function SlideRenderer({ kind, slideIdx, sectionSlug, sectionName, timerSeconds, bonusWindow }: {
+  kind: SlideKind; slideIdx: number; sectionSlug: string; sectionName: string; timerSeconds: number; bonusWindow: BonusWindow
 }) {
   switch (kind) {
     case 'main':           return <MainSlide slideIdx={slideIdx} sectionName={sectionName} sectionSlug={sectionSlug} />
@@ -251,11 +266,13 @@ function SlideRenderer({ kind, slideIdx, sectionSlug, sectionName, timerSeconds 
     case 'step1-roam':     return <Step1RoamSlide slideIdx={slideIdx} />
     case 'step2-card':     return <Step2CardSlide slideIdx={slideIdx} />
     case 'step3-bingo':    return <Step3BingoSlide slideIdx={slideIdx} />
-    case 'step4-time':     return <Step4TimeSlide slideIdx={slideIdx} timerSeconds={timerSeconds} />
+    case 'step4-speed':    return <Step4SpeedSlide slideIdx={slideIdx} window={bonusWindow} />
+    case 'step5-time':     return <Step5TimeSlide slideIdx={slideIdx} timerSeconds={timerSeconds} />
     case 'roles':          return <RolesSlide slideIdx={slideIdx} />
     case 'submissions':    return <SubmissionTypesSlide slideIdx={slideIdx} />
     case 'how-to-submit':  return <HowToSubmitSlide slideIdx={slideIdx} />
     case 'preview-clue':   return <PreviewClueSlide slideIdx={slideIdx} />
+    case 'join-qr':        return <JoinQrSlide slideIdx={slideIdx} sectionSlug={sectionSlug} sectionName={sectionName} />
     case 'qr-wish':        return <QrWishSlide slideIdx={slideIdx} sectionSlug={sectionSlug} sectionName={sectionName} />
   }
 }
@@ -469,10 +486,10 @@ function Step2CardSlide({ slideIdx }: { slideIdx: number }) {
         {/* Legend */}
         <div className="flex flex-col gap-3 max-w-sm w-full">
           {[
-            { kind: 'locked' as const,  label: 'Locked',    desc: 'Untouched tile' },
-            { kind: 'scanned' as const, label: 'Scanned',   desc: 'You opened it — finish the task' },
+            { kind: 'locked' as const,  label: 'Not visited', desc: 'A tile you have not opened yet' },
+            { kind: 'scanned' as const, label: 'In progress', desc: 'You opened it — finish the task' },
             { kind: 'done' as const,    label: 'Done',      desc: 'Task completed' },
-            { kind: 'bingo' as const,   label: 'Bingo Tile', desc: 'Part of a 5-in-a-row line' },
+            { kind: 'bingo' as const,   label: 'Bingo Line', desc: 'Part of a 5-in-a-row line — earns a line bonus' },
           ].map((l, i) => (
             <div key={l.kind} className="flex items-center gap-4 p-3 rounded-xl bg-white/5 border border-white/10"
                  style={{ animation: `slide-up-fade 0.5s ease-out ${0.65 + i * 0.1}s both` }}>
@@ -494,8 +511,8 @@ function Step2CardSlide({ slideIdx }: { slideIdx: number }) {
 // ── Step 3 · Form Bingo lines ────────────────────────────────────────────
 function Step3BingoSlide({ slideIdx }: { slideIdx: number }) {
   /**
-   * Animated multiplier ladder. The grid fills row → row → diagonal in waves,
-   * and the multiplier card on the side ticks up: 1.2× · 1.4× · 1.6× · 1.8× · 2.0×
+   * Animated line-bonus ladder. The grid fills row → row → diagonal in waves,
+   * and the card on the side ticks up: +100 · +200 · +300 · +400 · +500
    */
   // Map each tile (row*5+col) to which "wave" lights it (0-3). Wave 0 = first row,
   // wave 1 = second row, wave 2 = first column, wave 3 = main diagonal.
@@ -507,11 +524,11 @@ function Step3BingoSlide({ slideIdx }: { slideIdx: number }) {
     2, 4, 4, 4, 3,   // bottom-left col + diag end
   ]
   const ladder = [
-    { lines: 1, mult: '1.2×', tint: '#fbbf24' },
-    { lines: 2, mult: '1.4×', tint: '#fb923c' },
-    { lines: 3, mult: '1.6×', tint: '#f97316' },
-    { lines: 4, mult: '1.8×', tint: '#ef4444' },
-    { lines: 5, mult: '2.0×', tint: '#dc2626' },
+    { lines: 1, mult: '+100', tint: '#fbbf24' },
+    { lines: 2, mult: '+200', tint: '#fb923c' },
+    { lines: 3, mult: '+300', tint: '#f97316' },
+    { lines: 4, mult: '+400', tint: '#ef4444' },
+    { lines: 5, mult: '+500', tint: '#dc2626' },
   ]
   const period = 6 // seconds per full cycle
   return (
@@ -573,7 +590,7 @@ function Step3BingoSlide({ slideIdx }: { slideIdx: number }) {
           <p className="text-amber-200 font-black uppercase tracking-[0.3em] text-xs sm:text-sm text-center mb-1"
              style={{ fontFamily: 'system-ui, -apple-system, sans-serif',
                       animation: 'slide-up-fade 0.5s ease-out 0.5s both' }}>
-            Score Multiplier
+            Line Bonus
           </p>
           {ladder.map((l, i) => (
             <div key={l.lines} className="flex items-center justify-between gap-3 px-4 py-3 rounded-xl border-2"
@@ -593,7 +610,7 @@ function Step3BingoSlide({ slideIdx }: { slideIdx: number }) {
           ))}
           <p className="text-white/55 text-[11px] text-center mt-1 italic"
              style={{ fontFamily: 'system-ui, -apple-system, sans-serif' }}>
-            Multipliers stack with each new line you complete.
+            Every tile still scores its own points. Each new line pays a bigger bonus — up to 5 lines.
           </p>
         </div>
       </div>
@@ -601,15 +618,86 @@ function Step3BingoSlide({ slideIdx }: { slideIdx: number }) {
   )
 }
 
-// ── Step 4 · Beat the clock (duration comes from the board's own timer) ──
-function Step4TimeSlide({ slideIdx, timerSeconds }: { slideIdx: number; timerSeconds: number }) {
+// ── Step 4 · Speed bonus (window comes from the board's own default) ─────
+const fmtClock = (mins: number) => {
+  const total = Math.round(mins * 60)
+  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`
+}
+const PCT_TINTS: Record<number, string> = { 150: '#34d399', 140: '#2dd4bf', 130: '#a3e635', 120: '#fbbf24', 110: '#fb923c' }
+
+function Step4SpeedSlide({ slideIdx, window: w }: { slideIdx: number; window: BonusWindow }) {
+  const steps = bonusCheckpoints(w)
+  // A worked example that always follows this board's window, with two decimals.
+  const exampleMins = Math.round(w.full + (w.timer - w.full) * 0.13)
+  const examplePts = bonusPoints(100, exampleMins * 60_000, w)
+  const sans = { fontFamily: 'system-ui, -apple-system, sans-serif' }
+  return (
+    <ContentShell slideIdx={slideIdx} pretitle="Step 4" title="Speed Bonus" beam="#6ee7b7">
+      <div className="relative z-10 flex flex-col items-center gap-7 max-w-5xl w-full mx-auto">
+        <div className="text-center" style={{ animation: 'pop-bounce-in 0.7s cubic-bezier(0.34,1.56,0.64,1) 0.4s both' }}>
+          <p className="font-black leading-none text-white"
+             style={{ fontSize: 'clamp(3.5rem, 12vw, 8rem)', textShadow: '0 4px 24px rgba(52,211,153,0.55)' }}>
+            150<span className="text-emerald-300" style={{ fontSize: '0.5em' }}>%</span>
+          </p>
+          <p className="text-white/80 text-base sm:text-xl font-black uppercase tracking-[0.2em] mt-2" style={sans}>
+            Finish a tile within {w.full} min of opening it
+          </p>
+        </div>
+
+        {/* The glide: 150% → base, checkpoints marked */}
+        <div className="w-full px-4 py-5 rounded-3xl border-2 border-white/10 bg-black/30"
+             style={{ animation: 'slide-up-fade 0.6s ease-out 0.7s both' }}>
+          <div className="relative h-5 rounded-full overflow-hidden"
+               style={{ background: 'linear-gradient(90deg, #34d399 0%, #34d399 ' + (w.full / w.timer) * 100 + '%, #fbbf24 70%, #f87171 100%)' }} />
+          <div className="flex mt-2 text-[11px] sm:text-sm font-black" style={sans}>
+            {steps.map((c, i) => {
+              const from = i === 0 ? 0 : steps[i - 1].uptoMin
+              return (
+                <span key={c.pct} className="text-right" style={{ width: `${((c.uptoMin - from) / w.timer) * 100}%`, color: PCT_TINTS[c.pct] }}>
+                  {c.pct}%
+                  <span className="block text-white/50 font-bold">{i === 0 ? '≤' : ''}{fmtClock(c.uptoMin)}</span>
+                </span>
+              )
+            })}
+            <span className="flex-1 text-right text-white/80">
+              Base
+              <span className="block text-white/50 font-bold">{fmtClock(w.timer)}+</span>
+            </span>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 w-full">
+          {[
+            { icon: '📉', title: 'It slides', body: `After ${w.full} min the bonus drops every second until ${w.timer} min.`, tint: '#fbbf24' },
+            { icon: '🛟', title: 'Never below base', body: 'Run out of time? You still earn the tile’s full points.', tint: '#60a5fa' },
+            { icon: '🔢', title: 'Every second counts', body: `Scores show 2 decimals — a 100-pt tile done in ${fmtClock(exampleMins)} earns ${examplePts.toFixed(2)}.`, tint: '#34d399' },
+          ].map((c, i) => (
+            <div key={c.title} className="p-5 rounded-2xl border-2"
+                 style={{
+                   borderColor: `${c.tint}55`,
+                   background: `linear-gradient(160deg, ${c.tint}22 0%, rgba(0,0,0,0.4) 100%)`,
+                   animation: `pop-bounce-in 0.55s cubic-bezier(0.34,1.56,0.64,1) ${0.95 + i * 0.12}s both`,
+                 }}>
+              <div className="text-4xl leading-none">{c.icon}</div>
+              <p className="text-white font-black text-lg mt-2">{c.title}</p>
+              <p className="text-white/75 text-sm mt-1 leading-snug" style={sans}>{c.body}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+    </ContentShell>
+  )
+}
+
+// ── Step 5 · Beat the clock (duration comes from the board's own timer) ──
+function Step5TimeSlide({ slideIdx, timerSeconds }: { slideIdx: number; timerSeconds: number }) {
   const minutes = Math.max(1, Math.round(timerSeconds / 60))
   const hours = minutes / 60
   const durationLabel = Number.isInteger(hours)
     ? `${hours} ${hours === 1 ? 'hour' : 'hours'} · one shot`
     : 'One shot · no extensions'
   return (
-    <ContentShell slideIdx={slideIdx} pretitle="Step 4" title="Beat the Clock" beam="#fda4af">
+    <ContentShell slideIdx={slideIdx} pretitle="Step 5" title="Beat the Clock" beam="#fda4af">
       <div className="relative z-10 flex flex-col items-center gap-8 max-w-5xl w-full mx-auto">
         {/* Big duration */}
         <div className="flex items-end justify-center gap-4 sm:gap-6"
@@ -671,6 +759,11 @@ function Step4TimeSlide({ slideIdx, timerSeconds }: { slideIdx: number; timerSec
             </p>
           </div>
         </div>
+
+        <p className="text-white/70 text-sm sm:text-base px-5 py-3 rounded-2xl border border-white/15 bg-white/5"
+           style={{ fontFamily: 'system-ui, -apple-system, sans-serif', animation: 'slide-up-fade 0.6s ease-out 1.1s both' }}>
+          ⚡ Every tile also has its own speed-bonus timer — see Step 4.
+        </p>
       </div>
     </ContentShell>
   )
@@ -773,7 +866,7 @@ function RolesSlide({ slideIdx }: { slideIdx: number }) {
               </p>
               <p className="text-white/85 text-sm sm:text-base mt-1.5 leading-snug">
                 Find the <span className="font-black text-white">nearest marshal</span> or
-                <span className="font-black text-white"> WhatsApp the marshal</span> on the contact list — we'll get you sorted.
+                <span className="font-black text-white"> tap the message button</span> on your board — we'll get you sorted.
               </p>
             </div>
           </div>
@@ -786,38 +879,32 @@ function RolesSlide({ slideIdx }: { slideIdx: number }) {
 // ── 6. Submission Types ──────────────────────────────────────────────────
 function SubmissionTypesSlide({ slideIdx }: { slideIdx: number }) {
   const types = [
-    {
-      icon: '✋',
-      title: 'Standard',
-      tint: '#22c55e',
-      body: 'Show up at the location. A marshal verifies and unlocks the tile for you.',
-    },
-    {
-      icon: '📸',
-      title: 'Photo',
-      tint: '#f59e0b',
-      body: 'Snap a photo that meets the brief. Upload it — a marshal approves before the tile turns Done.',
-    },
-    {
-      icon: '⌨',
-      title: 'Answer',
-      tint: '#a855f7',
-      body: 'Type the correct word or code. The tile unlocks the moment your answer matches.',
-    },
+    { icon: '📸', title: 'Photo', tint: '#f59e0b',
+      body: 'Snap a photo that meets the brief and upload it. A marshal approves it before the tile turns Done.' },
+    { icon: '🎥', title: 'Video', tint: '#ef4444',
+      body: 'Record a short clip (up to 100 MB) and upload it. A marshal reviews it.' },
+    { icon: '⌨', title: 'Text', tint: '#a855f7',
+      body: 'Type your answer. A matching word or code unlocks the tile at once; a written answer is read and approved.' },
+    { icon: '🔗', title: 'Link', tint: '#38bdf8',
+      body: 'Paste a link to your work. A marshal opens it and approves.' },
+    { icon: '👮', title: 'Marshal password', tint: '#22c55e',
+      body: 'Find the marshal, enter their password in the app and tap Complete.' },
+    { icon: '⚔️', title: 'Versus', tint: '#f472b6',
+      body: 'Challenge another team. Pick who you faced and tap We won / We lost — the result is approved for you.' },
   ]
   return (
     <ContentShell slideIdx={slideIdx} pretitle="What You’ll Do" title="Submission Types" beam="#fcd34d">
-      <div className="relative z-10 grid grid-cols-1 md:grid-cols-3 gap-5 max-w-6xl w-full mx-auto">
+      <div className="relative z-10 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 max-w-6xl w-full mx-auto">
         {types.map((t, i) => (
           <div key={t.title}
-               className="p-6 rounded-3xl border-2 flex flex-col gap-3"
+               className="p-5 rounded-3xl border-2 flex flex-col gap-2 text-left"
                style={{
                  borderColor: `${t.tint}55`,
                  background: `linear-gradient(160deg, ${t.tint}22 0%, rgba(0,0,0,0.35) 100%)`,
                  animation: `pop-bounce-in 0.55s cubic-bezier(0.34,1.56,0.64,1) ${0.5 + i * 0.12}s both`,
                }}>
-            <div className="text-5xl leading-none" style={{ filter: `drop-shadow(0 0 12px ${t.tint}aa)` }}>{t.icon}</div>
-            <h3 className="text-white font-black text-2xl leading-tight">{t.title}</h3>
+            <div className="text-4xl leading-none" style={{ filter: `drop-shadow(0 0 12px ${t.tint}aa)` }}>{t.icon}</div>
+            <h3 className="text-white font-black text-xl leading-tight">{t.title}</h3>
             <p className="text-white/80 text-sm sm:text-base leading-snug"
                style={{ fontFamily: 'system-ui, -apple-system, sans-serif' }}>
               {t.body}
@@ -826,12 +913,6 @@ function SubmissionTypesSlide({ slideIdx }: { slideIdx: number }) {
         ))}
       </div>
 
-      <div className="relative z-10 mt-8 max-w-4xl mx-auto px-5 py-3 rounded-2xl border border-amber-300/40 bg-amber-300/10 text-amber-100 text-sm sm:text-base"
-           style={{ fontFamily: 'system-ui, -apple-system, sans-serif',
-                    animation: 'slide-up-fade 0.6s ease-out 0.95s both' }}>
-        <span className="font-black mr-2">👮 Marshal-required tasks:</span>
-        some tiles need a Marshal password before completion — look for the marshal badge in-app.
-      </div>
     </ContentShell>
   )
 }
@@ -842,7 +923,7 @@ function HowToSubmitSlide({ slideIdx }: { slideIdx: number }) {
     { n: '1', title: 'Tap a tile', body: 'Open any visible tile on your bingo card.' },
     { n: '2', title: 'Read the brief', body: 'Check what the task asks for and the points on offer.' },
     { n: '3', title: 'Do the task', body: 'Find the spot, do the activity, capture the photo, or solve the answer.' },
-    { n: '4', title: 'Submit in-app', body: 'Upload the photo, type the answer, or call the marshal over.' },
+    { n: '4', title: 'Submit in-app', body: 'Upload the photo or video, type your answer, paste a link, or call the marshal over.' },
     { n: '5', title: 'Watch it turn Done', body: 'Once approved, the tile flips to ✓ and the score updates live.' },
   ]
   return (
@@ -873,296 +954,116 @@ function HowToSubmitSlide({ slideIdx }: { slideIdx: number }) {
   )
 }
 
-// ── 7b. Preview a Clue · Interactive demo ────────────────────────────────
-const PREVIEW_TASK = {
-  title: 'The Vanishing Arch',
-  pill: 'Answer Challenge',
-  color: 'Purple',
-  hex: '#a855f7',
-  hexSoft: '#c4b5fd',
-  points: 120,
-  pointers: [
-    { icon: '🚶', text: 'Walk to the eastern plaza of Merdeka Square.' },
-    { icon: '🏛', text: 'Find the white stone arch at the corner.' },
-    { icon: '👀', text: 'Stand underneath and look straight up.' },
-    { icon: '📜', text: 'Read the bronze plaque — it names a structural feature.' },
-    { icon: '⌨', text: 'Type that feature below · 4 letters.' },
-  ],
-  expected: 'ARCH',
-}
+// ── 7b. Preview a Clue · opens the sample board ─────────────────────────
+const SAMPLE_BOARD_PATH = '/bingo-dash/sample'
 
 function PreviewClueSlide({ slideIdx }: { slideIdx: number }) {
-  const [stage, setStage] = useState<'tile' | 'brief' | 'done'>('tile')
-  const [answer, setAnswer] = useState('')
-  const [shake, setShake] = useState(false)
-  const t = PREVIEW_TASK
-
-  const handleSubmit = () => {
-    if (answer.trim().toUpperCase() === t.expected) {
-      setStage('done')
-      setShake(false)
-    } else {
-      setShake(true)
-      setTimeout(() => setShake(false), 600)
-    }
-  }
-  const reset = () => { setStage('tile'); setAnswer(''); setShake(false) }
-
+  const sans = { fontFamily: 'system-ui, -apple-system, sans-serif' }
   return (
-    <ContentShell slideIdx={slideIdx} pretitle="Live Demo · Try It Now" title="Preview a Clue" beam={t.hexSoft}>
-      <div
-        className="relative z-10 w-full max-w-md mx-auto"
-        onClick={e => e.stopPropagation()}
-        style={{ fontFamily: 'system-ui, -apple-system, sans-serif' }}
-      >
-        {stage === 'tile' && (
-          <button
-            onClick={() => setStage('brief')}
-            className="group relative w-full rounded-3xl border-2 px-8 py-10 text-center transition-all hover:scale-[1.02] active:scale-[0.98]"
-            style={{
-              borderColor: `${t.hex}88`,
-              background: `linear-gradient(160deg, ${t.hex}33 0%, rgba(0,0,0,0.45) 100%)`,
-              boxShadow: `0 0 36px ${t.hex}55`,
-              animation: 'pop-bounce-in 0.6s cubic-bezier(0.34,1.56,0.64,1) 0.4s both, preview-tile-pulse 2.4s ease-in-out infinite',
-            }}
+    <ContentShell slideIdx={slideIdx} pretitle="Live Demo · Try It Now" title="Preview a Clue" beam="#c4b5fd">
+      <div className="relative z-10 w-full max-w-md mx-auto" onClick={e => e.stopPropagation()} style={sans}>
+        <a
+          href={SAMPLE_BOARD_PATH}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="block w-full rounded-3xl border-2 px-8 py-10 text-center transition-all hover:scale-[1.02] active:scale-[0.98]"
+          style={{
+            borderColor: '#a855f788',
+            background: 'linear-gradient(160deg, #a855f733 0%, rgba(0,0,0,0.45) 100%)',
+            boxShadow: '0 0 36px #a855f755',
+            animation: 'pop-bounce-in 0.6s cubic-bezier(0.34,1.56,0.64,1) 0.4s both, preview-tile-pulse 2.4s ease-in-out infinite',
+          }}
+        >
+          <div className="text-6xl mb-3" style={{ filter: 'drop-shadow(0 0 14px #a855f7cc)' }}>🎯</div>
+          <p className="text-white/65 text-[10px] font-bold uppercase tracking-[0.4em] mb-1">Practice board</p>
+          <p className="text-white text-2xl font-black leading-tight">Open the Sample Board</p>
+          <span
+            className="inline-block mt-5 px-5 py-2 rounded-full text-[11px] font-black uppercase tracking-[0.3em] text-white"
+            style={{ background: '#a855f7', boxShadow: '0 4px 0 #a855f777' }}
           >
-            <div className="text-6xl mb-3" style={{ filter: `drop-shadow(0 0 14px ${t.hex}cc)` }}>⌨</div>
-            <p className="text-white/65 text-[10px] font-bold uppercase tracking-[0.4em] mb-1">{t.color} · {t.points} pts</p>
-            <p className="text-white text-2xl font-black leading-tight">{t.title}</p>
-            <span
-              className="inline-block mt-5 px-5 py-2 rounded-full text-[11px] font-black uppercase tracking-[0.3em] text-white"
-              style={{ background: t.hex, boxShadow: `0 4px 0 ${t.hex}77` }}
-            >
-              ▶ Tap to play
-            </span>
-          </button>
-        )}
-
-        {stage === 'brief' && (
-          <div
-            className="rounded-3xl overflow-hidden text-left relative"
-            style={{
-              background: `color-mix(in srgb, ${t.hex} 38%, #0a0a0a)`,
-              boxShadow: `0 20px 60px rgba(0,0,0,0.55), 0 0 40px ${t.hex}44`,
-              animation: 'pop-bounce-in 0.55s cubic-bezier(0.34,1.56,0.64,1) both',
-            }}
-          >
-            {/* Header — matches participant header style */}
-            <div
-              className="px-5 py-4 relative overflow-hidden"
-              style={{ background: `${t.hex}66` }}
-            >
-              <div className="absolute inset-0 bg-black/30" />
-              <div className="relative z-10">
-                <p className="text-white/85 text-[10px] font-bold uppercase tracking-[0.3em]">Team: Trailblazers</p>
-                <h3 className="text-white text-2xl font-black leading-tight tracking-tight mt-0.5">{t.title}</h3>
-                <div className="flex items-center gap-2 mt-1">
-                  <span className="text-white/85 text-[11px] uppercase tracking-wider font-bold">{t.color} Challenge</span>
-                  <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-white/25 text-white">{t.points} pts</span>
-                </div>
-              </div>
-            </div>
-
-            {/* Body */}
-            <div className="px-5 py-5 flex flex-col gap-2.5 relative">
-              <button
-                disabled
-                className="flex items-center justify-center gap-2 w-full py-2.5 rounded-2xl text-xs font-black text-white/90 border-2 border-white/25 bg-white/10 mb-1"
-              >
-                📍 Open in Maps
-              </button>
-
-              {/* 5 emoji pointer cards — matches InstructionPage format */}
-              {t.pointers.map((p, i) => (
-                <div
-                  key={i}
-                  className="relative"
-                  style={{ animation: `pop-bounce-in 0.5s cubic-bezier(0.34,1.56,0.64,1) ${0.15 + i * 0.08}s both` }}
-                >
-                  <div
-                    className="absolute inset-0 rounded-2xl opacity-40 blur-sm translate-y-0.5"
-                    style={{ backgroundColor: t.hex }}
-                  />
-                  <div
-                    className="relative rounded-2xl p-[2px] overflow-hidden"
-                    style={{
-                      background: `linear-gradient(145deg, ${t.hex}, ${t.hex}cc)`,
-                      boxShadow: `0 4px 0 ${t.hex}88, 0 5px 14px ${t.hex}44`,
-                    }}
-                  >
-                    <div
-                      className="relative rounded-[14px] px-3.5 py-2.5 overflow-hidden"
-                      style={{ background: '#fffaf0' }}
-                    >
-                      <div
-                        className="absolute inset-x-0 top-0 h-1/2 rounded-t-[14px] pointer-events-none"
-                        style={{ background: 'linear-gradient(180deg, rgba(255,255,255,0.7) 0%, rgba(255,255,255,0) 100%)' }}
-                      />
-                      <div className="relative flex items-center gap-3">
-                        <div
-                          className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0"
-                          style={{
-                            background: `linear-gradient(145deg, ${t.hex}22, ${t.hex}11)`,
-                            boxShadow: `0 2px 6px ${t.hex}22`,
-                          }}
-                        >
-                          <span className="text-xl">{p.icon}</span>
-                        </div>
-                        <p className="text-gray-800 text-sm leading-snug font-bold flex-1">{p.text}</p>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              ))}
-
-              {/* Answer input · keeps interactivity */}
-              <div
-                className="mt-3 rounded-2xl p-4 border-2"
-                style={{
-                  borderColor: `${t.hex}cc`,
-                  background: `${t.hex}22`,
-                  boxShadow: `0 0 18px ${t.hex}55`,
-                  animation: shake ? 'preview-shake 0.5s ease-in-out' : undefined,
-                }}
-              >
-                <input
-                  type="text"
-                  value={answer}
-                  onChange={e => setAnswer(e.target.value)}
-                  onKeyDown={e => { if (e.key === 'Enter') handleSubmit() }}
-                  placeholder="Type your answer…"
-                  autoFocus
-                  className="w-full px-4 py-3 rounded-xl border-2 text-center text-base font-bold focus:outline-none transition-colors bg-white/10 text-white placeholder-white/30 uppercase tracking-wider"
-                  style={{ borderColor: shake ? '#ef4444' : answer ? t.hex : 'rgba(255,255,255,0.2)' }}
-                />
-                {shake && (
-                  <p className="text-red-400 text-[11px] font-bold text-center mt-2">Not quite — look up at the plaque.</p>
-                )}
-                <button
-                  onClick={handleSubmit}
-                  disabled={!answer.trim()}
-                  className="mt-3 w-full py-2.5 rounded-xl font-black text-sm uppercase tracking-wider text-white disabled:opacity-40 transition-all active:scale-95"
-                  style={{ background: t.hex, boxShadow: `0 4px 0 ${t.hex}88` }}
-                >
-                  Submit Answer
-                </button>
-              </div>
-
-              <button
-                onClick={() => setStage('tile')}
-                className="text-white/40 hover:text-white/70 text-[11px] font-bold uppercase tracking-[0.3em] transition-colors"
-              >
-                ← Back to tile
-              </button>
-            </div>
-          </div>
-        )}
-
-        {stage === 'done' && (
-          <div
-            className="rounded-3xl border-2 px-8 py-10 text-center"
-            style={{
-              borderColor: `${t.hex}99`,
-              background: `linear-gradient(160deg, ${t.hex}33 0%, rgba(0,0,0,0.5) 100%)`,
-              boxShadow: `0 0 50px ${t.hex}66`,
-              animation: 'pop-bounce-in 0.7s cubic-bezier(0.34,1.56,0.64,1) both',
-            }}
-          >
-            <div className="text-7xl mb-3" style={{ animation: 'medal-pulse 1.6s ease-in-out infinite' }}>🎉</div>
-            <p className="text-white/70 text-[11px] font-bold uppercase tracking-[0.4em] mb-1">{t.title}</p>
-            <p className="text-white text-3xl font-black leading-none mb-2">Done!</p>
-            <p
-              className="font-black text-2xl tabular-nums"
-              style={{ color: t.hexSoft, textShadow: `0 0 14px ${t.hex}aa` }}
-            >
-              +{t.points} pts
-            </p>
-            <p className="text-white/55 text-xs mt-4 italic">Tile flips to ✓ on your bingo card.</p>
-            <button
-              onClick={reset}
-              className="mt-6 px-6 py-2.5 rounded-2xl font-black text-xs uppercase tracking-[0.3em] text-white border-2 border-white/30 bg-white/10 hover:bg-white/20 transition-all active:scale-95"
-            >
-              ↻ Try again
-            </button>
-          </div>
-        )}
+            ▶ Opens in a new tab
+          </span>
+        </a>
+        <p className="text-white/55 text-xs mt-4 italic">
+          ✦ Tap a tile, read the brief and try it — nothing here counts toward the game.
+        </p>
       </div>
-
-      <p
-        className="relative z-10 text-white/45 text-[11px] mt-5 italic"
-        style={{ fontFamily: 'system-ui, -apple-system, sans-serif' }}
-      >
-        ✦ Clicks inside the demo won't advance the deck · → key continues
-      </p>
     </ContentShell>
   )
 }
 
-// ── 9. QR + wish (closer) ───────────────────────────────────────────────
+/** The white QR card and its address, shared by the join and observer slides. */
+function QrBlock({ url }: { url: string }) {
+  return (
+    <>
+      <div className="bg-white p-5 rounded-3xl shadow-2xl"
+           style={{
+             animation: 'pop-bounce-in 0.75s cubic-bezier(0.34,1.56,0.64,1) 0.45s both',
+             boxShadow: '0 20px 60px rgba(0,0,0,0.45), 0 0 40px rgba(255,184,28,0.25)',
+           }}>
+        {url && <QRCodeSVG value={url} size={230} level="H" />}
+      </div>
+      <p className="text-white/80 text-xs sm:text-sm font-mono break-all max-w-md"
+         style={{ animation: 'slide-up-fade 0.6s ease-out 0.85s both' }}>
+        {url}
+      </p>
+    </>
+  )
+}
+
+// ── 8. Scan to join (players) ───────────────────────────────────────────
+// The QR is built from this board's slug every time the slide renders, so it
+// always points at the board that is open — rename or switch boards and it
+// follows; there is no stored image to go stale.
+function JoinQrSlide({ slideIdx, sectionSlug, sectionName }: {
+  slideIdx: number; sectionSlug: string; sectionName: string
+}) {
+  const joinUrl = typeof window !== 'undefined'
+    ? `${window.location.origin}/bingo-dash/play/${sectionSlug}`
+    : ''
+  return (
+    <ContentShell slideIdx={slideIdx} pretitle={`Players · ${sectionName}`} title="Scan to Join" beam="#fcd34d">
+      <div className="relative z-10 flex flex-col items-center gap-4">
+        <QrBlock url={joinUrl} />
+        <p className="text-white/75 text-sm sm:text-base max-w-xl"
+           style={{ fontFamily: 'system-ui, -apple-system, sans-serif', animation: 'slide-up-fade 0.6s ease-out 1.05s both' }}>
+          Open the camera, scan, pick your team and enter its 4-digit password. You are in!
+        </p>
+      </div>
+    </ContentShell>
+  )
+}
+
+// ── 9. Scan to watch (observers) + wish (closer) ───────────────────────
 function QrWishSlide({ slideIdx, sectionSlug, sectionName }: {
   slideIdx: number; sectionSlug: string; sectionName: string
 }) {
   const observerUrl = typeof window !== 'undefined'
     ? `${window.location.origin}/bingo-dash/play/${sectionSlug}?mode=observer`
     : ''
-
   return (
-    <div key={slideIdx} className="absolute inset-0 flex flex-col items-center justify-center text-center px-6 award-slide-enter">
-      {/* Soft animated blobs */}
-      <div className="absolute pointer-events-none z-0" style={{
-        top: '-12%', left: '-12%', width: '55vw', height: '55vw',
-        background: 'radial-gradient(circle, rgba(255,255,255,0.18) 0%, transparent 70%)',
-        filter: 'blur(40px)', animation: 'medal-pulse 6s ease-in-out infinite',
-      }} />
-      <div className="absolute pointer-events-none z-0" style={{
-        bottom: '-12%', right: '-10%', width: '55vw', height: '55vw',
-        background: 'radial-gradient(circle, rgba(255,184,28,0.18) 0%, transparent 70%)',
-        filter: 'blur(48px)', animation: 'medal-pulse 8s ease-in-out 1s infinite',
-      }} />
-
-      <p className="relative z-10 text-white/85 text-[11px] sm:text-xs font-bold uppercase tracking-[0.5em]"
-         style={{ animation: 'slide-down-fade 0.55s ease-out 0.1s both' }}>
-        Observers · {sectionName}
-      </p>
-
-      <h1 className="relative z-10 mt-3 font-black text-white leading-[0.95]" style={{
-        fontSize: 'clamp(2rem, 6vw, 4.5rem)',
-        letterSpacing: '0.03em',
-        textShadow: '0 4px 30px rgba(0,0,0,0.45)',
-        animation: 'title-slam 0.75s cubic-bezier(0.22, 1, 0.36, 1) 0.3s both',
-      }}>
-        Scan to Watch the Board
-      </h1>
-
-      <div className="relative z-10 mt-7 bg-white p-5 rounded-3xl shadow-2xl"
-           style={{
-             animation: 'pop-bounce-in 0.75s cubic-bezier(0.34,1.56,0.64,1) 0.55s both',
-             boxShadow: '0 20px 60px rgba(0,0,0,0.45), 0 0 40px rgba(255,184,28,0.25)',
-           }}>
-        {observerUrl && <QRCodeSVG value={observerUrl} size={260} level="H" />}
-      </div>
-
-      <p className="relative z-10 mt-5 text-white/80 text-xs sm:text-sm font-mono break-all max-w-md"
-         style={{ animation: 'slide-up-fade 0.6s ease-out 0.95s both' }}>
-        {observerUrl}
-      </p>
-
-      <div className="relative z-10 mt-7 flex items-center gap-3 max-w-xl"
-           style={{ animation: 'slide-up-fade 0.7s ease-out 1.15s both' }}>
-        <span className="h-px flex-1 bg-white/40" />
-        <p className="text-white font-black text-lg sm:text-2xl uppercase tracking-[0.25em] whitespace-nowrap"
-           style={{ textShadow: '0 2px 12px rgba(0,0,0,0.4)' }}>
-          🍀 Stay safe · Have fun
+    <ContentShell slideIdx={slideIdx} pretitle={`Observers · ${sectionName}`} title="Scan to Watch the Board" beam="#fcd34d">
+      <div className="relative z-10 flex flex-col items-center gap-4">
+        <QrBlock url={observerUrl} />
+        <p className="text-white/75 text-sm sm:text-base max-w-xl"
+           style={{ fontFamily: 'system-ui, -apple-system, sans-serif', animation: 'slide-up-fade 0.6s ease-out 1.05s both' }}>
+          No password needed — watch the live board, read-only.
         </p>
-        <span className="h-px flex-1 bg-white/40" />
+        <div className="mt-2 flex items-center gap-3 max-w-xl"
+             style={{ animation: 'slide-up-fade 0.7s ease-out 1.25s both' }}>
+          <span className="h-px flex-1 bg-white/40" />
+          <p className="text-white font-black text-lg sm:text-2xl uppercase tracking-[0.25em] whitespace-nowrap"
+             style={{ textShadow: '0 2px 12px rgba(0,0,0,0.4)' }}>
+            🍀 Stay safe · Have fun
+          </p>
+          <span className="h-px flex-1 bg-white/40" />
+        </div>
+        <p className="text-white/85 text-sm sm:text-base font-light italic max-w-2xl"
+           style={{ fontFamily: 'system-ui, -apple-system, sans-serif', animation: 'slide-up-fade 0.7s ease-out 1.4s both' }}>
+          Wishing you a memorable, safe, and winning game of Bingo Dash.
+        </p>
       </div>
-
-      <p className="relative z-10 mt-3 text-white/85 text-sm sm:text-base font-light italic max-w-2xl"
-         style={{ fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif',
-                  animation: 'slide-up-fade 0.7s ease-out 1.35s both' }}>
-        Wishing you a memorable, safe, and winning game of Bingo Dash.
-      </p>
-    </div>
+    </ContentShell>
   )
 }
 

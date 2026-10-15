@@ -3,6 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { fetchBoardTasks } from '../lib/boardCards'
 import { useFullscreen } from '../hooks/useFullscreen'
+import { useBingoAuth } from '../hooks/useBingoAuth'
 import { ParticleBackground } from '../components/ParticleBackground'
 import { FitBoard } from '../components/FitBoard'
 import {
@@ -32,10 +33,12 @@ function SectionPicker() {
   const [sections, setSections] = useState<BingoSection[]>([])
   const [activeId, setActiveId] = useState<string | null>(null)
   const navigate = useNavigate()
+  const { workingOwnerValue } = useBingoAuth()
 
   useEffect(() => {
+    // Every board is readable, so keep only this account's own.
     supabase.from('bingo_sections').select('*').order('sort_order').then(({ data }) => {
-      if (data) setSections(data)
+      if (data) setSections(data.filter(s => (s.owner_id ?? null) === workingOwnerValue))
     })
     supabase.from('bingo_settings').select('active_section_id').limit(1).maybeSingle()
       .then(({ data }) => { if (data) setActiveId(data.active_section_id) })
@@ -119,6 +122,7 @@ function AwardShow({ sectionSlug }: { sectionSlug: string }) {
   const navigate = useNavigate()
   const { isFullscreen, toggle: toggleFullscreen } = useFullscreen()
   const [section, setSection] = useState<BingoSection | null>(null)
+  const { workingOwnerValue } = useBingoAuth()
   const [teams, setTeams] = useState<BingoTeam[]>([])
   const [scans, setScans] = useState<BingoScan[]>([])
   const [gridTasks, setGridTasks] = useState<BingoTask[]>([])
@@ -154,7 +158,8 @@ function AwardShow({ sectionSlug }: { sectionSlug: string }) {
     let cancelled = false
     ;(async () => {
       const { data: sec } = await supabase.from('bingo_sections').select('*').eq('slug', sectionSlug).maybeSingle()
-      if (!sec || cancelled) { setLoaded(true); return }
+      // Someone else's board is treated as not found.
+      if (!sec || cancelled || (sec.owner_id ?? null) !== workingOwnerValue) { setLoaded(true); return }
       setSection(sec)
       const [{ data: t }, { data: s }, gt, { data: cfg }, { data: d }] = await Promise.all([
         supabase.from('bingo_teams').select('*').eq('section_id', sec.id).order('name'),
