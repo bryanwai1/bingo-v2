@@ -23,6 +23,10 @@ import {
   type AwardSlideKind,
   type AwardSlideId,
   type PrizeKind,
+  evaluationName,
+  evaluationUsesDefaultName,
+  evaluationQrs,
+  type EvalQr,
 } from '../lib/awardSlides'
 
 type DraftConfig = {
@@ -197,8 +201,18 @@ export function BingoDashAwardAdmin() {
   }
 
   const qrFileRef = useRef<HTMLInputElement>(null)
+  /** Which QR the next upload replaces; null appends a new one. */
+  const qrTargetRef = useRef<number | null>(null)
   const [uploadingQr, setUploadingQr] = useState(false)
+  // Every QR edit writes eval_qrs and drops the older single eval_qr.
+  const setQrs = (fn: (qrs: EvalQr[]) => EvalQr[]) =>
+    setDraft(d => ({ ...d, slide_text: { ...d.slide_text, eval_qr: undefined, eval_qrs: fn(evaluationQrs(d.slide_text)) } }))
+  const pickQr = (index: number | null) => {
+    qrTargetRef.current = index
+    qrFileRef.current?.click()
+  }
   const uploadQr = async (file: File) => {
+    const target = qrTargetRef.current
     if (file.size > 5 * 1024 * 1024) { alert(`${file.name} too large (max 5 MB).`); return }
     if (!file.type.startsWith('image/')) { alert('Please choose an image file.'); return }
     setUploadingQr(true)
@@ -208,7 +222,9 @@ export function BingoDashAwardAdmin() {
       const { error } = await supabase.storage.from('media').upload(path, file)
       if (error) { alert(`Upload failed: ${error.message}`); return }
       const url = supabase.storage.from('media').getPublicUrl(path).data.publicUrl
-      setDraft(d => ({ ...d, slide_text: { ...d.slide_text, eval_qr: url } }))
+      setQrs(qrs => target === null || !qrs[target]
+        ? [...qrs, { url }]
+        : qrs.map((q, i) => (i === target ? { ...q, url } : q)))
     } finally {
       setUploadingQr(false)
     }
@@ -684,11 +700,54 @@ export function BingoDashAwardAdmin() {
           {openEditors.has('evaluation') && (
           <SlideTextCard
             title="Evaluation slide"
-            hint="Slogan on top (from the place slides), QR code, your name and today's date. Background follows the main slide."
-            fields={[['title', 'Name']]}
+            hint="Title on top (blank uses the slogan from the place slides), QR codes, your name and today's date. Background follows the main slide."
+            fields={[]}
             slide="evaluation" draft={draft} onChange={setText}
           >
-            <label className="block text-sm font-semibold text-gray-700 mb-1 mt-3">QR code</label>
+            <label className="block text-sm font-semibold text-gray-700 mb-1">Title</label>
+            <input
+              type="text"
+              value={draft.slide_text.evaluation?.pretitle ?? ''}
+              onChange={e => setText('evaluation', 'pretitle', e.target.value)}
+              placeholder={draft.award_slogan.trim() || 'No title'}
+              className="w-full px-3 py-2 rounded-lg border border-gray-300 text-base focus:outline-none focus:ring-2 focus:ring-rose-300"
+            />
+
+            <div className="flex items-center justify-between gap-3 mt-3 mb-1">
+              <label className="text-sm font-semibold text-gray-700">Name</label>
+              <label className="flex items-center gap-1.5 text-sm text-gray-600 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={evaluationUsesDefaultName(draft.slide_text)}
+                  onChange={e => setDraft(d => ({ ...d, slide_text: { ...d.slide_text, eval_name_default: e.target.checked } }))}
+                  className="w-4 h-4 accent-rose-500"
+                />
+                Default
+              </label>
+            </div>
+            {evaluationUsesDefaultName(draft.slide_text) ? (
+              <input
+                type="text"
+                value={SLIDE_TEXT_DEFAULTS.evaluation.title}
+                disabled
+                className="w-full px-3 py-2 rounded-lg border border-gray-200 bg-gray-50 text-base text-gray-500"
+              />
+            ) : (
+              <input
+                type="text"
+                value={draft.slide_text.evaluation?.title ?? ''}
+                onChange={e => setText('evaluation', 'title', e.target.value)}
+                placeholder="No name"
+                className="w-full px-3 py-2 rounded-lg border border-gray-300 text-base focus:outline-none focus:ring-2 focus:ring-rose-300"
+              />
+            )}
+            <p className="text-xs text-gray-400 mt-1">
+              {evaluationUsesDefaultName(draft.slide_text)
+                ? 'Untick Default to type another name, or leave it blank for no name.'
+                : evaluationName(draft.slide_text) ? 'Shown on the slide.' : 'Blank: no name on the slide.'}
+            </p>
+
+            <label className="block text-sm font-semibold text-gray-700 mb-1 mt-3">QR codes</label>
             <input
               ref={qrFileRef}
               type="file"
@@ -700,26 +759,44 @@ export function BingoDashAwardAdmin() {
                 if (file) void uploadQr(file)
               }}
             />
-            <div className="flex items-center gap-3 flex-wrap">
-              <div className="w-20 h-20 rounded-lg bg-white border border-gray-200 p-1 flex items-center justify-center shrink-0">
-                {draft.slide_text.eval_qr
-                  ? <img src={draft.slide_text.eval_qr} alt="" className="max-w-full max-h-full object-contain" />
-                  : <span className="text-gray-400 text-[10px] font-bold">no QR</span>}
-              </div>
-              {draft.slide_text.eval_qr && (
-                <button
-                  onClick={() => setDraft(d => ({ ...d, slide_text: { ...d.slide_text, eval_qr: undefined } }))}
-                  className="px-3 py-1.5 rounded-lg border border-gray-300 text-sm font-bold text-gray-600 hover:bg-gray-50"
-                >
-                  Remove QR
-                </button>
-              )}
+            <div className="space-y-3">
+              {evaluationQrs(draft.slide_text).map((q, i) => (
+                <div key={i} className="flex items-start gap-3">
+                  <div className="w-20 h-20 rounded-lg bg-white border border-gray-200 p-1 flex items-center justify-center shrink-0">
+                    <img src={q.url} alt="" className="max-w-full max-h-full object-contain" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <input
+                      type="text"
+                      value={q.title ?? ''}
+                      onChange={e => setQrs(qrs => qrs.map((x, j) => (j === i ? { ...x, title: e.target.value } : x)))}
+                      placeholder="Title above this QR (optional)"
+                      className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-rose-300"
+                    />
+                    <div className="flex gap-2 mt-2">
+                      <button
+                        onClick={() => pickQr(i)}
+                        disabled={uploadingQr}
+                        className="px-3 py-1.5 rounded-lg border border-gray-300 text-sm font-bold text-gray-600 hover:bg-gray-50 disabled:opacity-50"
+                      >
+                        Replace
+                      </button>
+                      <button
+                        onClick={() => setQrs(qrs => qrs.filter((_, j) => j !== i))}
+                        className="px-3 py-1.5 rounded-lg border border-gray-300 text-sm font-bold text-gray-600 hover:bg-gray-50"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ))}
               <button
-                onClick={() => qrFileRef.current?.click()}
+                onClick={() => pickQr(null)}
                 disabled={uploadingQr}
                 className="px-3 py-1.5 rounded-lg border border-gray-300 text-sm font-bold text-gray-600 hover:bg-gray-50 disabled:opacity-50"
               >
-                {uploadingQr ? 'Uploading…' : draft.slide_text.eval_qr ? 'Replace QR' : 'Upload QR'}
+                {uploadingQr ? 'Uploading…' : evaluationQrs(draft.slide_text).length ? '+ Add another QR' : 'Upload QR'}
               </button>
             </div>
           </SlideTextCard>
@@ -813,7 +890,7 @@ export function BingoDashAwardAdmin() {
                         : s.kind === 'scoreboard'
                           ? `${teams.length} team${teams.length === 1 ? '' : 's'} ranked · final totals`
                           : s.kind === 'evaluation'
-                            ? `QR · ${draft.slide_text.evaluation?.title || SLIDE_TEXT_DEFAULTS.evaluation.title}`
+                            ? [`${evaluationQrs(draft.slide_text).length || 'no'} QR`, evaluationName(draft.slide_text)].filter(Boolean).join(' · ')
                           : s.kind === 'closing'
                             ? [draft.slide_text.closing?.title || draft.main_title, draft.slide_text.closing?.pretitle || SLIDE_TEXT_DEFAULTS.closing.pretitle].filter(Boolean).join(' · ')
                             : s.kind === 'consolation_group'

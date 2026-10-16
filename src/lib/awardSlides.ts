@@ -384,6 +384,7 @@ export type SlideTextBlock = {
   hint?: string
   bg?: string
 }
+export type EvalQr = { url: string; title?: string }
 export type SlideText = {
   /** Set by the editor; see normalizeSlideOrder's injectEndSlides. */
   v?: number
@@ -393,8 +394,13 @@ export type SlideText = {
   logo_bg?: string
   /** Rank and show scores including the facilitator bonus. Undefined = on. */
   include_bonus?: boolean
-  /** Evaluation slide: uploaded QR code image URL. */
+  /** Evaluation slide: uploaded QR code image URL (older configs; see eval_qrs). */
   eval_qr?: string
+  /** Evaluation slide: QR codes shown side by side, each with an optional title. */
+  eval_qrs?: EvalQr[]
+  /** Evaluation slide: show the default name. Undefined = on unless a custom name was typed. */
+  eval_name_default?: boolean
+  /** pretitle = heading (blank → award slogan), title = custom name. */
   evaluation?: SlideTextBlock
   intro?: SlideTextBlock
   holding?: SlideTextBlock
@@ -429,4 +435,22 @@ export function slideTextValue(
   if (typeof v === 'string' && v.trim()) return v
   const d = (SLIDE_TEXT_DEFAULTS[slide] as SlideTextBlock)[field]
   return d ?? fallback ?? ''
+}
+
+/** Whether the evaluation slide uses the default name (older configs: on unless a name was typed). */
+export function evaluationUsesDefaultName(text: SlideText): boolean {
+  return text.eval_name_default ?? !text.evaluation?.title?.trim()
+}
+
+/** The evaluation slide's QR codes, reading the older single eval_qr too. */
+export function evaluationQrs(text: SlideText): EvalQr[] {
+  if (Array.isArray(text.eval_qrs)) return text.eval_qrs.filter(q => q && typeof q.url === 'string' && q.url)
+  return text.eval_qr ? [{ url: text.eval_qr }] : []
+}
+
+/** The evaluation slide's name: the default, the typed name, or '' for none. */
+export function evaluationName(text: SlideText): string {
+  return evaluationUsesDefaultName(text)
+    ? SLIDE_TEXT_DEFAULTS.evaluation.title
+    : text.evaluation?.title?.trim() ?? ''
 }

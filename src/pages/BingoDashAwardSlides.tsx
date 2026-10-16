@@ -14,6 +14,8 @@ import {
   CEREMONY_BACKGROUND,
   readSlideText,
   slideTextValue,
+  evaluationName,
+  evaluationQrs,
   type SlideText,
   type PlaceKind,
   DEFAULT_PRIZE_COUNTS,
@@ -1014,9 +1016,10 @@ function ordinal(n: number): string {
 }
 
 function EvaluationSlide({ slideIdx, config, text }: { slideIdx: number; config: BingoAwardConfig | null; text: SlideText }) {
-  const slogan = config?.award_slogan?.trim() || ''
-  const name = slideTextValue(text, 'evaluation', 'title')
-  const qr = text.eval_qr
+  const slogan = text.evaluation?.pretitle?.trim() || config?.award_slogan?.trim() || ''
+  const name = evaluationName(text)
+  const qrs = evaluationQrs(text)
+  const qrSize = qrs.length > 1 ? `min(30vh, ${Math.floor(80 / qrs.length)}vw)` : 'min(34vh, 80vw)'
   const now = new Date()
   const day = now.getDate()
   const month = now.toLocaleString('en-GB', { month: 'short' }).toUpperCase()
@@ -1029,11 +1032,26 @@ function EvaluationSlide({ slideIdx, config, text }: { slideIdx: number; config:
           {slogan}
         </h1>
       )}
-      <div className="rounded-[2rem] bg-white flex items-center justify-center" style={{ width: 'min(34vh, 80vw)', height: 'min(34vh, 80vw)', padding: '2.2vh' }}>
-        {qr
-          ? <img src={qr} alt="Evaluation QR code" className="w-full h-full object-contain" />
-          : <span className="text-gray-400 font-bold text-sm">Upload QR code in Award admin</span>}
-      </div>
+      {qrs.length === 0 ? (
+        <div className="rounded-[2rem] bg-white flex items-center justify-center" style={{ width: qrSize, height: qrSize, padding: '2.2vh' }}>
+          <span className="text-gray-400 font-bold text-sm">Upload QR code in Award admin</span>
+        </div>
+      ) : (
+        <div className="flex items-end justify-center gap-[4vw]">
+          {qrs.map((q, i) => (
+            <div key={i} className="flex flex-col items-center gap-[1.2vh]">
+              {q.title?.trim() && (
+                <div className="font-black uppercase text-white leading-tight" style={{ fontSize: 'clamp(0.9rem, 2vw, 1.7rem)', textShadow: '0 2px 8px rgba(0,0,0,0.35)', maxWidth: qrSize }}>
+                  {q.title}
+                </div>
+              )}
+              <div className="rounded-[2rem] bg-white flex items-center justify-center" style={{ width: qrSize, height: qrSize, padding: '2.2vh' }}>
+                <img src={q.url} alt={q.title?.trim() || 'Evaluation QR code'} className="w-full h-full object-contain" />
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
       <div className="flex flex-col items-center gap-[1.6vh]">
         {name && (
           <div className="rounded-full font-black uppercase px-[3vw] py-[1.2vh]" style={{ ...pill, fontSize: 'clamp(1rem, 2.4vw, 2rem)' }}>{name}</div>
