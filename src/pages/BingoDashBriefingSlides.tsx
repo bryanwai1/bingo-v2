@@ -4,6 +4,7 @@ import { QRCodeSVG } from 'qrcode.react'
 import { supabase } from '../lib/supabase'
 import { useFullscreen } from '../hooks/useFullscreen'
 import { useBingoAuth } from '../hooks/useBingoAuth'
+import { useBoardReset } from '../hooks/useBoardReset'
 import { ParticleBackground } from '../components/ParticleBackground'
 import type { BingoSection } from '../types/database'
 import { bonusCheckpoints, bonusPoints, resolveBonusWindow, type BonusWindow } from '../lib/timeBonus'
@@ -152,6 +153,9 @@ function BriefingShow({ sectionSlug }: { sectionSlug: string }) {
       .subscribe()
     return () => { supabase.removeChannel(channel) }
   }, [sectionSlug])
+
+  // Reset Game on this board: start the deck over for the next event.
+  useBoardReset(section?.id, () => setSlideIdx(0))
 
   const totalSlides = SLIDES.length
   const safeIdx = Math.min(slideIdx, totalSlides - 1)

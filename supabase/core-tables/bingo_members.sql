@@ -11,9 +11,10 @@ create table public.bingo_members (
   password    text,
   created_at  timestamptz not null default now(),
 
-  -- (tracked) media-photos/20260421_bingo_features.sql
-  role        text not null default 'member'
-    check (role in ('member', 'observer'))
+  -- (tracked) media-photos/20260421_bingo_features.sql,
+  -- 'member' renamed by core-tables/20261021_team_caps_player_role.sql
+  role        text not null default 'player'
+    check (role in ('player', 'observer'))
 );
 
 create index bingo_members_team_idx on public.bingo_members(team_id);

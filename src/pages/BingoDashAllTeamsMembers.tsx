@@ -4,7 +4,6 @@ import { supabase } from '../lib/supabase'
 import { ParticleBackground } from '../components/ParticleBackground'
 import type { BingoTeam, BingoMember, BingoSection } from '../types/database'
 
-const MAX_TEAM_MEMBERS = 4
 
 export function BingoDashAllTeamsMembers() {
   const { sectionSlug } = useParams<{ sectionSlug: string }>()
@@ -79,7 +78,7 @@ export function BingoDashAllTeamsMembers() {
   const sortedTeams = [...teams].sort((a, b) =>
     a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' })
   )
-  const totalPlayers = members.filter(m => m.role === 'member').length
+  const totalPlayers = members.filter(m => m.role === 'player').length
 
   return (
     <div className="min-h-screen bg-gray-950 relative overflow-hidden px-4 py-8">
@@ -112,9 +111,9 @@ export function BingoDashAllTeamsMembers() {
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
             {sortedTeams.map((team, i) => {
               const teamMembers = members.filter(m => m.team_id === team.id)
-              const players = teamMembers.filter(m => m.role === 'member')
+              const players = teamMembers.filter(m => m.role === 'player')
               const observers = teamMembers.filter(m => m.role === 'observer')
-              const isFull = players.length >= MAX_TEAM_MEMBERS
+              const isFull = players.length >= (section?.max_team_players ?? 1)
               return (
                 <div key={team.id}
                   className="bg-white rounded-2xl shadow-xl p-4 animate-bounce-in flex flex-col"
@@ -132,7 +131,7 @@ export function BingoDashAllTeamsMembers() {
                     <div className="flex-1 min-w-0">
                       <h2 className="text-base font-black text-gray-900 truncate">{team.name}</h2>
                       <p className={`text-xs font-bold ${isFull ? 'text-red-500' : 'text-gray-400'}`}>
-                        {players.length} / {MAX_TEAM_MEMBERS} member{players.length !== 1 ? 's' : ''}
+                        {players.length} / {section?.max_team_players ?? 1} player{players.length !== 1 ? 's' : ''}
                       </p>
                     </div>
                   </div>
@@ -158,7 +157,7 @@ export function BingoDashAllTeamsMembers() {
                   {observers.length > 0 && (
                     <div className="mt-2.5 pt-2.5 border-t border-gray-100">
                       <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1.5">
-                        👁 {observers.length} observer{observers.length !== 1 ? 's' : ''}
+                        👁 {observers.length} / {section?.max_team_observers ?? 9} observer{observers.length !== 1 ? 's' : ''}
                       </p>
                       <p className="text-[11px] text-gray-500 truncate">
                         {observers.map(o => o.name).join(', ')}
@@ -172,7 +171,7 @@ export function BingoDashAllTeamsMembers() {
         )}
 
         <p className="text-[11px] text-gray-600 mt-8 text-center">
-          This page updates live as members join.
+          This page updates live as players join.
         </p>
       </div>
     </div>

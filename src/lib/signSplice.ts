@@ -292,34 +292,3 @@ export function validateTitle(raw: string, rules: TitleRules): string | null {
   if (n > rules.maxLength) return `Title can be at most ${rules.maxLength} letters.`
   return null
 }
-
-// ── Shop matching (Rule 11) ──────────────────────────────────────────────────
-
-/**
- * Fuzzy match the OCR text against a shop list — stands in for rapidfuzz's
- * partial_ratio. Returns the best shop name and a 0..100 score.
- */
-export function matchShop(detectedText: string, shopNames: string[]): { name: string; score: number } | null {
-  const hay = detectedText.toLowerCase().replace(/\s+/g, ' ')
-  if (!hay || shopNames.length === 0) return null
-
-  let best: { name: string; score: number } | null = null
-  for (const name of shopNames) {
-    const needle = name.toLowerCase()
-    let score: number
-    if (hay.includes(needle)) {
-      score = 100
-    } else {
-      // longest common run of characters, as a share of the shop name
-      let run = 0
-      let bestRun = 0
-      for (let i = 0; i < hay.length; i++) {
-        run = needle.includes(hay[i]) ? run + 1 : 0
-        bestRun = Math.max(bestRun, run)
-      }
-      score = Math.round((bestRun / needle.length) * 100)
-    }
-    if (!best || score > best.score) best = { name, score }
-  }
-  return best && best.score >= 60 ? best : null
-}

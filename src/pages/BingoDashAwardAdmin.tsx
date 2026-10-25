@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useBingoAuth } from '../hooks/useBingoAuth'
+import { useBoardReset } from '../hooks/useBoardReset'
 import type { BingoSection, BingoTeam } from '../types/database'
 import {
   DEFAULT_PRIZE_COUNTS,
@@ -164,6 +165,15 @@ export function BingoDashAwardAdmin() {
 
   // What was last loaded or saved, to tell whether the draft has changes.
   const [savedJson, setSavedJson] = useState<string | null>(null)
+
+  // Reset Game deleted this board's config: show the defaults, and drop the old
+  // row id so the next save inserts a new row instead of updating nothing.
+  useBoardReset(section?.id, () => {
+    setConfigId(null)
+    setDraft(EMPTY_DRAFT)
+    setTeams([])
+    setSavedJson(JSON.stringify(EMPTY_DRAFT))
+  })
   useEffect(() => {
     if (loaded && savedJson === null) setSavedJson(JSON.stringify(draft))
   }, [loaded, savedJson, draft])

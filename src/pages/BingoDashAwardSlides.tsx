@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabase'
 import { fetchBoardTasks } from '../lib/boardCards'
 import { useFullscreen } from '../hooks/useFullscreen'
 import { useBingoAuth } from '../hooks/useBingoAuth'
+import { useBoardReset } from '../hooks/useBoardReset'
 import { ParticleBackground } from '../components/ParticleBackground'
 import { FitBoard } from '../components/FitBoard'
 import {
@@ -213,6 +214,16 @@ function AwardShow({ sectionSlug }: { sectionSlug: string }) {
     return () => { void supabase.removeChannel(channel) }
   }, [sectionId])
 
+  // Reset Game has already deleted this board's teams and award setup, and
+  // realtime DELETEs cannot be filtered by board, so clear them here directly.
+  useBoardReset(sectionId, () => {
+    setSlideIdx(0)
+    setShowJudgePanel(false)
+    setConfig(null)
+    setTeams([])
+    setDuels([])
+  })
+
   const text: SlideText = useMemo(() => readSlideText(config?.slide_text), [config])
   const includeBonus = text.include_bonus !== false
 
@@ -256,6 +267,8 @@ function AwardShow({ sectionSlug }: { sectionSlug: string }) {
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [navigate, showJudgePanel, totalSlides])
+
+  useEffect(preloadPlaceArt, [])
 
   if (!loaded) {
     return <div className="min-h-screen bg-gray-950 flex items-center justify-center text-white">Loading…</div>
@@ -1298,7 +1311,7 @@ function PrizeSlide({
 
 // ── Place slides: 1st - 5th ──────────────────────────────────
 //
-// The five place slides ARE the artwork in public/award/<n>-place.png: a
+// The five place slides ARE the artwork in public/award/<n>-place.jpg: a
 // finished 1672x941 composition with four empty slots. So this renders the
 // image and drops four values into it - no headline, laurels, stat boxes,
 // spotlight or confetti are drawn in code, because the PNG already has them.
@@ -1344,6 +1357,21 @@ const NUM_FONT = `system-ui, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif`
 
 const PLACE_FILE: Record<PlaceKind, string> = {
   first: '1', second: '2', third: '3', fourth: '4', fifth: '5',
+}
+const placeArt = (kind: PlaceKind) => `/award/${PLACE_FILE[kind]}-place.jpg`
+
+/** Backgrounds already downloaded and decoded, so a slide can show at once. */
+const loadedArt = new Set<string>()
+/** Fetch every place background up front: each is only drawn when its slide
+ *  mounts, and without this its text showed on black until it arrived. */
+function preloadPlaceArt() {
+  for (const kind of Object.keys(PLACE_FILE) as PlaceKind[]) {
+    const src = placeArt(kind)
+    if (loadedArt.has(src)) continue
+    const img = new Image()
+    img.src = src
+    img.decode().then(() => loadedArt.add(src), () => {})
+  }
 }
 
 function SlideCanvas({ children }: { children: React.ReactNode }) {
@@ -1439,13 +1467,19 @@ function PlaceSlide({
   const photo = placePhoto(config, descriptor.id, team)
   const logo = customLogo(readSlideText(config?.slide_text).logo)
   const slogan = config?.award_slogan?.trim() || ''
+  const art = placeArt(kind)
+  // Hold the photo and values back until the artwork is in, so the slide
+  // fades in whole instead of showing its boxes on black first.
+  const [artReady, setArtReady] = useState(() => loadedArt.has(art))
 
   return (
-    <div key={slideIdx} className="absolute inset-0 award-slide-enter">
+    <div key={slideIdx} className={`absolute inset-0 ${artReady ? 'award-slide-enter' : 'invisible'}`}>
       <SlideCanvas>
         <img
-          src={`/award/${PLACE_FILE[kind]}-place.png`}
+          src={art}
           alt=""
+          onLoad={() => { loadedArt.add(art); setArtReady(true) }}
+          onError={() => setArtReady(true)}
           style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }}
         />
 

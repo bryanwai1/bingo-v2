@@ -1,13 +1,19 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useParams, Navigate } from 'react-router-dom'
-import { decks, getDeck, type Point } from '../lib/instructionDecks'
+import { decks, getDeck, type Deck, type Point } from '../lib/instructionDecks'
 import { useSetting } from '../hooks/useSettings'
 
 export function InstructionsSlide() {
   const { deckId } = useParams<{ deckId: string }>()
-  const effectiveId = deckId ?? 'flag-retrieval'
-  const deck = getDeck(effectiveId)
+  const deck = getDeck(deckId ?? 'flag-retrieval')
   if (!deck) return <Navigate to="/instructions" replace />
+  // Keyed so switching decks starts the slide state fresh, and the hooks
+  // below always run in the same order whether or not the deck exists.
+  return <DeckSlides key={deck.id} deck={deck} />
+}
+
+function DeckSlides({ deck }: { deck: Deck }) {
+  const effectiveId = deck.id
 
   const slides = deck.slides
 

@@ -4,7 +4,6 @@ import { supabase } from '../lib/supabase'
 import { ParticleBackground } from '../components/ParticleBackground'
 import type { BingoTeam, BingoMember, BingoSection } from '../types/database'
 
-const MAX_TEAM_MEMBERS = 4
 
 export function BingoDashTeamMembers() {
   const { teamId } = useParams<{ teamId: string }>()
@@ -55,7 +54,8 @@ export function BingoDashTeamMembers() {
     return () => { supabase.removeChannel(channel) }
   }, [teamId])
 
-  const players = members.filter(m => m.role === 'member')
+  const players = members.filter(m => m.role === 'player')
+  const maxPlayers = section?.max_team_players ?? 1
   const observers = members.filter(m => m.role === 'observer')
 
   if (loading) {
@@ -102,13 +102,13 @@ export function BingoDashTeamMembers() {
           </div>
         )}
 
-        {/* Members card */}
+        {/* Players card */}
         <div className="w-full bg-white rounded-3xl shadow-2xl p-6 animate-bounce-in"
           style={{ animationDelay: '0.05s', opacity: 0, animationFillMode: 'forwards' }}>
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-black text-gray-900">Members</h2>
-            <span className={`text-sm font-bold ${players.length >= MAX_TEAM_MEMBERS ? 'text-red-500' : 'text-gray-400'}`}>
-              {players.length} / {MAX_TEAM_MEMBERS}
+            <h2 className="text-lg font-black text-gray-900">Players</h2>
+            <span className={`text-sm font-bold ${players.length >= maxPlayers ? 'text-red-500' : 'text-gray-400'}`}>
+              {players.length} / {maxPlayers}
             </span>
           </div>
 
@@ -116,7 +116,7 @@ export function BingoDashTeamMembers() {
             <div className="py-10 text-center">
               <div className="text-4xl mb-3">👥</div>
               <p className="text-gray-400 text-sm font-medium">Nobody has joined yet.</p>
-              <p className="text-gray-300 text-xs mt-1">Members will appear here in real time.</p>
+              <p className="text-gray-300 text-xs mt-1">Players will appear here in real time.</p>
             </div>
           ) : (
             <ul className="flex flex-col gap-2">
@@ -130,7 +130,7 @@ export function BingoDashTeamMembers() {
                   <span className="font-bold text-gray-900 truncate">{m.name}</span>
                 </li>
               ))}
-              {Array.from({ length: Math.max(0, MAX_TEAM_MEMBERS - players.length) }).map((_, i) => (
+              {Array.from({ length: Math.max(0, maxPlayers - players.length) }).map((_, i) => (
                 <li key={`empty-${i}`}
                   className="flex items-center gap-3 px-3 py-3 rounded-xl bg-gray-50/60 border border-dashed border-gray-200">
                   <div className="w-9 h-9 rounded-full bg-gray-100 text-gray-300 flex items-center justify-center font-black text-base flex-shrink-0">
@@ -146,7 +146,7 @@ export function BingoDashTeamMembers() {
             <div className="mt-5 pt-5 border-t border-gray-100">
               <div className="flex items-center justify-between mb-3">
                 <h3 className="text-xs font-black text-gray-500 uppercase tracking-widest">Observers</h3>
-                <span className="text-xs font-bold text-gray-400">{observers.length}</span>
+                <span className="text-xs font-bold text-gray-400">{observers.length} / {section?.max_team_observers ?? 9}</span>
               </div>
               <ul className="flex flex-wrap gap-2">
                 {observers.map(m => (
@@ -162,7 +162,7 @@ export function BingoDashTeamMembers() {
         </div>
 
         <p className="text-[11px] text-gray-600 mt-5 text-center">
-          This page updates live as members join.
+          This page updates live as players join.
         </p>
       </div>
     </div>

@@ -115,6 +115,9 @@ export interface BingoSection extends BoardTimer {
   tile_display: 'icon' | 'words'
   /** Demo only: grid slots the presenter has lit up, shared with every viewer. */
   glow_slots?: number[] | null
+  /** Per-team caps, set in Admin → Teams. Players can complete challenges; observers only view. */
+  max_team_players?: number
+  max_team_observers?: number
   owner_id: string | null
   created_at: string
 }
@@ -358,7 +361,7 @@ export interface BingoMember {
   section_id: string
   name: string
   password: string
-  role: 'member' | 'observer'
+  role: 'player' | 'observer'
   created_at: string
 }
 
@@ -431,94 +434,6 @@ export interface BingoFacilitatorSession {
   uses: number
   revoked: boolean
   created_by: string | null
-  created_at: string
-}
-
-// ── Snake and Ladder ──────────────────────────────────────────
-
-export interface SnakeGame {
-  id: string
-  name: string
-  snakes: Record<string, number>   // head -> tail
-  ladders: Record<string, number>  // bottom -> top
-  created_at: string
-}
-
-export interface SnakeTile {
-  id: string
-  game_id: string
-  tile_number: number
-  task_id: string | null
-  created_at: string
-}
-
-export interface SnakeTeam {
-  id: string
-  game_id: string
-  name: string
-  hex_code: string
-  emoji: string | null
-  position: number
-  sort_order: number
-  points: number
-  created_at: string
-}
-
-// ── Photo Voting ──────────────────────────────────────────────
-
-export interface VotePoll {
-  id: string
-  title: string
-  max_votes_per_voter: number
-  is_open: boolean
-  media_type: 'photo' | 'video'
-  created_at: string
-}
-
-export interface VotePhoto {
-  id: string
-  poll_id: string
-  photo_url: string
-  label: string | null
-  sort_order: number
-  created_at: string
-}
-
-export interface VoteBallot {
-  id: string
-  poll_id: string
-  photo_id: string
-  voter_id: string
-  created_at: string
-}
-
-/* ---------- AI Team Building ---------- */
-
-export interface AitbSettings {
-  id: number
-  admin_password: string
-  game_ends_at: string | null
-  updated_at: string
-}
-
-export interface AitbTeam {
-  id: string
-  name: string
-  color: string
-  sort_order: number
-  adjust: number
-  created_at: string
-}
-
-export interface AitbProgress {
-  id: string
-  team_id: string
-  activity_id: number
-  scanned_at: string | null
-  steps_done: number[]
-  completed_at: string | null
-  bonus: number
-  words: string[]
   created_at: string
 }
 

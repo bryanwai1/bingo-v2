@@ -25,7 +25,6 @@ function formatTime(totalSeconds: number): string {
 }
 
 const GRID_SIZE = 25
-const MAX_TEAM_MEMBERS = 4
 const BINGO_WORD = 'BINGO'
 const BINGO_LINES = [
   [0, 1, 2, 3, 4], [5, 6, 7, 8, 9], [10, 11, 12, 13, 14], [15, 16, 17, 18, 19], [20, 21, 22, 23, 24],
@@ -54,6 +53,7 @@ function JoinScreen({
   sectionName,
   groups,
   memberCounts,
+  cap,
   onJoinGroup,
   isObserver = false,
   invite = null,
@@ -62,8 +62,10 @@ function JoinScreen({
   theme: PlayerTheme
   sectionName: string
   groups: BingoTeam[]
+  /** Per-team count of this joiner's role (players, or observers in observer mode). */
   memberCounts: Record<string, number>
-  onJoinGroup: (memberName: string, password: string, teamId: string, role: 'member' | 'observer') => Promise<void>
+  cap: number
+  onJoinGroup: (memberName: string, password: string, teamId: string, role: 'player' | 'observer') => Promise<void>
   isObserver?: boolean
   /** From a teammate's invite QR: the team and its password are already
    *  known, so the newcomer only types a name and lands on that team. */
@@ -90,7 +92,7 @@ function JoinScreen({
       // Scanned a teammate's QR: straight onto their team.
       setSubmitting(true)
       try {
-        await onJoinGroup(trimmedName, invite.password, invite.team.id, 'member')
+        await onJoinGroup(trimmedName, invite.password, invite.team.id, 'player')
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to join group')
         setSubmitting(false)
@@ -121,14 +123,14 @@ function JoinScreen({
     setStep('password')
   }
 
-  // Password step: submit password (members only)
+  // Password step: submit password (players only)
   const handleSubmitPassword = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!selectedTeam || password.length !== 4 || !trimmedName) return
     setSubmitting(true)
     setError('')
     try {
-      await onJoinGroup(trimmedName, password, selectedTeam.id, 'member')
+      await onJoinGroup(trimmedName, password, selectedTeam.id, 'player')
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to join group')
       setSubmitting(false)
@@ -267,7 +269,7 @@ function JoinScreen({
             ) : (
               filteredGroups.map(group => {
                 const count = memberCounts[group.id] ?? 0
-                const isFull = !isObserver && count >= MAX_TEAM_MEMBERS
+                const isFull = count >= cap
                 const notReady = !isObserver && !group.password
                 const disabled = isFull || notReady || submitting
                 return (
@@ -289,11 +291,9 @@ function JoinScreen({
                           "Senarai Kandungan" and "Group 1" lost its number —
                           which leaves a player unable to find their own team. */}
                       <span translate="no">{group.name}</span>
-                      {!isObserver && (
-                        <span className={`text-xs font-mono ${isFull ? 'text-red-400' : 'text-gray-400'}`}>
-                          {count} / {MAX_TEAM_MEMBERS}
-                        </span>
-                      )}
+                      <span className={`text-xs font-mono ${isFull ? 'text-red-400' : 'text-gray-400'}`}>
+                        {isObserver && '👁 '}{count} / {cap}
+                      </span>
                     </div>
                     {isFull && (
                       <span className="text-[10px] text-red-400 font-bold uppercase tracking-wider">Full</span>
@@ -572,7 +572,7 @@ function BoardScreen({
   team: { id: string; name: string }
   sectionName: string
   sectionSlug: string
-  memberRole: 'member' | 'observer'
+  memberRole: 'player' | 'observer'
   /** The team's 4-digit password, for the invite QR. */
   teamPassword?: string | null
   /** Board id for the support chat anchored under the team name. */
@@ -722,9 +722,9 @@ function BoardScreen({
             <LanguageToggle />
             {/* A teammate scans this and lands on the name step for THIS
                 team — no hunting through the group list or asking for the
-                password across a noisy room. Members only: an observer has
+                password across a noisy room. Players only: an observer has
                 no password to hand out. */}
-            {memberRole === 'member' && teamPassword && (
+            {memberRole === 'player' && teamPassword && (
               <MyQrButton
                 label="Invite teammate"
                 teamName={team.name}
@@ -851,7 +851,7 @@ export function BingoDashJoin() {
   const invitePw = searchParams.get('pw') ?? ''
   const [section, setSection] = useState<BingoSection | null>(null)
   const [team, setTeam] = useState<{ id: string; name: string } | null>(null)
-  const [memberRole, setMemberRole] = useState<'member' | 'observer'>('member')
+  const [memberRole, setMemberRole] = useState<'player' | 'observer'>('player')
   const [groups, setGroups] = useState<BingoTeam[]>([])
   const [memberCounts, setMemberCounts] = useState<Record<string, number>>({})
   const [gridTasks, setGridTasks] = useState<BingoTask[]>([])
@@ -875,7 +875,7 @@ export function BingoDashJoin() {
         const cachedMemberId = localStorage.getItem(MEMBER_ID_KEY(sectionSlug))
         const cachedTeamId = localStorage.getItem(TEAM_ID_KEY(sectionSlug))
         const cachedTeamData = localStorage.getItem(TEAM_DATA_KEY(sectionSlug))
-        const cachedRole = (localStorage.getItem(MEMBER_ROLE_KEY(sectionSlug)) ?? 'member') as 'member' | 'observer'
+        const cachedRole = localStorage.getItem(MEMBER_ROLE_KEY(sectionSlug)) === 'observer' ? 'observer' : 'player'
         // Player URL (no ?mode=observer) means the user wants to play, not observe.
         // Drop any stale observer session so they aren't silently kept in observer mode
         // — that would make every task QR they scan show "Observer Mode".
@@ -896,7 +896,7 @@ export function BingoDashJoin() {
             localStorage.removeItem(GLOBAL_MEMBER_ROLE_KEY)
           }
           setPageState('join')
-        } else if (isObserver && cachedRole === 'member' && cachedMemberId) {
+        } else if (isObserver && cachedRole === 'player' && cachedMemberId) {
           // Observer URL means the user wants to spectate, not play. Drop this
           // board's player session so they land on "Select Group to Watch"
           // instead of silently resuming as their team with full write access
@@ -906,7 +906,7 @@ export function BingoDashJoin() {
           localStorage.removeItem(TEAM_ID_KEY(sectionSlug))
           localStorage.removeItem(TEAM_DATA_KEY(sectionSlug))
           localStorage.removeItem(MEMBER_ROLE_KEY(sectionSlug))
-          if (localStorage.getItem(GLOBAL_MEMBER_ROLE_KEY) === 'member') {
+          if (['player', 'member'].includes(localStorage.getItem(GLOBAL_MEMBER_ROLE_KEY) ?? '')) {
             localStorage.removeItem(GLOBAL_TEAM_ID_KEY)
             localStorage.removeItem(GLOBAL_TEAM_DATA_KEY)
             localStorage.removeItem(GLOBAL_MEMBER_ROLE_KEY)
@@ -955,12 +955,12 @@ export function BingoDashJoin() {
           .order('name')
           .then(({ data: g }) => { if (g) setGroups(g) })
 
-        // Load member counts per team — only 'member' role counts toward the cap
+        // Per-team counts of the role this joiner will take, for the cap
         supabase
           .from('bingo_members')
           .select('team_id')
           .eq('section_id', data.id)
-          .eq('role', 'member')
+          .eq('role', isObserver ? 'observer' : 'player')
           .then(({ data: m }) => {
             if (!m) return
             const counts: Record<string, number> = {}
@@ -1053,7 +1053,7 @@ export function BingoDashJoin() {
   }, [team?.id, section?.game_started])
 
   // Join a group: create or find the member record, then enter the board
-  const joinGroup = async (memberName: string, password: string, teamId: string, role: 'member' | 'observer') => {
+  const joinGroup = async (memberName: string, password: string, teamId: string, role: 'player' | 'observer') => {
     if (!section || !sectionSlug) throw new Error('Section not found')
 
     // Observers bypass password checks
@@ -1089,16 +1089,17 @@ export function BingoDashJoin() {
       .limit(1)
     const existing = existingRows?.[0] ?? null
 
-    // Enforce 4-member cap only for non-observer joiners (don't block a returning member on their own team)
-    const isReturningSameTeam = existing?.team_id === teamId
-    if (role === 'member' && !isReturningSameTeam) {
+    // Enforce the board's per-team cap for this role (don't block someone returning to their own team)
+    const isReturningSameTeam = existing?.team_id === teamId && existing.role === role
+    if (!isReturningSameTeam) {
+      const cap = role === 'observer' ? section.max_team_observers ?? 9 : section.max_team_players ?? 1
       const { count } = await supabase
         .from('bingo_members')
         .select('id', { count: 'exact', head: true })
         .eq('team_id', teamId)
-        .eq('role', 'member')
-      if ((count ?? 0) >= MAX_TEAM_MEMBERS) {
-        throw new Error(`This team is full (${MAX_TEAM_MEMBERS} / ${MAX_TEAM_MEMBERS}).`)
+        .eq('role', role)
+      if ((count ?? 0) >= cap) {
+        throw new Error(`This team is full (${cap} ${role === 'observer' ? 'observer' : 'player'}${cap === 1 ? '' : 's'}).`)
       }
     }
 
@@ -1152,7 +1153,7 @@ export function BingoDashJoin() {
     localStorage.setItem(GLOBAL_MEMBER_ROLE_KEY, role)
     setMemberRole(role)
     setGroups(prev => prev.map(g => g.id === liveTeam.id ? liveTeam : g))
-    if (role === 'member') {
+    if (role === (isObserver ? 'observer' : 'player')) {
       setMemberCounts(prev => ({ ...prev, [liveTeam.id]: (prev[liveTeam.id] ?? 0) + (existing ? 0 : 1) }))
     }
     setTeam(liveTeam)
@@ -1211,7 +1212,7 @@ export function BingoDashJoin() {
     return (
       <>
         <JoinScreen
-          theme={theme} sectionName={section.name} groups={groups} memberCounts={memberCounts} onJoinGroup={joinGroup} isObserver={isObserver}
+          theme={theme} sectionName={section.name} groups={groups} memberCounts={memberCounts} cap={(isObserver ? section.max_team_observers ?? 9 : section.max_team_players ?? 1)} onJoinGroup={joinGroup} isObserver={isObserver}
           invite={(() => {
             const t = inviteTeamId ? groups.find(g => g.id === inviteTeamId) : null
             return t && /^\d{4}$/.test(invitePw) ? { team: t, password: invitePw } : null

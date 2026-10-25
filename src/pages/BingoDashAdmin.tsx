@@ -6,6 +6,7 @@ import JSZip from 'jszip'
 import { supabase } from '../lib/supabase'
 import { CategoryIcon } from '../components/BingoTileFace'
 import { useBingoAuth } from '../hooks/useBingoAuth'
+import { announceBoardReset } from '../hooks/useBoardReset'
 import type { BingoTask, BingoTeam, BingoScan, BingoSettings, BingoSection, BingoCategory, BingoChallengeSection, BingoMember, BingoPhotoSubmission, BingoBoardCard, BingoDuel, BonusItem } from '../types/database'
 import { BINGO_LINES, buildBingoSlots, completedBingoLines, scoreWithBingoLines } from '../lib/bingoLines'
 import { boxPoints, resolveBonusWindow, BONUS_PRESETS, DEFAULT_BONUS_FULL_MIN, DEFAULT_BONUS_TIMER_MIN } from '../lib/timeBonus'
@@ -740,6 +741,31 @@ function boardWriteFailureMessage(dbMessage?: string): string {
 
 
 // Cards are neutral now, so text follows the theme rather than the swatch.
+// Stroke icons for the Teams tab buttons (16×16 grid, currentColor).
+const ICONS = {
+  plus: 'M8 3v10M3 8h10',
+  minus: 'M3 8h10',
+  stack: 'M2.5 5.5 8 3l5.5 2.5L8 8zM2.5 8.5 8 11l5.5-2.5M2.5 11 8 13.5l5.5-2.5',
+  star: 'm8 2 1.8 3.8 4.2.5-3.1 2.9.8 4.1L8 11.3 4.3 13.3l.8-4.1L2 6.3l4.2-.5z',
+  link: 'M6.5 9.5 9.5 6.5M7 4.5 8.3 3.2a2.5 2.5 0 0 1 3.5 3.5L10.5 8M9 11.5l-1.3 1.3a2.5 2.5 0 0 1-3.5-3.5L5.5 8',
+  reset: 'M3 8a5 5 0 1 0 1.5-3.6M3 3v3h3',
+  grid: 'M3 3h4v4H3zM9 3h4v4H9zM3 9h4v4H3zM9 9h4v4H9z',
+  qr: 'M2.5 2.5h4v4h-4zM9.5 2.5h4v4h-4zM2.5 9.5h4v4h-4zM9.5 9.5h1.5v1.5M13.5 9.5v4h-4',
+  dots: 'M8 3.5v.01M8 8v.01M8 12.5v.01',
+  move: 'M3 8h10M10 5l3 3-3 3',
+  board: 'M2.5 3h11v10h-11zM2.5 6.5h11',
+  trash: 'M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.6 8.5h5.8l.6-8.5',
+  chev: 'M6 3.5 10.5 8 6 12.5',
+}
+const closeMenu = (e: { currentTarget: Element }) => e.currentTarget.closest('details')?.removeAttribute('open')
+function Ico({ d, className }: { d: keyof typeof ICONS; className?: string }) {
+  return (
+    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={d === 'dots' ? 2.4 : 1.6} strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden="true">
+      <path d={ICONS[d]} />
+    </svg>
+  )
+}
+
 const CARD_INK = { strong: 'var(--a-text)', mid: 'var(--a-text-2)', faint: 'var(--a-text-3)' }
 
 // A card as it sits on a board. placementId identifies the bingo_board_cards
@@ -755,6 +781,10 @@ const LIBRARY_ALL_ID = '__all__'
 // dominated by the main account's, with nothing to tell them apart — and theirs
 // are the only ones they can edit.
 const LIBRARY_OWN_ID = '__own__'
+// This account's cards whose board was deleted. The live database does not
+// always cascade a board delete to its cards, and every other group is built
+// from a board that exists, so these used to drop out of the library entirely.
+const LIBRARY_ORPHAN_ID = '__orphan__'
 
 const emptySlots = new Set<number>()
 
@@ -1021,6 +1051,12 @@ export function BingoDashAdmin() {
   type BonusDraftRow = BonusItem & { deduct?: boolean }
   const [bonusDraft, setBonusDraft] = useState<BonusDraftRow[]>([])
   const [bonusSaving, setBonusSaving] = useState(false)
+  // Bulk bonus popup: one activity title for every group, each group's own
+  // amount. Amounts are typed unsigned; `deduct` flips a group's to minus.
+  const [bulkBonusOpen, setBulkBonusOpen] = useState(false)
+  const [bulkBonusTitle, setBulkBonusTitle] = useState('')
+  const [bulkBonusDraft, setBulkBonusDraft] = useState<Record<string, { points: number; deduct: boolean }>>({})
+  const [bulkBonusSaving, setBulkBonusSaving] = useState(false)
   // Section-wide "live teams link" share modal
   const [showAllTeamsLink, setShowAllTeamsLink] = useState(false)
   const [allTeamsLinkCopied, setAllTeamsLinkCopied] = useState(false)
@@ -1451,7 +1487,20 @@ export function BingoDashAdmin() {
         flat.push(...mine)
       }
       dupeHiddenRef.current = hiddenByTaskId
-      if (flat.length === 0) return []
+
+      // Not deduped: a stranded card is often the only copy left, and hiding
+      // it behind a same-titled card elsewhere is how it went missing.
+      // Sub-account cards need no check — the owner already gets them from
+      // byAccount whatever board they were on.
+      const sectionIds = new Set(sections.map(s => s.id))
+      const orphans = libraryTasks.filter(t => !sectionIds.has(t.section_id) && isMineRow(t.owner_id))
+      const orphanGroup = orphans.length > 0 ? [{
+        section: { id: LIBRARY_ORPHAN_ID, name: 'Unassigned — board deleted', foreign: false },
+        categories: byCategory(orphans),
+        totalTasks: orphans.length,
+      }] : []
+
+      if (flat.length === 0) return orphanGroup
 
       // The owner writes everything, so a "mine vs theirs" split tells them
       // nothing — they keep the single flat catalogue.
@@ -1460,7 +1509,7 @@ export function BingoDashAdmin() {
           section: { id: LIBRARY_ALL_ID, name: 'Shared Library (Full)', foreign: false },
           categories: byCategory(flat),
           totalTasks: flat.length,
-        }]
+        }, ...orphanGroup]
       }
 
       // Own Library is a shortcut to this account's own cards, not a silo.
@@ -1485,7 +1534,7 @@ export function BingoDashAdmin() {
           totalTasks: shared.length,
         })
       }
-      return out
+      return [...out, ...orphanGroup]
     }
 
     return groups
@@ -1587,6 +1636,9 @@ export function BingoDashAdmin() {
         countBucket(tasks.filter(t => t.section_id === section.id && t.owner_id === null))
       }
     }
+    // The Unassigned group, counted in full like it is listed (no dedupe).
+    const sectionIds = new Set(sections.map(s => s.id))
+    total += tasks.filter(t => !t.is_board_copy && !sectionIds.has(t.section_id) && isMineRow(t.owner_id)).length
     return total
   }, [tasks, myBoards, isOwner, isMineRow, myOwnerValue, sections])
 
@@ -2298,6 +2350,15 @@ export function BingoDashAdmin() {
     notify(`Added "${task.title}" to ${currentBoard?.name ?? 'the board'}.`)
   }
 
+  // Re-home cards stranded by a deleted board (the Unassigned library group).
+  const moveCardsToBoard = async (ids: string[], sectionId: string) => {
+    const { error } = await supabase.from('bingo_tasks').update({ section_id: sectionId }).in('id', ids)
+    if (error) { notify('Could not move the cards.', 'error'); return }
+    const moved = new Set(ids)
+    setTasks(prev => prev.map(t => moved.has(t.id) ? { ...t, section_id: sectionId } : t))
+    notify(`Moved ${ids.length} card${ids.length === 1 ? '' : 's'}.`)
+  }
+
   const duplicateTask = async (task: BingoTask) => {
     try {
       // A manual duplicate is a fresh card, not copy-on-use lineage
@@ -2609,7 +2670,7 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
   }
 
   const resetTeamScore = async (id: string, name: string) => {
-    if (!confirm(`Reset all progress for "${name}"? This clears scans, photo submissions, and bonus points. The team itself, members, and password are kept.`)) return
+    if (!confirm(`Reset all progress for "${name}"? This clears scans, photo submissions, and bonus points. The team itself, players, and password are kept.`)) return
     const teamSubs = photoSubmissions.filter(s => s.team_id === id)
     const subIds = teamSubs.map(s => s.id)
     const photoPaths = teamSubs.map(s => extractStoragePath(s.photo_url)).filter((p): p is string => !!p)
@@ -2670,13 +2731,19 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
       `  • ${sectionMembers.length} player${sectionMembers.length !== 1 ? 's' : ''}\n` +
       `  • ${sectionScans.length} scan record${sectionScans.length !== 1 ? 's' : ''}\n` +
       `  • ${sectionSubs.length} photo submission${sectionSubs.length !== 1 ? 's' : ''}\n` +
-      `  • all bonus points, photos and support-chat messages\n\n` +
+      `  • all bonus points, photos and support-chat messages\n` +
+      `  • the award slide setup (titles, colours, logo, place photos, QR codes, slide order)\n\n` +
+      `Open briefing and award slides for this board go back to slide 1.\n` +
       `The board will be left with 0 teams. Other boards are NOT affected. This cannot be undone.`
     )) return
 
     setResettingGame(true)
     try {
-      await wipeSectionTeams()
+      if (!(await wipeSectionTeams()) || !currentSectionId) return
+      // The award slides go back to the built-in defaults for the next event.
+      const { error } = await supabase.from('bingo_award_configs').delete().eq('section_id', currentSectionId)
+      if (error) alert('Teams were removed, but the award slides could not be reset: ' + error.message)
+      await announceBoardReset(currentSectionId)
     } finally {
       setResettingGame(false)
     }
@@ -2710,7 +2777,7 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
     if (!confirm(`Remove "${memberName}" from ${teamName}?`)) return
     setMembers(prev => prev.filter(m => m.id !== memberId))
     const { error } = await supabase.from('bingo_members').delete().eq('id', memberId)
-    if (error) { alert('Failed to remove member'); await fetchAll() }
+    if (error) { alert('Failed to remove player'); await fetchAll() }
   }
 
   const moveMember = async (memberId: string, newTeamId: string) => {
@@ -2948,6 +3015,44 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
       setBonusTeam(null)
     } finally {
       setBonusSaving(false)
+    }
+  }
+
+  const openBulkBonus = () => {
+    setBulkBonusTitle('')
+    setBulkBonusDraft({})
+    setBulkBonusOpen(true)
+  }
+
+  // Add one "<title>: ±n" line to the breakdown of every group given an amount,
+  // so it shows in that group's own Bonus popup like a line typed there.
+  // Groups left at 0 are untouched.
+  const saveBulkBonus = async () => {
+    const label = bulkBonusTitle.trim()
+    const changes = scopedTeams.flatMap(team => {
+      const d = bulkBonusDraft[team.id]
+      if (!d || !d.points) return []
+      const saved = team.bonus_breakdown ?? []
+      // Same legacy rule as openBonusModal: a bare total becomes a "Bonus" line.
+      const base: BonusItem[] = saved.length > 0 ? saved
+        : (team.bonus_points ?? 0) !== 0 ? [{ label: 'Bonus', points: team.bonus_points }] : []
+      const bonus_breakdown = [...base, { label, points: d.deduct ? -d.points : d.points }]
+      return [{ id: team.id, bonus_breakdown, bonus_points: bonus_breakdown.reduce((sum, i) => sum + i.points, 0) }]
+    })
+    if (!label || changes.length === 0) return
+    setBulkBonusSaving(true)
+    try {
+      setTeams(prev => prev.map(t => {
+        const c = changes.find(x => x.id === t.id)
+        return c ? { ...t, bonus_breakdown: c.bonus_breakdown, bonus_points: c.bonus_points } : t
+      }))
+      const results = await Promise.all(changes.map(c =>
+        supabase.from('bingo_teams').update({ bonus_breakdown: c.bonus_breakdown, bonus_points: c.bonus_points }).eq('id', c.id)))
+      const failed = results.filter(r => r.error).length
+      if (failed > 0) { alert(`${failed} of ${changes.length} groups could not be saved. Please check and try again.`); await fetchAll() }
+      else setBulkBonusOpen(false)
+    } finally {
+      setBulkBonusSaving(false)
     }
   }
 
@@ -3930,8 +4035,24 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                       )}
                     </div>
                     <span className="text-xs a-text-3 font-medium">{totalTasks} cards</span>
+                    {section.id === LIBRARY_ORPHAN_ID && (
+                      <span className="text-xs a-text-3">Their board no longer exists.</span>
+                    )}
                     <div className="flex-1 h-px a-surface/10" />
-                    {!section.foreign && (
+                    {section.id === LIBRARY_ORPHAN_ID && currentSectionId && (!isOwner || canEditLibrary) && (() => {
+                      const target = myBoards.find(b => b.id === currentSectionId)
+                      if (!target) return null
+                      const ids = categoryGroups.flatMap(c => c.tasks.map(t => t.id))
+                      return (
+                        <button
+                          onClick={() => { if (confirm(`Move ${ids.length} card${ids.length === 1 ? '' : 's'} to "${target.name}"?`)) moveCardsToBoard(ids, target.id) }}
+                          className="text-xs text-teal-600 hover:text-teal-300 font-bold transition-colors flex-shrink-0"
+                        >
+                          Move all to {target.name} →
+                        </button>
+                      )
+                    })()}
+                    {!section.foreign && section.id !== LIBRARY_ORPHAN_ID && (
                       <>
                         <button
                           onClick={() => setShowCategoryManager(showCategoryManager === section.id ? null : section.id)}
@@ -5140,85 +5261,126 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
             return (
               <div key={section.id} className="mb-10">
                 {/* Board header */}
-                <div className="flex flex-wrap items-center gap-x-3 gap-y-2 mb-4">
-                  <h2 className="text-base font-black a-text uppercase tracking-wider">{section.name}</h2>
-                  {activeBoardPointer === section.id && (
-                    <span className="text-[10px] font-black text-green-400 bg-green-950/60 border border-green-800 px-1.5 py-0.5 rounded uppercase">Live</span>
-                  )}
-                  <span className="text-xs a-text-3 font-medium">{sectionTeams.length} group{sectionTeams.length !== 1 ? 's' : ''}</span>
-                  <div className="flex-1 h-px a-surface/10" />
-                  <button
-                    onClick={() => { setShowAllTeamsLink(true); setAllTeamsLinkCopied(false) }}
-                    className="px-3 py-1.5 rounded-lg text-xs font-bold text-emerald-300 border border-emerald-500/30 bg-emerald-500/10 hover:bg-emerald-500/20 transition-colors whitespace-nowrap"
-                    title="Share a single live link showing every group and their members"
-                  >
-                    🔗 Live Teams Link
-                  </button>
+                {(() => {
+                  const boardMembers = members.filter(m => sectionTeams.some(t => t.id === m.team_id))
+                  const observerCount = boardMembers.filter(m => m.role === 'observer').length
+                  return (
+                    <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 mb-4">
+                      <h2 className="text-base font-black a-text uppercase tracking-wider">{section.name}</h2>
+                      {activeBoardPointer === section.id && (
+                        <span className="text-[10px] font-black a-ok-text a-ok-panel border px-1.5 py-0.5 rounded uppercase">Live</span>
+                      )}
+                      <span className="text-xs a-text-3 font-medium tabular-nums">
+                        {sectionTeams.length} group{sectionTeams.length !== 1 ? 's' : ''} · {boardMembers.length - observerCount} players · {observerCount} observers
+                      </span>
+                    </div>
+                  )
+                })()}
+
+                {/* Toolbar: team limits · new group · board-wide actions */}
+                <div className="grid gap-3 md:flex md:flex-wrap md:items-end mb-4">
+                  <div className="flex items-end gap-2">
+                    {([
+                      ['max_team_players', 'Players / team', 1, 1],
+                      ['max_team_observers', 'Observers / team', 9, 0],
+                    ] as const).map(([field, label, fallback, min]) => (
+                      <label key={field} className="grid gap-1 text-[11px] font-bold a-text-3 uppercase tracking-wide">
+                        {label}
+                        <input
+                          key={`${section.id}-${section[field] ?? fallback}`}
+                          type="number"
+                          min={min}
+                          max={20}
+                          defaultValue={section[field] ?? fallback}
+                          onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur() }}
+                          onBlur={e => {
+                            const n = Math.min(20, Math.max(min, Math.round(Number(e.target.value))))
+                            if (!Number.isFinite(n)) { e.target.value = String(section[field] ?? fallback); return }
+                            e.target.value = String(n)
+                            if (n !== (section[field] ?? fallback)) updateBoardSettings({ [field]: n })
+                          }}
+                          className="w-16 px-2 py-1.5 rounded-lg border a-border a-surface a-text text-sm text-center font-mono focus:outline-none focus:border-teal-500"
+                        />
+                      </label>
+                    ))}
+                  </div>
+                  <div className="flex gap-2 md:ml-4">
+                    <input
+                      type="text"
+                      value={newGroupName}
+                      onChange={e => setNewGroupName(e.target.value)}
+                      onKeyDown={e => { if (e.key === 'Enter') createGroup(section.id) }}
+                      placeholder="New group name"
+                      className="flex-1 md:w-44 min-w-0 px-3 py-1.5 rounded-lg border a-border a-surface a-text text-sm focus:outline-none focus:border-teal-500"
+                    />
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      pattern="[0-9]*"
+                      maxLength={4}
+                      value={newGroupPassword}
+                      onChange={e => setNewGroupPassword(e.target.value.replace(/\D/g, '').slice(0, 4))}
+                      onKeyDown={e => { if (e.key === 'Enter') createGroup(section.id) }}
+                      placeholder="PIN"
+                      className="w-16 md:w-20 px-2 py-1.5 rounded-lg border a-border a-surface a-text text-sm font-mono tracking-widest text-center focus:outline-none focus:border-teal-500"
+                    />
+                    <button
+                      onClick={() => createGroup(section.id)}
+                      disabled={!newGroupName.trim() || newGroupPassword.length !== 4}
+                      className="a-btn a-btn-solid-brand text-sm"
+                    >
+                      <Ico d="plus" />Add
+                    </button>
+                  </div>
+                  <div className="flex flex-wrap gap-2 md:ml-auto">
+                    <button
+                      onClick={() => {
+                        const n = parseInt(prompt('How many groups to bulk create?', '16') ?? '', 10)
+                        if (Number.isFinite(n) && n > 0) bulkCreateGroups(section.id, n)
+                      }}
+                      className="a-btn a-btn-brand"
+                    >
+                      <Ico d="stack" />Bulk create
+                    </button>
+                    {sectionTeams.length > 0 && (
+                      <button onClick={openBulkBonus} className="a-btn a-btn-solid-live"
+                        title="Give one activity's bonus or deduction to many groups at once">
+                        <Ico d="star" />Bulk bonus
+                      </button>
+                    )}
+                    <button
+                      onClick={() => { setShowAllTeamsLink(true); setAllTeamsLinkCopied(false) }}
+                      className="a-btn a-btn-ok"
+                      title="Share a single live link showing every group and their players"
+                    >
+                      <Ico d="link" />Live teams link
+                    </button>
+                    {sectionTeams.length > 0 && (
+                      <button onClick={resetTeams} disabled={resettingTeams} className="a-btn a-btn-danger"
+                        title="Delete every group on this board, leaving it with no teams. Other boards are unaffected.">
+                        <Ico d="reset" />{resettingTeams ? 'Resetting…' : 'Reset teams'}
+                      </button>
+                    )}
+                  </div>
                 </div>
 
-                {/* Create group form */}
-                <div className="flex gap-2 mb-4 flex-wrap">
-                  <input
-                    type="text"
-                    value={newGroupName}
-                    onChange={e => setNewGroupName(e.target.value)}
-                    onKeyDown={e => { if (e.key === 'Enter') createGroup(section.id) }}
-                    placeholder="Group name..."
-                    className="flex-1 min-w-[140px] px-3 py-2 rounded-lg border a-border a-surface a-text placeholder-gray-600 text-sm focus:outline-none focus:border-teal-500"
-                  />
-                  <input
-                    type="text"
-                    inputMode="numeric"
-                    pattern="[0-9]*"
-                    maxLength={4}
-                    value={newGroupPassword}
-                    onChange={e => setNewGroupPassword(e.target.value.replace(/\D/g, '').slice(0, 4))}
-                    onKeyDown={e => { if (e.key === 'Enter') createGroup(section.id) }}
-                    placeholder="4-digit password"
-                    className="w-36 px-3 py-2 rounded-lg border a-border a-surface a-text placeholder-gray-600 text-sm font-mono tracking-widest text-center focus:outline-none focus:border-teal-500"
-                  />
-                  <button
-                    onClick={() => createGroup(section.id)}
-                    disabled={!newGroupName.trim() || newGroupPassword.length !== 4}
-                    className="px-4 py-2 rounded-lg text-sm font-bold a-text bg-teal-600 hover:bg-teal-500 disabled:opacity-40 transition-colors shadow-lg shadow-teal-100/30"
-                  >
-                    + Create Group
-                  </button>
-                  <button
-                    onClick={() => {
-                      const n = parseInt(prompt('How many groups to bulk create?', '16') ?? '', 10)
-                      if (Number.isFinite(n) && n > 0) bulkCreateGroups(section.id, n)
-                    }}
-                    className="px-4 py-2 rounded-lg text-sm font-bold a-text-2 a-surface/10 hover:a-surface/15 transition-colors"
-                  >
-                    Bulk Create
-                  </button>
-                  {sectionTeams.length > 0 && (
-                    <button
-                      onClick={resetTeams}
-                      disabled={resettingTeams}
-                      className="px-4 py-2 rounded-lg text-sm font-bold text-red-300 border border-red-500/30 bg-red-500/10 hover:bg-red-500/20 disabled:opacity-40 transition-colors"
-                      title="Delete every group on this board, leaving it with no teams. Other boards are unaffected."
-                    >
-                      {resettingTeams ? 'Resetting…' : '↺ Reset Teams'}
-                    </button>
-                  )}
-                </div>
-                {sectionTeams.length > 0 && (<div className="rounded-xl border a-border overflow-x-auto">
-                  <table className="w-full min-w-[1040px] text-sm">
-                    <thead>
-                      <tr className="border-b a-border a-surface-2">
-                        <th className="text-left px-3 py-2.5 font-bold a-text-3 uppercase tracking-wide text-[11px] w-14">Photo</th>
-                        <th className="text-left px-3 py-2.5 font-bold a-text-3 uppercase tracking-wide text-[11px] min-w-[180px]">Group</th>
-                        <th className="text-left px-3 py-2.5 font-bold a-text-3 uppercase tracking-wide text-[11px] w-20">PWD</th>
-                        <th className="text-left px-3 py-2.5 font-bold a-text-3 uppercase tracking-wide text-[11px] w-28">Members</th>
-                        <th className="text-left px-3 py-2.5 font-bold a-text-3 uppercase tracking-wide text-[11px] min-w-[140px]">Board</th>
-                        <th className="text-left px-3 py-2.5 font-bold a-text-3 uppercase tracking-wide text-[11px] w-36">Progress</th>
-                        <th className="text-left px-3 py-2.5 font-bold a-text-3 uppercase tracking-wide text-[11px] w-16" title="Bonus points from other games">Bonus</th>
-                        <th className="text-right px-3 py-2.5 font-bold a-text-3 uppercase tracking-wide text-[11px] w-36">Actions</th>
+                {/* One markup: a table that hugs its content on md+, stacked cards below md */}
+                {sectionTeams.length > 0 && (<div className="md:w-fit md:max-w-full md:rounded-xl md:border a-border md:a-surface md:overflow-x-auto">
+                  <table className="w-full md:w-auto text-sm block md:table">
+                    <thead className="hidden md:table-header-group">
+                      <tr className="border-b a-border a-surface-2 text-[11px] font-bold a-text-3 uppercase tracking-wide text-left whitespace-nowrap">
+                        <th className="px-2.5 py-2">Group</th>
+                        <th className="px-2.5 py-2">PIN</th>
+                        <th className="px-2.5 py-2">Players</th>
+                        <th className="px-2.5 py-2">Observers</th>
+                        <th className="px-2.5 py-2 text-right">Tasks</th>
+                        <th className="px-2.5 py-2 text-right">Bingo</th>
+                        <th className="px-2.5 py-2 text-right">Points</th>
+                        <th className="px-2.5 py-2" title="Bonus points from other games">Bonus</th>
+                        <th className="px-2.5 py-2"></th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-white/5">
+                    <tbody className="grid gap-2 md:table-row-group">
                       {sectionTeams.map(team => {
                         const teamScans = scans.filter(s => s.team_id === team.id)
                         const sectionGridTasks = boardTasksForSection(section.id)
@@ -5239,7 +5401,6 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                         )
                         const completedCount = completedPlacements.length
                         const completedIds = new Set(completedPlacements.map(t => t.placementId))
-                        const pct = sectionGridTasks.length > 0 ? Math.round((completedCount / sectionGridTasks.length) * 100) : 0
                         const teamSlots = buildBingoSlots(sectionGridTasks)
                         const teamLineSlots = teamSlots.map(t => t ? { ...t, id: t.placementId } : null)
                         const teamBingoLines = completedBingoLines(teamLineSlots, completedIds).length
@@ -5263,211 +5424,219 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                           })),
                           teamLineSlots,
                         ).total + (duelBonuses.get(team.id) ?? 0)
-                        const teamMembers = members.filter(m => m.team_id === team.id)
-                        const isFull = teamMembers.length >= 4
+                        const roleColumns = [
+                          { key: 'player', label: 'Players', people: members.filter(m => m.team_id === team.id && m.role !== 'observer'), cap: section.max_team_players ?? 1 },
+                          { key: 'observer', label: 'Observers', people: members.filter(m => m.team_id === team.id && m.role === 'observer'), cap: section.max_team_observers ?? 9 },
+                        ]
+                        const pinInput = (cls: string) => (
+                          <input
+                            type="text"
+                            inputMode="numeric"
+                            pattern="[0-9]*"
+                            maxLength={4}
+                            defaultValue={team.password}
+                            placeholder="PIN"
+                            aria-label={`${team.name} PIN`}
+                            key={`${team.id}-pwd-${team.password}`}
+                            onBlur={e => {
+                              const v = e.target.value.replace(/\D/g, '').slice(0, 4)
+                              if (v !== team.password) updateTeam(team.id, { password: v })
+                              e.target.value = v
+                            }}
+                            onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur() }}
+                            className={`px-1.5 py-1 rounded border bg-transparent font-mono text-xs tracking-widest text-center a-text-2 focus:outline-none focus:border-teal-500 ${team.password ? cls : 'border-amber-500'}`}
+                            title={team.password ? 'Team password' : 'Not set — enter a 4-digit password'}
+                          />
+                        )
                         return (
-                          <tr key={team.id} className="hover:a-surface-2 transition-colors group">
-                            {/* Photo */}
-                            <td className="px-3 py-2.5">
-                              <div className="relative group/photo">
-                                <label
-                                  className={`block w-9 h-9 rounded-full overflow-hidden border-2 ${team.photo_url ? 'border-teal-500/60' : 'border-dashed border-white/20'} a-surface-2 cursor-pointer hover:border-teal-500 transition-colors ${uploadingTeamPhoto === team.id ? 'opacity-60' : ''}`}
-                                  title={team.photo_url ? 'Click to replace photo' : 'Click to upload photo'}
-                                >
-                                  {team.photo_url ? (
-                                    <img src={team.photo_url} alt={`${team.name} photo`} className="w-full h-full object-cover" />
-                                  ) : (
-                                    <div className="w-full h-full flex items-center justify-center a-text-3 text-base">
-                                      {uploadingTeamPhoto === team.id ? '…' : '+'}
-                                    </div>
-                                  )}
-                                  <input
-                                    type="file"
-                                    accept="image/*"
-                                    className="hidden"
-                                    disabled={uploadingTeamPhoto === team.id}
-                                    onChange={e => {
-                                      const f = e.target.files?.[0]
-                                      e.target.value = ''
-                                      if (f) uploadTeamPhoto(team.id, f)
-                                    }}
-                                  />
-                                </label>
-                                {team.photo_url && uploadingTeamPhoto !== team.id && (
-                                  <button
-                                    type="button"
-                                    onClick={() => removeTeamPhoto(team.id)}
-                                    className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-red-500 a-text text-[10px] font-bold leading-none flex items-center justify-center opacity-0 group-hover/photo:opacity-100 transition-opacity shadow"
-                                    title="Remove photo"
+                          <tr key={team.id} className="grid grid-cols-3 gap-x-4 gap-y-3 p-3 rounded-xl border a-border a-surface md:table-row md:p-0 md:rounded-none md:border-0 md:border-t md:bg-transparent">
+                            {/* Photo + name (+ PIN on phone) */}
+                            <td className="col-span-3 md:px-2.5 md:py-2 align-top">
+                              <div className="flex items-center gap-2.5">
+                                <div className="relative group/photo shrink-0">
+                                  <label
+                                    className={`block w-9 h-9 rounded-full overflow-hidden border-2 ${team.photo_url ? 'border-teal-500/60' : 'border-dashed a-border'} a-surface-2 cursor-pointer hover:border-teal-500 transition-colors ${uploadingTeamPhoto === team.id ? 'opacity-60' : ''}`}
+                                    title={team.photo_url ? 'Click to replace photo' : 'Click to upload photo'}
                                   >
-                                    &times;
-                                  </button>
-                                )}
-                              </div>
-                            </td>
-                            {/* Group name */}
-                            <td className="px-3 py-2.5">
-                              <input
-                                type="text"
-                                defaultValue={team.name}
-                                key={`${team.id}-name-${team.name}`}
-                                onBlur={e => {
-                                  const v = e.target.value.trim()
-                                  if (v && v !== team.name) updateTeam(team.id, { name: v })
-                                  else e.target.value = team.name
-                                }}
-                                onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
-                                className="w-full px-2 py-1 rounded border border-transparent hover:border-white/20 focus:border-teal-500 focus:outline-none font-medium a-text bg-transparent text-sm"
-                              />
-                            </td>
-                            {/* Password */}
-                            <td className="px-3 py-2.5">
-                              <input
-                                type="text"
-                                inputMode="numeric"
-                                pattern="[0-9]*"
-                                maxLength={4}
-                                defaultValue={team.password}
-                                placeholder="—"
-                                key={`${team.id}-pwd-${team.password}`}
-                                onBlur={e => {
-                                  const v = e.target.value.replace(/\D/g, '').slice(0, 4)
-                                  if (v !== team.password) updateTeam(team.id, { password: v })
-                                  e.target.value = v
-                                }}
-                                onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
-                                className={`w-16 px-2 py-1 rounded border border-transparent hover:border-white/20 focus:border-teal-500 focus:outline-none font-mono tracking-widest text-center bg-transparent text-sm ${
-                                  team.password ? 'a-text-2' : 'a-text-3'
-                                }`}
-                                title={team.password ? 'Team password' : 'Not set — enter a 4-digit password'}
-                              />
-                            </td>
-                            {/* Members */}
-                            <td className="px-3 py-2.5">
-                              <div className="flex flex-col gap-0.5">
-                                <span className={`text-sm font-bold ${isFull ? 'text-red-400' : 'a-text-2'}`}>
-                                  {teamMembers.length} / 4
-                                </span>
-                                {teamMembers.length > 0 && (
-                                  <div className="flex flex-col gap-0.5">
-                                    {teamMembers.map(m => (
-                                      <div key={m.id} className="flex items-center gap-1 group/m">
-                                        <span className="text-[11px] a-text-2 truncate max-w-[72px]">{m.name}</span>
-                                        <select
-                                          value=""
-                                          onChange={e => { if (e.target.value) moveMember(m.id, e.target.value) }}
-                                          className="text-[9px] bg-transparent a-text-3 hover:a-text-2 cursor-pointer outline-none border-none opacity-0 group-hover/m:opacity-100 transition-opacity"
-                                          title={`Move ${m.name}`}
-                                        >
-                                          <option value="">Move…</option>
-                                          {sectionTeams.filter(t => t.id !== team.id).map(t => (
-                                            <option key={t.id} value={t.id}>{t.name}</option>
-                                          ))}
-                                        </select>
-                                        <button
-                                          type="button"
-                                          onClick={() => removeMember(m.id, m.name, team.name)}
-                                          className="w-3.5 h-3.5 rounded-full a-surface/10 hover:bg-red-500 hover:a-text a-text-3 text-[9px] font-bold leading-none flex items-center justify-center transition-colors opacity-0 group-hover/m:opacity-100"
-                                          title={`Remove ${m.name}`}
-                                        >
-                                          &times;
-                                        </button>
+                                    {team.photo_url ? (
+                                      <img src={team.photo_url} alt={`${team.name} photo`} className="w-full h-full object-cover" />
+                                    ) : (
+                                      <div className="w-full h-full flex items-center justify-center a-text-3">
+                                        {uploadingTeamPhoto === team.id ? '…' : <Ico d="plus" className="w-3.5 h-3.5" />}
                                       </div>
-                                    ))}
-                                  </div>
-                                )}
-                              </div>
-                            </td>
-                            {/* Board/Compartment */}
-                            <td className="px-3 py-2.5">
-                              <select
-                                value={team.section_id}
-                                onChange={e => moveTeamToSection(team.id, e.target.value)}
-                                className="px-2 py-1 rounded border a-border text-xs a-surface-2 a-text-2 focus:outline-none focus:border-teal-500"
-                              >
-                                {myBoards.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                              </select>
-                            </td>
-                            {/* Progress + Bingos */}
-                            <td className="px-3 py-2.5">
-                              <div className="flex items-center gap-1.5 mb-0.5">
-                                <div className="flex-1 h-1 a-surface/10 rounded-full overflow-hidden">
-                                  <div className="h-full bg-green-500 transition-all" style={{ width: `${pct}%` }} />
-                                </div>
-                                <span className="text-[11px] a-text-3 font-mono whitespace-nowrap">
-                                  {completedCount}/{sectionGridTasks.length}
-                                </span>
-                              </div>
-                              <div className="flex items-center gap-2">
-                                <span className="text-[11px] font-black text-amber-500">{teamBingoLines}</span>
-                                <span className="text-[11px] a-text-3">bingos</span>
-                                {pointsEarned > 0 && (
-                                  <span className="text-[11px] a-text-3 font-bold">{pointsEarned.toFixed(2)}pts</span>
-                                )}
-                              </div>
-                            </td>
-                            {/* Bonus */}
-                            <td className="px-3 py-2.5">
-                              <div className="flex flex-col items-start gap-1.5">
-                              {(() => {
-                                const bonusTotal = team.bonus_points ?? 0
-                                const itemCount = (team.bonus_breakdown ?? []).length
-                                return (
-                                  <button
-                                    onClick={() => openBonusModal(team)}
-                                    title="Edit bonus points — add activities and points for each"
-                                    className={`min-w-[3.5rem] px-2.5 py-1 rounded-lg border font-mono text-center text-sm transition-colors ${
-                                      bonusTotal !== 0
-                                        ? 'border-amber-500/40 bg-amber-500/10 text-amber-300 hover:bg-amber-500/20'
-                                        : 'a-border bg-transparent a-text-3 hover:border-white/30 hover:a-text-2'
-                                    }`}
-                                  >
-                                    {bonusTotal !== 0 ? (bonusTotal > 0 ? `+${bonusTotal}` : bonusTotal) : 'Add'}
-                                    {itemCount > 0 && (
-                                      <span className="ml-1 text-[10px] a-text-3 font-sans">
-                                        ({itemCount})
-                                      </span>
                                     )}
-                                  </button>
-                                )
-                              })()}
-                              {/* Same sheet as Add, opened with a minus row ready — for
-                                  penalties and corrections. */}
-                              <button
-                                onClick={() => openBonusModal(team, 'deduct')}
-                                title="Deduct points — add a penalty or correction line"
-                                className="px-2.5 py-1 rounded-lg border border-red-500/40 bg-red-500/10 text-red-400 hover:bg-red-500/20 text-sm font-mono transition-colors"
-                              >
-                                Deduct
-                              </button>
+                                    <input
+                                      type="file"
+                                      accept="image/*"
+                                      className="hidden"
+                                      disabled={uploadingTeamPhoto === team.id}
+                                      onChange={e => {
+                                        const f = e.target.files?.[0]
+                                        e.target.value = ''
+                                        if (f) uploadTeamPhoto(team.id, f)
+                                      }}
+                                    />
+                                  </label>
+                                  {team.photo_url && uploadingTeamPhoto !== team.id && (
+                                    <button
+                                      type="button"
+                                      onClick={() => removeTeamPhoto(team.id)}
+                                      className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-red-500 text-white text-[10px] font-bold leading-none flex items-center justify-center md:opacity-0 md:group-hover/photo:opacity-100 transition-opacity shadow"
+                                      title="Remove photo"
+                                    >
+                                      &times;
+                                    </button>
+                                  )}
+                                </div>
+                                <input
+                                  type="text"
+                                  defaultValue={team.name}
+                                  aria-label="Group name"
+                                  key={`${team.id}-name-${team.name}`}
+                                  onBlur={e => {
+                                    const v = e.target.value.trim()
+                                    if (v && v !== team.name) updateTeam(team.id, { name: v })
+                                    else e.target.value = team.name
+                                  }}
+                                  onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur() }}
+                                  className="min-w-0 w-full md:w-36 px-1.5 py-1 -mx-1.5 rounded border border-transparent hover:border-[var(--a-border)] focus:border-teal-500 focus:outline-none font-semibold a-text bg-transparent text-sm"
+                                />
+                                <span className="md:hidden">{pinInput('w-16 a-border')}</span>
+                              </div>
+                            </td>
+                            {/* PIN (laptop) */}
+                            <td className="hidden md:table-cell px-2.5 py-2 align-top">
+                              {pinInput('w-14 border-transparent hover:border-[var(--a-border)]')}
+                            </td>
+                            {/* Players, then Observers: count only, click to show names */}
+                            {roleColumns.map(({ key, label, people, cap }) => {
+                              // Red only when OVER the limit; exactly full is normal.
+                              const tone = people.length > cap ? 'var(--a-danger)' : people.length === cap ? 'var(--a-brand)' : 'var(--a-text-2)'
+                              const count = (
+                                <>
+                                  <span className="md:hidden text-[10px] font-bold a-text-3 uppercase mr-1">{label}</span>
+                                  <span className="font-mono text-xs font-bold px-1.5 py-0.5 rounded-md border"
+                                    style={{ color: tone, borderColor: `color-mix(in srgb, ${tone} 40%, transparent)` }}>
+                                    {people.length}/{cap}
+                                  </span>
+                                </>
+                              )
+                              const chip = key === 'observer'
+                                ? { background: 'var(--a-info-soft)', color: 'var(--a-info)' }
+                                : { background: 'var(--a-brand-soft)', color: 'var(--a-brand)' }
+                              return (
+                                <td key={key} className={`${key === 'player' ? 'col-span-1' : 'col-span-2'} md:px-2.5 md:py-2 align-top whitespace-nowrap`}>
+                                  {people.length === 0 ? <span className="inline-flex items-center">{count}</span> : (
+                                    <details className="a-details group/d">
+                                      <summary className="inline-flex items-center gap-1 select-none">
+                                        {count}
+                                        <Ico d="chev" className="w-3 h-3 a-text-3 transition-transform group-open/d:rotate-90" />
+                                      </summary>
+                                      <div className="flex flex-wrap gap-1 mt-1.5 whitespace-normal md:max-w-[16rem]">
+                                        {people.map(m => (
+                                          <span key={m.id} className="inline-flex items-center gap-0.5 max-w-[9rem] pl-2 pr-0.5 py-0.5 rounded-full text-[11px] font-semibold" style={chip}>
+                                            <span className="truncate">{m.name}</span>
+                                            <details className="a-details relative">
+                                              <summary className="w-5 h-5 grid place-items-center rounded-full" title={`Move or remove ${m.name}`} aria-label={`Move or remove ${m.name}`}>
+                                                <Ico d="dots" className="w-3 h-3" />
+                                              </summary>
+                                              <div className="a-menu max-h-64 overflow-y-auto">
+                                                <div className="px-2 py-1 a-text-3 text-[10px] uppercase font-bold">Move to</div>
+                                                {sectionTeams.filter(t => t.id !== team.id).map(t => (
+                                                  <button key={t.id} onClick={e => { closeMenu(e); moveMember(m.id, t.id) }}><Ico d="move" />{t.name}</button>
+                                                ))}
+                                                <button onClick={e => { closeMenu(e); removeMember(m.id, m.name, team.name) }} className="a-danger-text border-t a-border mt-1">
+                                                  <Ico d="trash" />Remove
+                                                </button>
+                                              </div>
+                                            </details>
+                                          </span>
+                                        ))}
+                                      </div>
+                                    </details>
+                                  )}
+                                </td>
+                              )
+                            })}
+                            {/* Tasks · Bingo · Points */}
+                            {([
+                              ['Tasks', <>{completedCount}<span className="a-text-3 font-normal">/{sectionGridTasks.length}</span></>, 'a-text'],
+                              ['Bingo', teamBingoLines, 'a-live'],
+                              ['Pts', pointsEarned.toFixed(2), 'a-text-2'],
+                            ] as const).map(([label, value, tone]) => (
+                              <td key={label} className="md:px-2.5 md:py-2 align-top md:text-right whitespace-nowrap">
+                                <span className="md:hidden text-[10px] font-bold a-text-3 uppercase mr-1">{label}</span>
+                                <span className={`font-mono tabular-nums text-sm font-bold ${tone}`}>{value}</span>
+                              </td>
+                            ))}
+                            {/* Bonus: total / Add on top, Deduct below */}
+                            <td className="col-span-3 md:px-2.5 md:py-2 align-top whitespace-nowrap">
+                              <div className="inline-flex flex-col gap-1.5">
+                                <button
+                                  onClick={() => openBonusModal(team)}
+                                  title="Edit bonus points — add activities and points for each"
+                                  className={`a-btn font-mono min-w-[3.5rem] ${(team.bonus_points ?? 0) !== 0 ? 'a-btn-live' : 'a-btn-ghost'}`}
+                                >
+                                  {(team.bonus_points ?? 0) !== 0
+                                    ? (team.bonus_points > 0 ? `+${team.bonus_points}` : team.bonus_points)
+                                    : <><Ico d="plus" />Add</>}
+                                  {(team.bonus_breakdown ?? []).length > 0 && (
+                                    <span className="a-text-3 font-normal font-sans">({team.bonus_breakdown.length})</span>
+                                  )}
+                                </button>
+                                {/* Same sheet as Add, opened with a minus row ready — for
+                                    penalties and corrections. */}
+                                <button
+                                  onClick={() => openBonusModal(team, 'deduct')}
+                                  title="Deduct points — add a penalty or correction line"
+                                  className="a-btn a-btn-danger"
+                                >
+                                  <Ico d="minus" />Deduct
+                                </button>
                               </div>
                             </td>
                             {/* Actions */}
-                            <td className="px-3 py-2.5 text-right">
-                              <div className="flex items-center justify-end gap-2">
+                            <td className="col-span-3 md:px-2.5 md:py-2 align-top whitespace-nowrap">
+                              <div className="flex items-center gap-1.5 md:justify-end">
+                                <button onClick={() => setViewingTeam(team)} className="a-btn a-btn-brand flex-1 md:flex-none">
+                                  <Ico d="grid" />Grid
+                                </button>
                                 <button
                                   onClick={() => { setMembersLinkTeam(team); setMembersLinkCopied(false) }}
-                                  className="px-2.5 py-1 rounded-lg text-[11px] font-bold text-emerald-300 border border-emerald-500/30 bg-emerald-500/10 hover:bg-emerald-500/20 transition-colors whitespace-nowrap"
-                                  title="Share a live link to this group's member list"
+                                  className="a-btn a-btn-ok flex-1 md:flex-none"
+                                  title="Share a live link to this group's player list"
                                 >
-                                  🔗 Members
+                                  <Ico d="qr" />Share
                                 </button>
-                                <button
-                                  onClick={() => setViewingTeam(team)}
-                                  className="px-2.5 py-1 rounded-lg text-[11px] font-bold text-teal-500 border border-teal-500/30 bg-teal-500/10 hover:bg-teal-500/20 transition-colors whitespace-nowrap"
-                                >
-                                  Grid
-                                </button>
-                                <button
-                                  onClick={() => resetTeamScore(team.id, team.name)}
-                                  disabled={completedCount === 0 && (team.bonus_points ?? 0) === 0}
-                                  className="text-[11px] text-amber-500 hover:text-amber-300 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-                                  title="Reset this team's scans, photo submissions, and bonus points"
-                                >
-                                  Reset
-                                </button>
-                                <button onClick={() => deleteTeam(team.id, team.name)}
-                                  className="text-[11px] a-text-3 hover:text-red-400 transition-colors">Del</button>
+                                <details className="a-details relative">
+                                  <summary className="a-btn a-btn-ghost px-2" aria-label={`More actions for ${team.name}`}>
+                                    <Ico d="dots" />
+                                  </summary>
+                                  <div className="a-menu">
+                                    <label className="cursor-pointer">
+                                      <Ico d="board" />
+                                      <select
+                                        value=""
+                                        onChange={e => { if (e.target.value) { closeMenu(e); moveTeamToSection(team.id, e.target.value) } }}
+                                        className="flex-1 min-w-0 bg-transparent outline-none cursor-pointer"
+                                      >
+                                        <option value="">Move to board…</option>
+                                        {myBoards.filter(b => b.id !== team.section_id).map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+                                      </select>
+                                    </label>
+                                    <button
+                                      onClick={e => { closeMenu(e); resetTeamScore(team.id, team.name) }}
+                                      disabled={completedCount === 0 && (team.bonus_points ?? 0) === 0}
+                                      className="a-live disabled:opacity-40"
+                                      title="Reset this team's scans, photo submissions, and bonus points"
+                                    >
+                                      <Ico d="reset" />Reset score
+                                    </button>
+                                    <button onClick={e => { closeMenu(e); deleteTeam(team.id, team.name) }} className="a-danger-text">
+                                      <Ico d="trash" />Delete group
+                                    </button>
+                                  </div>
+                                </details>
                               </div>
                             </td>
                           </tr>
@@ -6191,7 +6360,7 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
           : ''
         const sectionTeamCount = currentSectionId ? teams.filter(t => t.section_id === currentSectionId).length : 0
         const sectionMemberCount = currentSectionId
-          ? members.filter(m => m.section_id === currentSectionId && m.role === 'member').length
+          ? members.filter(m => m.section_id === currentSectionId && m.role === 'player').length
           : 0
         const handleCopy = () => {
           if (!url) return
@@ -6235,7 +6404,7 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                     <span className="a-text-2"> · </span>
                     <span className="font-bold text-emerald-600">{sectionTeamCount}</span> group{sectionTeamCount !== 1 ? 's' : ''}
                     <span className="a-text-2">, </span>
-                    <span className="font-bold text-emerald-600">{sectionMemberCount}</span> member{sectionMemberCount !== 1 ? 's' : ''}
+                    <span className="font-bold text-emerald-600">{sectionMemberCount}</span> player{sectionMemberCount !== 1 ? 's' : ''}
                   </p>
                 </div>
                 <button onClick={() => setShowAllTeamsLink(false)}
@@ -6390,11 +6559,99 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
         )
       })()}
 
+      {/* ── Bulk Bonus Modal: one title, an amount per group ───────────────── */}
+      {bulkBonusOpen && (() => {
+        const close = () => { if (!bulkBonusSaving) setBulkBonusOpen(false) }
+        const rowOf = (id: string) => bulkBonusDraft[id] ?? { points: 0, deduct: false }
+        const setRow = (id: string, patch: Partial<{ points: number; deduct: boolean }>) =>
+          setBulkBonusDraft(prev => ({ ...prev, [id]: { ...rowOf(id), ...patch } }))
+        const changed = scopedTeams.filter(t => rowOf(t.id).points > 0).length
+        const canApply = !!bulkBonusTitle.trim() && changed > 0 && !bulkBonusSaving
+        return (
+          <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 px-4" onClick={close}>
+            <div className="a-surface rounded-2xl shadow-2xl w-full max-w-lg animate-bounce-in flex flex-col max-h-[90vh]"
+              onClick={e => e.stopPropagation()}>
+              <div className="px-4 sm:px-6 py-5 border-b a-border flex items-center justify-between flex-shrink-0">
+                <div>
+                  <h3 className="text-lg font-bold a-text">Bulk Bonus &amp; Deductions</h3>
+                  <p className="text-xs a-text-2 mt-0.5">One activity for all groups · groups left at 0 are not changed</p>
+                </div>
+                <button onClick={close} className="a-text-2 hover:a-text-3 text-2xl font-light">&times;</button>
+              </div>
+
+              <div className="px-4 sm:px-6 pt-4 flex-shrink-0">
+                <input
+                  type="text"
+                  value={bulkBonusTitle}
+                  autoFocus
+                  placeholder="Activity title (e.g. Tug of War)"
+                  onChange={e => setBulkBonusTitle(e.target.value)}
+                  className="w-full px-3 py-2 rounded-lg border a-border focus:border-teal-500 focus:outline-none text-sm a-text a-surface"
+                />
+              </div>
+
+              <div className="px-4 sm:px-6 py-4 overflow-y-auto flex flex-col gap-2">
+                {scopedTeams.map(team => {
+                  const row = rowOf(team.id)
+                  const current = team.bonus_points ?? 0
+                  const next = current + (row.deduct ? -row.points : row.points)
+                  return (
+                    <div key={team.id} className="flex items-center gap-2">
+                      <span className="flex-1 min-w-0 truncate text-sm font-bold a-text">{team.name}</span>
+                      <span className="text-xs a-text-2 font-mono w-16 text-right" title="Bonus now → after">
+                        {current}{row.points > 0 && <> → <span className={row.deduct ? 'text-red-500' : 'text-emerald-500'}>{next}</span></>}
+                      </span>
+                      <button
+                        onClick={() => setRow(team.id, { deduct: !row.deduct })}
+                        title={row.deduct ? 'Deduction — click to make it a bonus' : 'Bonus — click to make it a deduction'}
+                        className={`w-8 h-8 flex-shrink-0 rounded-lg border font-black text-sm ${
+                          row.deduct ? 'border-red-500/40 text-red-500 bg-red-500/10' : 'border-emerald-500/40 text-emerald-500 bg-emerald-500/10'}`}>
+                        {row.deduct ? '−' : '+'}
+                      </button>
+                      <input
+                        type="number"
+                        step="1"
+                        min={0}
+                        value={row.points}
+                        onChange={e => {
+                          const n = Math.abs(parseInt(e.target.value, 10))
+                          setRow(team.id, { points: Number.isFinite(n) ? n : 0 })
+                        }}
+                        onFocus={e => e.target.select()}
+                        className={`w-20 px-2 py-2 rounded-lg border focus:outline-none text-sm text-center font-mono a-surface ${
+                          row.deduct ? 'border-red-500/40 text-red-400 focus:border-red-500' : 'a-border a-text focus:border-teal-500'}`}
+                      />
+                    </div>
+                  )
+                })}
+              </div>
+
+              <div className="px-4 sm:px-6 py-4 border-t a-border flex items-center justify-between flex-shrink-0">
+                <div className="text-sm a-text-3">
+                  {changed} group{changed !== 1 ? 's' : ''} to update
+                </div>
+                <div className="flex items-center gap-2">
+                  <button onClick={close}
+                    className="px-4 py-2 rounded-lg text-sm font-bold a-text-3 hover:a-surface-2 transition-colors">
+                    Cancel
+                  </button>
+                  <button onClick={saveBulkBonus} disabled={!canApply}
+                    title={!bulkBonusTitle.trim() ? 'Type an activity title first' : undefined}
+                    className="px-5 py-2 rounded-lg text-sm font-bold a-text bg-teal-600 hover:bg-violet-700 disabled:opacity-50 transition-colors">
+                    {bulkBonusSaving ? 'Saving…' : 'Apply'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )
+      })()}
+
       {/* ── Per-team "Live members link" Share Modal ──────────────────────── */}
       {membersLinkTeam && (() => {
         const team = membersLinkTeam
         const url = `${window.location.origin}/bingo-dash/team/${team.id}/members`
-        const teamMembers = members.filter(m => m.team_id === team.id && m.role === 'member')
+        const teamMembers = members.filter(m => m.team_id === team.id && m.role === 'player')
         const handleCopy = () => {
           navigator.clipboard.writeText(url).then(() => {
             setMembersLinkCopied(true)
@@ -6430,11 +6687,11 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
               onClick={e => e.stopPropagation()}>
               <div className="px-4 sm:px-6 py-5 border-b a-border flex items-center justify-between">
                 <div>
-                  <h3 className="text-lg font-bold a-text">Live Members Link</h3>
+                  <h3 className="text-lg font-bold a-text">Live Players Link</h3>
                   <p className="text-xs a-text-2 mt-0.5">
                     For <span className="font-bold a-text-3">{team.name}</span>
                     <span className="a-text-2"> · </span>
-                    <span className="font-bold text-emerald-600">{teamMembers.length}</span> member{teamMembers.length !== 1 ? 's' : ''} now
+                    <span className="font-bold text-emerald-600">{teamMembers.length}</span> player{teamMembers.length !== 1 ? 's' : ''} now
                   </p>
                 </div>
                 <button onClick={() => setMembersLinkTeam(null)}

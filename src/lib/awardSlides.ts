@@ -351,9 +351,6 @@ export function groupLabel(name: string): string {
   return m ? m[0] : name.trim()
 }
 
-/** HSBC red, used when a board has picked no colour of its own. */
-export const HSBC_RED = '#DB0011'
-
 /** The ceremony slides' background (holding, lineup, scoreboard…). */
 export const CEREMONY_BACKGROUND = 'radial-gradient(ellipse at 50% 35%, #3b1f66 0%, #180a33 55%, #06020f 100%)'
 /** Its main colour, for the colour picker when no colour is set. */

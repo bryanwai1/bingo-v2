@@ -11,7 +11,6 @@
 //   slot 125..149 -> face 5
 
 export const TILES_PER_FACE = 25
-export const MAX_FACES = 6
 
 export type FaceCount = 1 | 2 | 3 | 4 | 5 | 6
 
@@ -30,14 +29,6 @@ export const FACE_NAMES = [
 export const FACE_COLORS = [
   '#2dd4bf', '#fbbf24', '#a78bfa', '#38bdf8', '#f472b6', '#4ade80',
 ] as const
-
-export function faceOf(slot: number): number {
-  return Math.floor(slot / TILES_PER_FACE)
-}
-
-export function positionOnFace(slot: number): number {
-  return slot % TILES_PER_FACE
-}
 
 export function slotFor(face: number, position: number): number {
   return face * TILES_PER_FACE + position

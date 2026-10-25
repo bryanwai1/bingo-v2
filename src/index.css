@@ -913,3 +913,28 @@ html.admin-dark {
 .grab-ui .text-gray-500,
 .grab-ui .text-gray-600 { color: #f3f4f6; }
 .grab-ui .bg-gray-600 { background-color: #f3f4f6; }
+
+/* ── Admin tinted buttons (Teams tab) ──────────────────────────
+   Icon + label, coloured by what the button does, readable in both themes. */
+:root       { --a-info: #0369a1; --a-info-soft: #e0f2fe; }
+html.admin-dark { --a-info: #7dd3fc; --a-info-soft: #0c2d40; }
+.a-btn { display: inline-flex; align-items: center; justify-content: center; gap: .4rem; border: 1px solid; border-radius: .6rem;
+  padding: .4rem .7rem; font-size: .75rem; font-weight: 700; white-space: nowrap; cursor: pointer; transition: transform .1s, filter .15s; }
+.a-btn:hover:not(:disabled) { filter: brightness(1.06); }
+.a-btn:active:not(:disabled) { transform: scale(.97); }
+.a-btn:disabled { opacity: .4; cursor: not-allowed; }
+.a-btn svg { width: 14px; height: 14px; flex: none; }
+.a-btn-brand  { background: var(--a-brand-soft);  border-color: color-mix(in srgb, var(--a-brand) 35%, transparent);  color: var(--a-brand); }
+.a-btn-ok     { background: var(--a-ok-soft);     border-color: color-mix(in srgb, var(--a-ok) 35%, transparent);     color: var(--a-ok); }
+.a-btn-live   { background: var(--a-live-soft);   border-color: color-mix(in srgb, var(--a-live) 40%, transparent);   color: var(--a-live); }
+.a-btn-danger { background: var(--a-danger-soft); border-color: color-mix(in srgb, var(--a-danger) 35%, transparent); color: var(--a-danger); }
+.a-btn-ghost  { background: transparent; border-color: var(--a-border); color: var(--a-text-2); }
+.a-btn-solid-brand { background: #0f766e; border-color: #0f766e; color: #fff; }
+.a-btn-solid-live  { background: #d97706; border-color: #d97706; color: #fff; }
+.a-menu { position: absolute; z-index: 20; right: 0; margin-top: .25rem; min-width: 11rem; padding: .25rem; border: 1px solid var(--a-border);
+  border-radius: .6rem; background: var(--a-surface); box-shadow: var(--a-shadow-2); color: var(--a-text-2); }
+.a-menu button, .a-menu label { display: flex; align-items: center; gap: .5rem; width: 100%; text-align: left; padding: .4rem .5rem; border-radius: .4rem; font-size: .75rem; }
+.a-menu button:hover { background: var(--a-surface-2); }
+.a-menu svg { width: 14px; height: 14px; flex: none; }
+details.a-details > summary { list-style: none; cursor: pointer; }
+details.a-details > summary::-webkit-details-marker { display: none; }

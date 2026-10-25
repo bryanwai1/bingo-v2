@@ -26,7 +26,7 @@ import { AitbMissionModule } from '../components/AitbMissionModule'
 import { CardBonusTimer } from '../components/CardBonusTimer'
 import { resolveBonusWindow } from '../lib/timeBonus'
 import { useBingoAuth } from '../hooks/useBingoAuth'
-import { aitbByName, AITB_POINTS, aitbToolUrl, aitbToolCaption } from '../lib/aitbActivities'
+import { aitbByName, aitbHeroUrlByName, AITB_POINTS, aitbToolUrl, aitbToolCaption } from '../lib/aitbActivities'
 import { useCardDrawConfig } from '../hooks/useCardDrawConfig'
 import type { BingoTask, BingoTaskPage } from '../types/database'
 
@@ -766,7 +766,7 @@ export function BingoDashTaskEdit() {
 
         {/* Hero photos */}
         <div className="mb-6">
-          <BingoAdminPhotoUpload taskId={task.id} />
+          <BingoAdminPhotoUpload taskId={task.id} defaultPhotoUrl={aitbHeroUrlByName(task.title)} />
         </div>
 
         {/* Tabs */}

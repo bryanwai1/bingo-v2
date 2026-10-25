@@ -5,9 +5,11 @@ import type { TaskPhoto } from '../types/database'
 
 interface BingoAdminPhotoUploadProps {
   taskId: string
+  /** Built-in art for this card (AI Team Building activities), offered while it has no photos. */
+  defaultPhotoUrl?: string | null
 }
 
-export function BingoAdminPhotoUpload({ taskId }: BingoAdminPhotoUploadProps) {
+export function BingoAdminPhotoUpload({ taskId, defaultPhotoUrl }: BingoAdminPhotoUploadProps) {
   const { photos, loading, addPhoto, deletePhoto, updatePosition, updateCaption, reorderPhotos } = useBingoTaskPhotos(taskId)
   const [uploading, setUploading] = useState(false)
   const [editing, setEditing] = useState<TaskPhoto | null>(null)
@@ -115,7 +117,25 @@ export function BingoAdminPhotoUpload({ taskId }: BingoAdminPhotoUploadProps) {
         </div>
       </div>
 
-      {photos.length === 0 ? (
+      {photos.length === 0 && defaultPhotoUrl ? (
+        // Saved as an ordinary photo row so players see it too, and it can be
+        // adjusted, reordered or deleted like an upload.
+        <div className="flex flex-col sm:flex-row items-center gap-4">
+          <div className="relative w-full sm:w-64 rounded-xl overflow-hidden border border-gray-200 bg-gray-50" style={{ aspectRatio: '4/3' }}>
+            <img src={defaultPhotoUrl} alt="Built-in hero" className="w-full h-full object-cover" draggable={false} />
+          </div>
+          <div className="flex flex-col items-center sm:items-start gap-2">
+            <p className="text-sm text-gray-500">This card has a built-in image but no hero photo yet.</p>
+            <button
+              onClick={async () => { setUploading(true); await addPhoto(taskId, defaultPhotoUrl, 0); setUploading(false) }}
+              disabled={uploading}
+              className="px-4 py-2 bg-violet-600 a-text rounded-lg hover:bg-violet-700 disabled:opacity-50 text-sm font-medium transition-colors"
+            >
+              Use this image
+            </button>
+          </div>
+        </div>
+      ) : photos.length === 0 ? (
         <div
           className="border-2 border-dashed border-gray-200 rounded-xl py-10 flex flex-col items-center gap-3 cursor-pointer hover:border-violet-300 hover:bg-violet-50 transition-colors"
           onClick={() => fileRef.current?.click()}

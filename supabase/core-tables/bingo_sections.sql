@@ -50,7 +50,13 @@ create table public.bingo_sections (
 
   -- (tracked) core-tables/20261006_player_theme.sql
   player_theme            text not null default 'default'
-    constraint bingo_sections_player_theme_check check (player_theme in ('default', 'grab'))
+    constraint bingo_sections_player_theme_check check (player_theme in ('default', 'grab')),
+
+  -- (tracked) core-tables/20261021_team_caps_player_role.sql
+  max_team_players        integer not null default 1
+    constraint bingo_sections_max_team_players_check check (max_team_players between 1 and 20),
+  max_team_observers      integer not null default 9
+    constraint bingo_sections_max_team_observers_check check (max_team_observers between 0 and 20)
 );
 
 comment on column public.bingo_sections.scoreboard_theme is 'midnight | arena | daylight — how the projector looks for this board.';
