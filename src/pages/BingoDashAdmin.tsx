@@ -5277,106 +5277,157 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                   )
                 })()}
 
-                {/* Toolbar: team limits · new group · board-wide actions */}
-                <div className="grid gap-3 md:flex md:flex-wrap md:items-end mb-4">
-                  <div className="flex items-end gap-2">
-                    {([
-                      ['max_team_players', 'Players / team', 1, 1],
-                      ['max_team_observers', 'Observers / team', 9, 0],
-                    ] as const).map(([field, label, fallback, min]) => (
-                      <label key={field} className="grid gap-1 text-[11px] font-bold a-text-3 uppercase tracking-wide">
-                        {label}
-                        <input
-                          key={`${section.id}-${section[field] ?? fallback}`}
-                          type="number"
-                          min={min}
-                          max={20}
-                          defaultValue={section[field] ?? fallback}
-                          onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur() }}
-                          onBlur={e => {
-                            const n = Math.min(20, Math.max(min, Math.round(Number(e.target.value))))
-                            if (!Number.isFinite(n)) { e.target.value = String(section[field] ?? fallback); return }
-                            e.target.value = String(n)
-                            if (n !== (section[field] ?? fallback)) updateBoardSettings({ [field]: n })
-                          }}
-                          className="w-16 px-2 py-1.5 rounded-lg border a-border a-surface a-text text-sm text-center font-mono focus:outline-none focus:border-teal-500"
-                        />
-                      </label>
-                    ))}
-                  </div>
-                  <div className="flex gap-2 md:ml-4">
-                    <input
-                      type="text"
-                      value={newGroupName}
-                      onChange={e => setNewGroupName(e.target.value)}
-                      onKeyDown={e => { if (e.key === 'Enter') createGroup(section.id) }}
-                      placeholder="New group name"
-                      className="flex-1 md:w-44 min-w-0 px-3 py-1.5 rounded-lg border a-border a-surface a-text text-sm focus:outline-none focus:border-teal-500"
-                    />
-                    <input
-                      type="text"
-                      inputMode="numeric"
-                      pattern="[0-9]*"
-                      maxLength={4}
-                      value={newGroupPassword}
-                      onChange={e => setNewGroupPassword(e.target.value.replace(/\D/g, '').slice(0, 4))}
-                      onKeyDown={e => { if (e.key === 'Enter') createGroup(section.id) }}
-                      placeholder="PIN"
-                      className="w-16 md:w-20 px-2 py-1.5 rounded-lg border a-border a-surface a-text text-sm font-mono tracking-widest text-center focus:outline-none focus:border-teal-500"
-                    />
-                    <button
-                      onClick={() => createGroup(section.id)}
-                      disabled={!newGroupName.trim() || newGroupPassword.length !== 4}
-                      className="a-btn a-btn-solid-brand text-sm"
-                    >
-                      <Ico d="plus" />Add
-                    </button>
-                  </div>
-                  <div className="flex flex-wrap gap-2 md:ml-auto">
-                    <button
-                      onClick={() => {
-                        const n = parseInt(prompt('How many groups to bulk create?', '16') ?? '', 10)
-                        if (Number.isFinite(n) && n > 0) bulkCreateGroups(section.id, n)
-                      }}
-                      className="a-btn a-btn-brand"
-                    >
-                      <Ico d="stack" />Bulk create
-                    </button>
-                    {sectionTeams.length > 0 && (
-                      <button onClick={openBulkBonus} className="a-btn a-btn-solid-live"
-                        title="Give one activity's bonus or deduction to many groups at once">
-                        <Ico d="star" />Bulk bonus
-                      </button>
-                    )}
-                    <button
-                      onClick={() => { setShowAllTeamsLink(true); setAllTeamsLinkCopied(false) }}
-                      className="a-btn a-btn-ok"
-                      title="Share a single live link showing every group and their players"
-                    >
-                      <Ico d="link" />Live teams link
-                    </button>
-                    {sectionTeams.length > 0 && (
-                      <button onClick={resetTeams} disabled={resettingTeams} className="a-btn a-btn-danger"
-                        title="Delete every group on this board, leaving it with no teams. Other boards are unaffected.">
+                {/* Toolbar: one box, sorted into sections — reset · add groups · team size · share and score */}
+                <div className="mb-5 overflow-hidden rounded-2xl border a-border a-surface">
+                  {sectionTeams.length > 0 && (
+                    <div className="flex flex-wrap items-center justify-between gap-3 border-b px-4 py-3 md:px-5"
+                      style={{ background: 'var(--a-danger-soft)', borderColor: 'color-mix(in srgb, var(--a-danger) 35%, transparent)' }}>
+                      <div className="min-w-0">
+                        <p className="text-sm font-bold a-danger-text">Reset teams</p>
+                        <p className="text-xs a-text-2">Deletes every group on this board. Other boards are unaffected.</p>
+                      </div>
+                      <button onClick={resetTeams} disabled={resettingTeams} className="a-btn a-btn-solid-danger w-full text-sm md:w-auto">
                         <Ico d="reset" />{resettingTeams ? 'Resetting…' : 'Reset teams'}
                       </button>
-                    )}
+                    </div>
+                  )}
+
+                  {/* Add groups */}
+                  <div className="grid gap-3 border-b a-border px-4 py-4 md:grid-cols-[13rem_minmax(0,1fr)] md:items-center md:gap-6 md:px-5">
+                    <div>
+                      <h3 className="text-sm font-bold a-text">Add groups</h3>
+                      <p className="mt-0.5 text-xs a-text-3">One at a time, or many at once.</p>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-3">
+                      <div className="grid w-full grid-cols-[minmax(0,1fr)_7.5rem] gap-2 md:flex md:w-auto md:min-w-[22rem] md:flex-1">
+                        <input
+                          type="text"
+                          value={newGroupName}
+                          onChange={e => setNewGroupName(e.target.value)}
+                          onKeyDown={e => { if (e.key === 'Enter') createGroup(section.id) }}
+                          placeholder="Group name"
+                          className="min-w-0 rounded-lg border a-border a-surface-2 px-3 py-2 text-sm a-text focus:border-teal-500 focus:outline-none md:flex-1"
+                        />
+                        <input
+                          type="text"
+                          inputMode="numeric"
+                          pattern="[0-9]*"
+                          maxLength={4}
+                          value={newGroupPassword}
+                          onChange={e => setNewGroupPassword(e.target.value.replace(/\D/g, '').slice(0, 4))}
+                          onKeyDown={e => { if (e.key === 'Enter') createGroup(section.id) }}
+                          placeholder="4-digit PIN"
+                          aria-label="4-digit PIN"
+                          className="w-full rounded-lg border a-border a-surface-2 px-2 py-2 text-center font-mono text-sm a-text focus:border-teal-500 focus:outline-none md:w-28"
+                        />
+                        <button
+                          onClick={() => createGroup(section.id)}
+                          disabled={!newGroupName.trim() || newGroupPassword.length !== 4}
+                          className="a-btn a-btn-solid-brand col-span-2 !py-2 text-sm md:col-span-1"
+                        >
+                          <Ico d="plus" />Add group
+                        </button>
+                      </div>
+                      <button
+                        onClick={() => {
+                          const n = parseInt(prompt('How many groups to bulk create?', '16') ?? '', 10)
+                          if (Number.isFinite(n) && n > 0) bulkCreateGroups(section.id, n)
+                        }}
+                        className="a-btn a-btn-outline-brand w-full !py-2 text-sm md:w-auto"
+                      >
+                        <Ico d="stack" />Bulk create
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Team size */}
+                  <details className="group border-b a-border">
+                    <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3.5 md:px-5 [&::-webkit-details-marker]:hidden">
+                      <span className="min-w-0">
+                        <span className="text-sm font-bold a-text">Team size</span>
+                        <span className="ml-2 text-xs a-text-3">{section.max_team_players ?? 1} player{(section.max_team_players ?? 1) !== 1 ? 's' : ''} · {section.max_team_observers ?? 9} observers per group</span>
+                      </span>
+                      <span className="flex-none text-xs font-bold group-open:hidden" style={{ color: "var(--a-brand)" }}>Edit</span>
+                      <span className="hidden flex-none text-xs font-bold a-text-3 group-open:inline">Hide</span>
+                    </summary>
+                    <div className="flex flex-wrap items-center gap-x-8 gap-y-3 px-4 pb-4 md:px-5">
+                      {([
+                        ['max_team_players', 'Players', 1, 1],
+                        ['max_team_observers', 'Observers', 9, 0],
+                      ] as const).map(([field, label, fallback, min]) => {
+                        const value = section[field] ?? fallback
+                        const step = (d: number) => {
+                          const n = Math.min(20, Math.max(min, value + d))
+                          if (n !== value) updateBoardSettings({ [field]: n })
+                        }
+                        return (
+                          <div key={field} className="flex w-full items-center justify-between gap-3 md:w-auto md:justify-start">
+                            <span className="text-xs font-semibold a-text-2">{label}</span>
+                            <div className="flex items-center rounded-full border a-border a-surface-2 p-0.5">
+                              <button type="button" onClick={() => step(-1)} disabled={value <= min} aria-label={`Fewer ${label.toLowerCase()}`}
+                                className="grid h-8 w-8 place-items-center rounded-full text-base font-bold a-text-2 transition active:scale-90 disabled:opacity-30">−</button>
+                              <input
+                                key={`${section.id}-${value}`}
+                                type="number"
+                                min={min}
+                                max={20}
+                                defaultValue={value}
+                                aria-label={`${label} per team`}
+                                onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur() }}
+                                onBlur={e => {
+                                  const n = Math.min(20, Math.max(min, Math.round(Number(e.target.value))))
+                                  if (!Number.isFinite(n)) { e.target.value = String(value); return }
+                                  e.target.value = String(n)
+                                  if (n !== value) updateBoardSettings({ [field]: n })
+                                }}
+                                className="w-9 bg-transparent text-center font-mono text-sm font-bold a-text focus:outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                              />
+                              <button type="button" onClick={() => step(1)} disabled={value >= 20} aria-label={`More ${label.toLowerCase()}`}
+                                className="grid h-8 w-8 place-items-center rounded-full text-base font-bold a-text-2 transition active:scale-90 disabled:opacity-30">+</button>
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </details>
+
+                  {/* Share and score */}
+                  <div className="grid gap-3 px-4 py-4 md:grid-cols-[13rem_minmax(0,1fr)] md:items-center md:gap-6 md:px-5">
+                    <div>
+                      <h3 className="text-sm font-bold a-text">Share and score</h3>
+                      <p className="mt-0.5 text-xs a-text-3">For the big screen and bonus points.</p>
+                    </div>
+                    <div className="grid gap-2 md:flex md:flex-wrap">
+                      <button
+                        onClick={() => { setShowAllTeamsLink(true); setAllTeamsLinkCopied(false) }}
+                        className="a-btn a-btn-ok !py-2 text-sm"
+                        title="Share a single live link showing every group and their players"
+                      >
+                        <Ico d="link" />Live teams link
+                      </button>
+                      {sectionTeams.length > 0 && (
+                        <button onClick={openBulkBonus} className="a-btn a-btn-live !py-2 text-sm"
+                          title="Give one activity's bonus or deduction to many groups at once">
+                          <Ico d="star" />Bulk bonus
+                        </button>
+                      )}
+                    </div>
                   </div>
                 </div>
 
                 {/* One markup: a table that hugs its content on md+, stacked cards below md */}
-                {sectionTeams.length > 0 && (<div className="md:w-fit md:max-w-full md:rounded-xl md:border a-border md:a-surface md:overflow-x-auto">
-                  <table className="w-full md:w-auto text-sm block md:table">
+                {sectionTeams.length > 0 && (<div className="md:w-full md:max-w-full md:rounded-xl md:border a-border md:a-surface md:overflow-x-auto">
+                  <table className="w-full text-sm block md:table">
                     <thead className="hidden md:table-header-group">
                       <tr className="border-b a-border a-surface-2 text-[11px] font-bold a-text-3 uppercase tracking-wide text-left whitespace-nowrap">
                         <th className="px-2.5 py-2">Group</th>
-                        <th className="px-2.5 py-2">PIN</th>
-                        <th className="px-2.5 py-2">Players</th>
-                        <th className="px-2.5 py-2">Observers</th>
-                        <th className="px-2.5 py-2 text-right">Tasks</th>
-                        <th className="px-2.5 py-2 text-right">Bingo</th>
-                        <th className="px-2.5 py-2 text-right">Points</th>
-                        <th className="px-2.5 py-2" title="Bonus points from other games">Bonus</th>
+                        <th className="px-2.5 py-2 text-center">PIN</th>
+                        <th className="px-2.5 py-2 text-center">Players</th>
+                        <th className="px-2.5 py-2 text-center">Observers</th>
+                        <th className="px-2.5 py-2 text-center">Tasks</th>
+                        <th className="px-2.5 py-2 text-center">Bingo</th>
+                        <th className="px-2.5 py-2 text-center">Points</th>
+                        <th className="px-2.5 py-2 text-center" title="Bonus points from other games">Bonus</th>
                         <th className="px-2.5 py-2"></th>
                       </tr>
                     </thead>
@@ -5444,14 +5495,14 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                               e.target.value = v
                             }}
                             onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur() }}
-                            className={`px-1.5 py-1 rounded border bg-transparent font-mono text-xs tracking-widest text-center a-text-2 focus:outline-none focus:border-teal-500 ${team.password ? cls : 'border-amber-500'}`}
+                            className={`px-1.5 py-1 rounded-lg border font-mono text-base font-black tracking-[0.2em] text-center a-text a-surface-2 focus:outline-none focus:border-teal-500 ${team.password ? cls : 'border-amber-500'}`}
                             title={team.password ? 'Team password' : 'Not set — enter a 4-digit password'}
                           />
                         )
                         return (
                           <tr key={team.id} className="grid grid-cols-3 gap-x-4 gap-y-3 p-3 rounded-xl border a-border a-surface md:table-row md:p-0 md:rounded-none md:border-0 md:border-t md:bg-transparent">
                             {/* Photo + name (+ PIN on phone) */}
-                            <td className="col-span-3 md:px-2.5 md:py-2 align-top">
+                            <td className="col-span-3 md:px-2.5 md:py-2 md:align-middle">
                               <div className="flex items-center gap-2.5">
                                 <div className="relative group/photo shrink-0">
                                   <label
@@ -5501,12 +5552,12 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                                   onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur() }}
                                   className="min-w-0 w-full md:w-36 px-1.5 py-1 -mx-1.5 rounded border border-transparent hover:border-[var(--a-border)] focus:border-teal-500 focus:outline-none font-semibold a-text bg-transparent text-sm"
                                 />
-                                <span className="md:hidden">{pinInput('w-16 a-border')}</span>
+                                <span className="md:hidden">{pinInput('w-20 a-border')}</span>
                               </div>
                             </td>
                             {/* PIN (laptop) */}
-                            <td className="hidden md:table-cell px-2.5 py-2 align-top">
-                              {pinInput('w-14 border-transparent hover:border-[var(--a-border)]')}
+                            <td className="hidden md:table-cell px-2.5 py-2 align-middle text-center">
+                              {pinInput('w-[4.75rem] a-border')}
                             </td>
                             {/* Players, then Observers: count only, click to show names */}
                             {roleColumns.map(({ key, label, people, cap }) => {
@@ -5525,14 +5576,14 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                                 ? { background: 'var(--a-info-soft)', color: 'var(--a-info)' }
                                 : { background: 'var(--a-brand-soft)', color: 'var(--a-brand)' }
                               return (
-                                <td key={key} className={`${key === 'player' ? 'col-span-1' : 'col-span-2'} md:px-2.5 md:py-2 align-top whitespace-nowrap`}>
+                                <td key={key} className={`${key === 'player' ? 'col-span-1' : 'col-span-2'} md:px-2.5 md:py-2 md:align-middle md:text-center whitespace-nowrap`}>
                                   {people.length === 0 ? <span className="inline-flex items-center">{count}</span> : (
-                                    <details className="a-details group/d">
+                                    <details className="a-details group/d md:inline-block">
                                       <summary className="inline-flex items-center gap-1 select-none">
                                         {count}
                                         <Ico d="chev" className="w-3 h-3 a-text-3 transition-transform group-open/d:rotate-90" />
                                       </summary>
-                                      <div className="flex flex-wrap gap-1 mt-1.5 whitespace-normal md:max-w-[16rem]">
+                                      <div className="flex flex-wrap gap-1 mt-1.5 whitespace-normal md:max-w-[16rem] md:justify-center">
                                         {people.map(m => (
                                           <span key={m.id} className="inline-flex items-center gap-0.5 max-w-[9rem] pl-2 pr-0.5 py-0.5 rounded-full text-[11px] font-semibold" style={chip}>
                                             <span className="truncate">{m.name}</span>
@@ -5564,13 +5615,13 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                               ['Bingo', teamBingoLines, 'a-live'],
                               ['Pts', pointsEarned.toFixed(2), 'a-text-2'],
                             ] as const).map(([label, value, tone]) => (
-                              <td key={label} className="md:px-2.5 md:py-2 align-top md:text-right whitespace-nowrap">
+                              <td key={label} className="md:px-2.5 md:py-2 md:align-middle md:text-center whitespace-nowrap">
                                 <span className="md:hidden text-[10px] font-bold a-text-3 uppercase mr-1">{label}</span>
                                 <span className={`font-mono tabular-nums text-sm font-bold ${tone}`}>{value}</span>
                               </td>
                             ))}
                             {/* Bonus: total / Add on top, Deduct below */}
-                            <td className="col-span-3 md:px-2.5 md:py-2 align-top whitespace-nowrap">
+                            <td className="col-span-3 md:px-2.5 md:py-2 md:align-middle md:text-center whitespace-nowrap">
                               <div className="inline-flex flex-col gap-1.5">
                                 <button
                                   onClick={() => openBonusModal(team)}
@@ -5596,7 +5647,7 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                               </div>
                             </td>
                             {/* Actions */}
-                            <td className="col-span-3 md:px-2.5 md:py-2 align-top whitespace-nowrap">
+                            <td className="col-span-3 md:px-2.5 md:py-2 md:align-middle whitespace-nowrap">
                               <div className="flex items-center gap-1.5 md:justify-end">
                                 <button onClick={() => setViewingTeam(team)} className="a-btn a-btn-brand flex-1 md:flex-none">
                                   <Ico d="grid" />Grid
