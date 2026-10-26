@@ -30,7 +30,7 @@ import { RetroGamesSample } from '../components/RetroGamesSample'
 import { BundleCard } from '../components/BundleCard'
 import { AitbMissionModule } from '../components/AitbMissionModule'
 import { CardBonusTimer } from '../components/CardBonusTimer'
-import { resolveBonusWindow, type BonusDefaults } from '../lib/timeBonus'
+import { resolveBonusWindow, activeElapsedMs, type BonusDefaults } from '../lib/timeBonus'
 import { aitbByName, aitbToolUrl, aitbToolCaption, AITB_POINTS } from '../lib/aitbActivities'
 import { normalizeUrl } from '../lib/normalizeUrl'
 import type { BingoScan, BingoTask } from '../types/database'
@@ -289,14 +289,22 @@ export function BingoDashParticipant() {
       setBonusDefaults({
         default_bonus_full_minutes: data.default_bonus_full_minutes,
         default_bonus_timer_minutes: data.default_bonus_timer_minutes,
+        card_pauses: data.card_pauses,
       })
       if (typeof data.marshal_password === 'string') setMarshalPassword(data.marshal_password)
       if (typeof data.photo_submissions_enabled === 'boolean') {
         setPhotoSubmissionsEnabled(data.photo_submissions_enabled)
       }
     }
-    supabase.from('bingo_sections').select('marshal_password, photo_submissions_enabled, default_bonus_full_minutes, default_bonus_timer_minutes').eq('id', sectionId).single()
-      .then(({ data }) => applySettings(data))
+    const baseCols = 'marshal_password, photo_submissions_enabled, default_bonus_full_minutes, default_bonus_timer_minutes'
+    // card_pauses only exists once supabase/core-tables/20261027_freeze_card_timers.sql
+    // has been run — fall back so the page still loads before that.
+    supabase.from('bingo_sections').select(`${baseCols}, card_pauses`).eq('id', sectionId).single()
+      .then(async ({ data, error }) => {
+        if (!error) { applySettings(data); return }
+        const retry = await supabase.from('bingo_sections').select(baseCols).eq('id', sectionId).single()
+        applySettings(retry.data)
+      })
     const channel = supabase
       .channel('bingo-section-participant')
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'bingo_sections', filter: `id=eq.${sectionId}` }, (payload) => {
@@ -1021,9 +1029,11 @@ export function BingoDashParticipant() {
         {/* Bonus timer — every card, from the moment the team opens it. */}
         {scanRecord && !chainLocked && (() => {
           const opened = new Date(scanRecord.scannedAt).getTime()
-          if (!scanRecord.completed) lastElapsed.current = Math.max(0, now - opened)
+          // Board pauses are taken off, so the clock stands still while the
+          // admin has the board countdown paused.
+          if (!scanRecord.completed) lastElapsed.current = activeElapsedMs(opened, now, bonusDefaults)
           const elapsed = !scanRecord.completed ? lastElapsed.current
-            : scanRecord.completedAt ? Math.max(0, Date.parse(scanRecord.completedAt) - opened) : lastElapsed.current
+            : scanRecord.completedAt ? activeElapsedMs(opened, Date.parse(scanRecord.completedAt), bonusDefaults) : lastElapsed.current
           return (
             <CardBonusTimer
               elapsedMs={elapsed}

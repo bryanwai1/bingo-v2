@@ -77,6 +77,9 @@ export interface TeamScan {
 // ── Bingo Dash ────────────────────────────────────────────────
 
 // Per-board timer + time's-up alarm fields (subset of BingoSection).
+/** One stretch the board countdown was paused. end null = still paused. Epoch ms. */
+export interface PauseSpan { start: number; end: number | null }
+
 export interface BoardTimer {
   timer_seconds: number
   /** The duration last configured (via Set / +/- while stopped, or a live
@@ -90,6 +93,8 @@ export interface BoardTimer {
 }
 
 export interface BingoSection extends BoardTimer {
+  /** Stretches the game or timer was paused; card clocks skip them. See lib/timeBonus.ts. */
+  card_pauses?: PauseSpan[] | null
   /** Cube faces in play: 1, 2 or 6. See src/lib/cubeFaces.ts */
   face_count?: number | null
   // Time-bonus window every card on this board follows unless it sets its own:

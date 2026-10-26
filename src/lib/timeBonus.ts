@@ -1,4 +1,4 @@
-import type { BingoScan } from '../types/database'
+import type { BingoScan, PauseSpan } from '../types/database'
 
 // ── Per-card time bonus ───────────────────────────────────────────────────────
 // A card pays 150% of its base points when a team finishes inside the FULL
@@ -29,6 +29,8 @@ const LANDMARKS = 5
 export interface BonusDefaults {
   default_bonus_full_minutes?: number | null
   default_bonus_timer_minutes?: number | null
+  /** Pauses logged while the board countdown was paused — see pausedMsBetween. */
+  card_pauses?: PauseSpan[] | null
 }
 
 /** A card's own override — null/undefined means "follow the board default". */
@@ -84,6 +86,28 @@ export function bonusPercent(elapsedMs: number, window: BonusWindow): number {
   return BASE_PCT + (MAX_BONUS_PCT - BASE_PCT) * left
 }
 
+/**
+ * How much of [from, to] the board spent paused. An open pause (end null) runs
+ * to `to`. Read whenever the log has entries — the freeze switch only decides
+ * whether NEW pauses are logged — so turning it off never changes earned points.
+ */
+export function pausedMsBetween(from: number, to: number, board?: Pick<BonusDefaults, 'card_pauses'> | null): number {
+  const pauses = board?.card_pauses
+  if (!pauses?.length) return 0
+  let total = 0
+  for (const p of pauses) {
+    const start = Math.max(p.start, from)
+    const end = Math.min(p.end ?? to, to)
+    if (end > start) total += end - start
+  }
+  return total
+}
+
+/** Live card clock: time since the card was opened, minus paused time. Never negative. */
+export function activeElapsedMs(from: number, to: number, board?: Pick<BonusDefaults, 'card_pauses'> | null): number {
+  return Math.max(0, to - from - pausedMsBetween(from, to, board))
+}
+
 /** Scores are kept to 2 decimal places. */
 export const round2 = (n: number) => Math.round(n * 100) / 100
 
@@ -107,9 +131,14 @@ export function completionScan(
 }
 
 /** Elapsed ms between opening and completing, or null when either time is unknown. */
-export function scanElapsedMs(scan: Pick<BingoScan, 'scanned_at' | 'completed_at'> | undefined): number | null {
+export function scanElapsedMs(
+  scan: Pick<BingoScan, 'scanned_at' | 'completed_at'> | undefined,
+  board?: Pick<BonusDefaults, 'card_pauses'> | null,
+): number | null {
   if (!scan?.scanned_at || !scan.completed_at) return null
-  const ms = Date.parse(scan.completed_at) - Date.parse(scan.scanned_at)
+  const from = Date.parse(scan.scanned_at)
+  const to = Date.parse(scan.completed_at)
+  const ms = to - from - pausedMsBetween(from, to, board)
   return Number.isFinite(ms) ? ms : null
 }
 
@@ -123,7 +152,7 @@ export function boxPoints(
   board?: BonusDefaults | null,
 ): number {
   const base = Number(task.points ?? 0) || 0
-  const elapsed = scanElapsedMs(completionScan(teamScans, task.placement_id, task.id))
+  const elapsed = scanElapsedMs(completionScan(teamScans, task.placement_id, task.id), board)
   if (elapsed === null) return base
   return bonusPoints(base, elapsed, resolveBonusWindow(task, board))
 }

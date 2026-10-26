@@ -7,7 +7,7 @@ import { supabase } from '../lib/supabase'
 import { CategoryIcon } from '../components/BingoTileFace'
 import { useBingoAuth } from '../hooks/useBingoAuth'
 import { announceBoardReset } from '../hooks/useBoardReset'
-import type { BingoTask, BingoTeam, BingoScan, BingoSettings, BingoSection, BingoCategory, BingoChallengeSection, BingoMember, BingoPhotoSubmission, BingoBoardCard, BingoDuel, BonusItem } from '../types/database'
+import type { BingoTask, BingoTeam, BingoScan, BingoSettings, BingoSection, BingoCategory, BingoChallengeSection, BingoMember, BingoPhotoSubmission, BingoBoardCard, BingoDuel, BonusItem, PauseSpan } from '../types/database'
 import { BINGO_LINES, buildBingoSlots, completedBingoLines, scoreWithBingoLines } from '../lib/bingoLines'
 import { boxPoints, resolveBonusWindow, BONUS_PRESETS, DEFAULT_BONUS_FULL_MIN, DEFAULT_BONUS_TIMER_MIN } from '../lib/timeBonus'
 import { TileFace } from '../components/BingoTileFace'
@@ -1059,6 +1059,7 @@ export function BingoDashAdmin() {
   const [bulkBonusSaving, setBulkBonusSaving] = useState(false)
   // Section-wide "live teams link" share modal
   const [showAllTeamsLink, setShowAllTeamsLink] = useState(false)
+  const [teamSizeSaved, setTeamSizeSaved] = useState(false)
   const [allTeamsLinkCopied, setAllTeamsLinkCopied] = useState(false)
   const [members, setMembers] = useState<BingoMember[]>([])
   const [photoSubmissions, setPhotoSubmissions] = useState<BingoPhotoSubmission[]>([])
@@ -1769,6 +1770,17 @@ export function BingoDashAdmin() {
   // ── Section CRUD ──────────────────────────────────────────────────────────
   const slugify = (s: string) => s.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
 
+  // Team size a new board starts with — set from the Teams tab, kept in this
+  // browser only (nothing is written to the database).
+  const defaultTeamSize = (): { max_team_players?: number; max_team_observers?: number } => {
+    try {
+      const v = JSON.parse(localStorage.getItem('bingo-default-team-size') ?? 'null')
+      return v && Number.isFinite(v.players) && Number.isFinite(v.observers)
+        ? { max_team_players: v.players, max_team_observers: v.observers }
+        : {}
+    } catch { return {} }
+  }
+
   const createSection = async (overrideName?: string) => {
     const name = (overrideName ?? newSectionName).trim()
     if (!name) return
@@ -1778,13 +1790,13 @@ export function BingoDashAdmin() {
     while (sections.some(s => s.slug === slug)) { slug = `${baseSlug}-${i++}` }
     const maxOrder = myBoards.reduce((m, s) => Math.max(m, s.sort_order), -1)
     let { data, error } = await supabase.from('bingo_sections')
-      .insert({ name, slug, sort_order: maxOrder + 1, owner_id: myOwnerValue })
+      .insert({ name, slug, sort_order: maxOrder + 1, owner_id: myOwnerValue, ...defaultTeamSize() })
       .select().single()
     if (error) {
       // Slugs are globally unique across accounts and other accounts' boards
       // aren't visible here — retry once with a random suffix on collision.
       const retry = await supabase.from('bingo_sections')
-        .insert({ name, slug: `${baseSlug}-${Math.random().toString(36).slice(2, 6)}`, sort_order: maxOrder + 1, owner_id: myOwnerValue })
+        .insert({ name, slug: `${baseSlug}-${Math.random().toString(36).slice(2, 6)}`, sort_order: maxOrder + 1, owner_id: myOwnerValue, ...defaultTeamSize() })
         .select().single()
       data = retry.data; error = retry.error
     }
@@ -1959,6 +1971,28 @@ export function BingoDashAdmin() {
     if (error) alert('Failed to save note — has the board_note migration been run in Supabase?')
   }
 
+  // Card clocks always follow the game, not just the countdown: Pause on the timer OR
+  // stopping the game (players see the waiting screen) opens an entry in
+  // card_pauses. Scoring and the player's bonus bar subtract it, so points are
+  // never touched. It closes when the game is running again — see
+  // 20261027_freeze_card_timers.sql.
+  const openPauseLog = (board: BingoSection | null | undefined): PauseSpan[] | null => {
+    if (!board) return null
+    const log = board.card_pauses ?? []
+    return log.some(p => p.end === null) ? null : [...log, { start: Date.now(), end: null }]
+  }
+  const closePauseLog = (board: BingoSection | null | undefined): PauseSpan[] | null => {
+    const log = board?.card_pauses ?? []
+    if (!log.some(p => p.end === null)) return null
+    const now = Date.now()
+    return log.map(p => p.end === null ? { ...p, end: now } : p)
+  }
+  // The patch to send alongside game_started so the pause log stays in step.
+  const gameLockPauseLog = (board: BingoSection | null | undefined, started: boolean): { card_pauses?: PauseSpan[] } => {
+    const log = started ? closePauseLog(board) : (board?.game_started ? openPauseLog(board) : null)
+    return log ? { card_pauses: log } : {}
+  }
+
   const toggleSectionGameStarted = async (sectionId: string, started: boolean) => {
     // Snapshot for rollback: the UI flips optimistically, so a write the
     // database rejects would otherwise show as LIVE until the next refetch.
@@ -1969,7 +2003,7 @@ export function BingoDashAdmin() {
       // facilitator does not have to remember a second button at the whistle.
       const board = sections.find(s => s.id === sectionId)
       const alreadyRunning = !!board?.timer_end_at && new Date(board.timer_end_at).getTime() > Date.now()
-      const startPatch: Partial<BingoSection> = { game_started: true }
+      const startPatch: Partial<BingoSection> = { game_started: true, ...gameLockPauseLog(board, true) }
       if (!alreadyRunning && (board?.timer_seconds ?? 0) > 0) {
         startPatch.timer_end_at = new Date(Date.now() + (board!.timer_seconds ?? 0) * 1000).toISOString()
       }
@@ -1996,9 +2030,10 @@ export function BingoDashAdmin() {
         alert(boardWriteFailureMessage(failure?.message))
       }
     } else {
-      setSections(prev => prev.map(s => s.id === sectionId ? { ...s, game_started: false } : s))
+      const lockPatch = { game_started: false, ...gameLockPauseLog(sections.find(s => s.id === sectionId), false) }
+      setSections(prev => prev.map(s => s.id === sectionId ? { ...s, ...lockPatch } : s))
       const { data, error } = await supabase
-        .from('bingo_sections').update({ game_started: false }).eq('id', sectionId).select('id')
+        .from('bingo_sections').update(lockPatch).eq('id', sectionId).select('id')
       if (error || data?.length !== 1) {
         setSections(prevSections)
         alert(boardWriteFailureMessage(error?.message))
@@ -2130,20 +2165,47 @@ export function BingoDashAdmin() {
     setTimerMinutesInput('')
   }
 
+  // Timer Start / Reset end a card pause only while the game is live — if the
+  // game is stopped, players are still on the waiting screen and stay frozen.
+  const timerClosePauseLog = (): { card_pauses?: PauseSpan[] } => {
+    if (!currentBoard?.game_started) return {}
+    const closed = closePauseLog(currentBoard)
+    return closed ? { card_pauses: closed } : {}
+  }
+
   const startTimer = () => {
-    if (!currentBoard?.timer_seconds) return
-    updateBoardSettings({ timer_end_at: new Date(Date.now() + currentBoard.timer_seconds * 1000).toISOString() })
+    if (!currentBoard) return
+    const close = timerClosePauseLog()
+    if (!currentBoard.timer_seconds) {
+      if (close.card_pauses) updateBoardSettings(close)
+      return
+    }
+    updateBoardSettings({
+      timer_end_at: new Date(Date.now() + currentBoard.timer_seconds * 1000).toISOString(),
+      ...close,
+    })
   }
 
   const pauseTimer = () => {
     if (!currentBoard?.timer_end_at) return
     const remaining = Math.max(0, Math.round((new Date(currentBoard.timer_end_at).getTime() - Date.now()) / 1000))
-    updateBoardSettings({ timer_seconds: remaining, timer_end_at: null })
+    const open = openPauseLog(currentBoard)
+    updateBoardSettings({
+      timer_seconds: remaining,
+      timer_end_at: null,
+      ...(open ? { card_pauses: open } : {}),
+    })
   }
 
   // Stop the countdown and hand back the length that was actually set —
-  // not the paused remainder, and not zero.
-  const resetTimer = () => updateBoardSettings({ timer_end_at: null, timer_seconds: currentBoard?.timer_duration_seconds ?? 0 })
+  // not the paused remainder, and not zero. Also ends an open card pause.
+  const resetTimer = () => {
+    updateBoardSettings({
+      timer_end_at: null,
+      timer_seconds: currentBoard?.timer_duration_seconds ?? 0,
+      ...timerClosePauseLog(),
+    })
+  }
 
   // ── Board grid actions ─────────────────────────────────────────────────────
   // Grid membership lives in bingo_board_cards: one placement row per
@@ -3473,6 +3535,10 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
               </button>
             </div>
 
+            {(currentBoard?.card_pauses ?? []).some(p => p.end === null) && (
+              <p className="mb-4 text-center text-xs font-bold a-live">❄ Card timers are frozen — they carry on when the game runs again.</p>
+            )}
+
             <div className="flex items-center gap-2 justify-center flex-wrap">
               {([-10, -5, -1] as const).map(d => (
                 <button key={d} onClick={() => adjustTimer(d)} disabled={timerSaving}
@@ -4616,7 +4682,7 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                       📺 Scoreboard
                     </a>
                     <button
-                      onClick={() => updateBoardSettings({ game_started: !live })}
+                      onClick={() => updateBoardSettings({ game_started: !live, ...gameLockPauseLog(currentBoard, !live) })}
                       className={`${btn} a-text`}
                       style={{ background: live ? '#b91c1c' : 'var(--a-live)' }}>
                       {live ? '■ Stop game' : '▶ Start game'}
@@ -5388,6 +5454,23 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                           </div>
                         )
                       })}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          try {
+                            localStorage.setItem('bingo-default-team-size', JSON.stringify({
+                              players: section.max_team_players ?? 1,
+                              observers: section.max_team_observers ?? 9,
+                            }))
+                          } catch { /* storage blocked — nothing saved */ }
+                          setTeamSizeSaved(true)
+                          setTimeout(() => setTeamSizeSaved(false), 2000)
+                        }}
+                        title="New boards will start with these team sizes (saved in this browser only)"
+                        className="a-btn a-btn-ghost w-full !py-2 text-sm md:ml-auto md:w-auto"
+                      >
+                        <Ico d="star" />{teamSizeSaved ? 'Saved as default' : 'Set as default'}
+                      </button>
                     </div>
                   </details>
 
