@@ -899,7 +899,7 @@ export function BingoDashTaskEdit() {
                       </label>
                       {rule && (
                         <div className="flex rounded-md overflow-hidden border border-violet-200">
-                          {(['required', 'optional'] as const).map(r => (
+                          {(['required', 'auto', 'optional'] as const).map(r => (
                             <button
                               key={r}
                               onClick={() => saveInputs('answer', { ...inputs, [kind]: r })}
@@ -907,7 +907,7 @@ export function BingoDashTaskEdit() {
                                 rule === r ? 'bg-violet-600 text-white' : 'bg-white text-gray-500 hover:bg-violet-50'
                               }`}
                             >
-                              {r === 'required' ? 'Compulsory' : 'Optional'}
+                              {r === 'required' ? 'Compulsory' : r === 'auto' ? 'Auto-approve' : 'Optional'}
                             </button>
                           ))}
                         </div>
@@ -923,9 +923,14 @@ export function BingoDashTaskEdit() {
                   : (() => {
                       const kinds = inputKinds(inputs)
                       const must = kinds.filter(k => inputs[k] === 'required').map(k => INPUT_LABELS[k].label)
+                      const auto = kinds.filter(k => inputs[k] === 'auto').map(k => INPUT_LABELS[k].label)
                       if (kinds.length === 0) return 'Pick at least one input, or leave the card on marshal.'
+                      if (auto.length > 0) {
+                        const all = [...must, ...auto]
+                        return `The tile turns green once ${all.join(' and ')} ${all.length > 1 ? 'are' : 'is'} in. ${auto.join(' and ')} ${auto.length > 1 ? 'count' : 'counts'} as soon as ${auto.length > 1 ? 'they are' : 'it is'} sent${must.length > 0 ? `; a marshal approves ${must.join(' and ')} in admin` : ''}.`
+                      }
                       return must.length > 0
-                        ? `The tile turns green once ${must.join(' and ')} ${must.length > 1 ? 'are' : 'is'} in — a marshal approves each submission in admin.`
+                        ? `The tile turns green once ${must.join(' and ')} ${must.length > 1 ? 'are' : 'is'} approved by a marshal in admin.`
                         : 'Everything here is optional, so any one of them completes the card.'
                     })()}
               </p>

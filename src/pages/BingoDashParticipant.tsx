@@ -6,7 +6,7 @@ import { useBingoDashTeam } from '../hooks/useBingoDashTeam'
 import { useBingoTaskPages } from '../hooks/useBingoTaskPages'
 import {
   fileAccept, fileEmoji, fileHeading, fileNoun, inputKinds, isComplete, missingLabels,
-  effectiveInputs, usesInputs,
+  effectiveInputs, usesInputs, isCompulsory, type InputKind,
 } from '../lib/completionInputs'
 import { useBingoTaskPhotos } from '../hooks/useBingoTaskPhotos'
 import { useBingoScans } from '../hooks/useBingoScans'
@@ -541,6 +541,20 @@ export function BingoDashParticipant() {
     return () => { live = false }
   }, [team, taskId, inputs.versus])
 
+  /** An 'auto' input is approved the moment it is sent; the rest wait for a marshal. */
+  const statusFor = (kind: InputKind) => (inputs[kind] === 'auto' ? 'approved' : 'pending')
+
+  /** Auto-approved inputs never reach the admin, so nobody else finishes the
+   *  card for the team: do it here once every compulsory input is in. */
+  const finishIfDone = async (justSent: InputKind[]) => {
+    const auto = justSent.filter(k => inputs[k] === 'auto')
+    if (auto.length === 0 || !scanRecord || scanRecord.completed) return
+    const done = { ...progress, ...Object.fromEntries(auto.map(k => [k, true])) }
+    if (!isComplete(inputs, done)) return
+    await toggleComplete(scanRecord.id, true)
+    setScanRecord(prev => (prev ? { ...prev, completed: true } : prev))
+  }
+
   /** The battle claim: who we fought and whether we won. One row for the
    *  admin, like a link — and only the challenging team ever sends one. */
   const submitVersus = async () => {
@@ -550,11 +564,12 @@ export function BingoDashParticipant() {
       // Rematches are allowed: the admin sees every claim and decides.
       const { error } = await supabase.from('bingo_photo_submissions').insert({
         team_id: team.id, task_id: taskId, scan_id: scanRecord.id,
-        photo_url: '', media_type: 'versus', status: 'pending',
+        photo_url: '', media_type: 'versus', status: statusFor('versus'),
         opponent_id: opponentId, versus_won: versusWon,
       })
       if (error) { alert('Could not send your result: ' + error.message); return }
       setVersusSent(true)
+      await finishIfDone(['versus'])
     } finally {
       setVersusBusy(false)
     }
@@ -572,11 +587,12 @@ export function BingoDashParticipant() {
     try {
       const { error } = await supabase.from('bingo_photo_submissions').insert({
         team_id: team.id, task_id: taskId, scan_id: scanRecord.id,
-        photo_url: url, media_type: 'link', status: 'pending',
+        photo_url: url, media_type: 'link', status: statusFor('link'),
       })
       if (error) { alert('Could not save your link: ' + error.message); return }
       setLinkSent(true)
       setLinkValue('')
+      await finishIfDone(['link'])
     } finally {
       setLinkBusy(false)
     }
@@ -602,10 +618,11 @@ export function BingoDashParticipant() {
     try {
       const { error } = await supabase.from('bingo_photo_submissions').insert({
         team_id: team.id, task_id: taskId, scan_id: scanRecord.id,
-        photo_url: text, media_type: 'text', status: 'pending',
+        photo_url: text, media_type: 'text', status: statusFor('answer'),
       })
       if (error) { alert('Could not send your answer: ' + error.message); return }
       setFreeTextSent(true)
+      await finishIfDone(['answer'])
     } finally {
       setFreeTextBusy(false)
     }
@@ -724,12 +741,13 @@ export function BingoDashParticipant() {
       if (text && team && taskId && scanRecord) {
         const { error } = await supabase.from('bingo_photo_submissions').insert({
           team_id: team.id, task_id: taskId, scan_id: scanRecord.id,
-          photo_url: text, media_type: 'text', status: 'pending',
+          photo_url: text, media_type: 'text', status: statusFor('answer'),
         })
         if (error) { alert('Could not send your answer: ' + error.message); return }
         setFreeTextSent(true)
+        if (staged.length === 0) await finishIfDone(['answer'])
       }
-      for (const item of staged) await uploadOne(item.file)
+      for (const item of staged) await uploadOne(item.file, text ? ['answer'] : [])
       staged.forEach(x => URL.revokeObjectURL(x.preview))
       setStaged([])
       if (staged.length > 0) setPhotoSubmitted(true)
@@ -738,7 +756,7 @@ export function BingoDashParticipant() {
     }
   }
 
-  const uploadOne = async (file: File) => {
+  const uploadOne = async (file: File, alsoSent: InputKind[] = []) => {
     if (!team || !taskId || !scanRecord) return
     const isVideo = file.type.startsWith('video/')
     {
@@ -768,10 +786,11 @@ export function BingoDashParticipant() {
         scan_id: scanRecord.id,
         photo_url: urlData.publicUrl,
         media_type: isVideo ? 'video' : 'image',
-        status: 'pending',
+        status: statusFor(isVideo ? 'video' : 'photo'),
       })
       if (insertErr) { alert('Could not save submission: ' + insertErr.message); return }
       setPhotosSent(n => n + 1)
+      await finishIfDone([isVideo ? 'video' : 'photo', ...alsoSent])
     }
   }
 
@@ -1393,7 +1412,7 @@ export function BingoDashParticipant() {
                 <div className="mb-6">
                   <p className="text-white font-black text-lg text-center mb-1">⚔️ Who did you battle?</p>
                   <p className="text-white/50 text-sm text-center mb-4">
-                    Pick the team and the result - the admin approves it.
+                    {inputs.versus === 'auto' ? 'Pick the team and the result.' : 'Pick the team and the result - the admin approves it.'}
                   </p>
                   {reviews.versus?.status === 'rejected' && !versusSent && !approvedKinds.versus && (
                     <div className="mb-4 p-4 rounded-2xl bg-red-500/15 border border-red-400/50 text-center">
@@ -1439,7 +1458,7 @@ export function BingoDashParticipant() {
                         className="w-full py-3.5 rounded-2xl font-black uppercase tracking-wider transition-all active:scale-95 disabled:opacity-40"
                         style={{ backgroundColor: task.hex_code, color: '#000' }}
                       >
-                        {versusBusy ? 'Sending…' : 'Submit result for approval'}
+                        {versusBusy ? 'Sending…' : inputs.versus === 'auto' ? 'Submit result' : 'Submit result for approval'}
                       </button>
                       <p className="text-white/40 text-xs font-bold text-center">
                         Only the team that started the challenge sends this.
@@ -1694,8 +1713,8 @@ export function BingoDashParticipant() {
                       )}
 
                       {(staged.length > 0 || (combinedText && freeText.trim())) && (() => {
-                        const fileRequired = inputs.photo === 'required' || inputs.video === 'required'
-                        const textRequired = inputs.answer === 'required'
+                        const fileRequired = isCompulsory(inputs.photo) || isCompulsory(inputs.video)
+                        const textRequired = isCompulsory(inputs.answer)
                         const missingFile = combinedText && fileRequired && staged.length === 0
                         const missingText = combinedText && textRequired && !freeText.trim()
                         const label = photoUploading ? 'Sending…'

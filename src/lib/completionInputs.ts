@@ -8,8 +8,12 @@
 export const INPUT_KINDS = ['photo', 'video', 'link', 'answer', 'versus'] as const
 export type InputKind = (typeof INPUT_KINDS)[number]
 
-export type InputRule = 'required' | 'optional'
+// 'auto' is compulsory too, but what the team sends counts at once — no marshal.
+export type InputRule = 'required' | 'optional' | 'auto'
 export type CompletionInputs = Partial<Record<InputKind, InputRule>>
+
+/** The team has to send this input before the card can finish. */
+export const isCompulsory = (rule: InputRule | undefined) => rule === 'required' || rule === 'auto'
 
 export const INPUT_LABELS: Record<InputKind, { label: string; emoji: string }> = {
   photo: { label: 'Photo', emoji: '📸' },
@@ -27,7 +31,7 @@ export function parseInputs(raw: unknown): CompletionInputs {
   const out: CompletionInputs = {}
   for (const kind of INPUT_KINDS) {
     const rule = (raw as Record<string, unknown>)[kind]
-    if (rule === 'required' || rule === 'optional') out[kind] = rule
+    if (rule === 'required' || rule === 'optional' || rule === 'auto') out[kind] = rule
   }
   return out
 }
@@ -113,7 +117,7 @@ export type InputProgress = {
 export function isComplete(inputs: CompletionInputs, done: InputProgress): boolean {
   const kinds = inputKinds(inputs)
   if (kinds.length === 0) return false
-  const required = kinds.filter(k => inputs[k] === 'required')
+  const required = kinds.filter(k => isCompulsory(inputs[k]))
   if (!required.every(k => done[k])) return false
   return kinds.some(k => done[k])
 }
@@ -121,7 +125,7 @@ export function isComplete(inputs: CompletionInputs, done: InputProgress): boole
 /** What is still outstanding, for a one-line nudge on the card. */
 export function missingLabels(inputs: CompletionInputs, done: InputProgress): string[] {
   const kinds = inputKinds(inputs)
-  const required = kinds.filter(k => inputs[k] === 'required' && !done[k])
+  const required = kinds.filter(k => isCompulsory(inputs[k]) && !done[k])
   if (required.length > 0) return required.map(k => INPUT_LABELS[k].label)
   // Nothing compulsory outstanding: the card still needs one of something.
   if (!kinds.some(k => done[k])) return kinds.map(k => INPUT_LABELS[k].label)
