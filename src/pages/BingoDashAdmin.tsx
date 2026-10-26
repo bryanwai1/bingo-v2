@@ -2167,15 +2167,16 @@ export function BingoDashAdmin() {
 
   // Timer Start / Reset end a card pause only while the game is live — if the
   // game is stopped, players are still on the waiting screen and stay frozen.
-  const timerClosePauseLog = (): { card_pauses?: PauseSpan[] } => {
-    if (!currentBoard?.game_started) return {}
+  // Start timer always ends the pause; Reset leaves a stopped game frozen.
+  const timerClosePauseLog = (alwaysClose = false): { card_pauses?: PauseSpan[] } => {
+    if (!alwaysClose && !currentBoard?.game_started) return {}
     const closed = closePauseLog(currentBoard)
     return closed ? { card_pauses: closed } : {}
   }
 
   const startTimer = () => {
     if (!currentBoard) return
-    const close = timerClosePauseLog()
+    const close = timerClosePauseLog(true)
     if (!currentBoard.timer_seconds) {
       if (close.card_pauses) updateBoardSettings(close)
       return
