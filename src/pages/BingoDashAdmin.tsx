@@ -2133,6 +2133,17 @@ export function BingoDashAdmin() {
     } finally { setTimerSaving(false) }
   }
 
+  // Self-heal: a Live game with the countdown running can never be frozen, so
+  // an open pause left over from an earlier stop or pause is ended here. The
+  // buttons close it themselves; this catches any that slipped through.
+  const staleFreeze = !!currentBoard?.game_started && isTimerRunning
+    && (currentBoard.card_pauses ?? []).some(p => p.end === null)
+  useEffect(() => {
+    if (!staleFreeze || !currentBoard) return
+    const closed = closePauseLog(currentBoard)
+    if (closed) void updateBoardSettings({ card_pauses: closed })
+  }, [staleFreeze]) // eslint-disable-line react-hooks/exhaustive-deps
+
   // +/- adjustments and Set redefine "the configured duration", so they
   // always update timer_duration_seconds alongside the live value —
   // that's what Reset hands back.
