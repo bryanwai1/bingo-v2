@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { AnswerBlocksEditor } from '../components/AnswerBlocksEditor'
 import { CardPasscodeBox } from '../components/CardPasscodeBox'
-import { revertBoardCopy } from '../lib/boardCopy'
+import { pushBoardCopyToLibrary, revertBoardCopy } from '../lib/boardCopy'
 import { parseAnswerBlocks, blocksFromLegacy, isBlockComplete, type AnswerBlock } from '../lib/answerBlocks'
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
@@ -139,6 +139,7 @@ export function BingoDashTaskEdit() {
   // A board's own copy of a library card: which box it fills, so it can go back to the library card.
   const [copyBox, setCopyBox] = useState<{ id: string; boardName: string } | null>(null)
   const [reverting, setReverting] = useState(false)
+  const [publishing, setPublishing] = useState(false)
   const [placedCount, setPlacedCount] = useState<number | null>(null)
   const taskIdForPlacements = task?.id
   useEffect(() => {
@@ -689,6 +690,24 @@ export function BingoDashTaskEdit() {
                 Everything you change here applies to this board only. The Card Library and other boards are not affected.
               </p>
             </div>
+            {copyBox && isOwner && task.cloned_from && (
+              <button
+                disabled={publishing || reverting || saving}
+                onClick={async () => {
+                  if (!window.confirm('Update the library card with this board\'s version? Every board that uses the library card will get these changes. This board keeps its copy.')) return
+                  setPublishing(true)
+                  try {
+                    if (!(await saveNow())) return
+                    await pushBoardCopyToLibrary(copyBox.id)
+                    alert('Library card updated.')
+                  } catch (err) { alert(err instanceof Error ? err.message : 'Could not update the library card.') }
+                  finally { setPublishing(false) }
+                }}
+                className="px-4 py-2 rounded-lg bg-teal-600 text-white text-sm font-bold hover:bg-teal-700 disabled:opacity-50"
+              >
+                {publishing ? 'Updating…' : 'Update to library card'}
+              </button>
+            )}
             {copyBox && (
               <button
                 disabled={reverting}

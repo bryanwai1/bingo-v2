@@ -12,6 +12,13 @@ export async function ensureBoardCopy(placementId: string): Promise<string> {
   return data
 }
 
+/** Owner only: copy this board copy's content onto the library card it came from. */
+export async function pushBoardCopyToLibrary(placementId: string): Promise<string> {
+  const { data, error } = await supabase.rpc('push_board_copy_to_library', { p_placement: placementId })
+  if (error || typeof data !== 'string') throw new Error(error?.message ?? 'Could not update the library card.')
+  return data
+}
+
 /** Put the box back on the library card and delete the board's copy. */
 export async function revertBoardCopy(placementId: string): Promise<string> {
   const { data, error } = await supabase.rpc('revert_board_copy', { p_placement: placementId })

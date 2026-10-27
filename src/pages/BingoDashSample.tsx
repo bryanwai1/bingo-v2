@@ -16,7 +16,8 @@ import { MyQrButton } from '../components/MyQrButton'
 import { DemoBundleCard } from '../components/DemoBundleCard'
 import { AitbMissionModule } from '../components/AitbMissionModule'
 import { CardBonusTimer } from '../components/CardBonusTimer'
-import { resolveBonusWindow } from '../lib/timeBonus'
+import { resolveBonusWindow, type BonusDefaults } from '../lib/timeBonus'
+import { LanguageToggle } from '../components/LanguageToggle'
 import { aitbByName, aitbToolUrl, aitbToolCaption, AITB_POINTS } from '../lib/aitbActivities'
 import { InstructionPage } from '../components/InstructionPage'
 import { PageNavigator } from '../components/PageNavigator'
@@ -749,6 +750,7 @@ const BoardScreen = forwardRef<BoardScreenHandle, {
           </div>
           <div className="flex flex-col items-end gap-2 flex-shrink-0 mt-1">
             <TimerDisplay settings={section} />
+            <LanguageToggle />
             {/* Mirrors the real player board (BingoDashHome), so the demo shows
                 the controls a participant actually has. The QR hands out the
                 sandbox link rather than a team invite — nothing here is saved,
@@ -928,11 +930,16 @@ export type SampleTaskDetailHandle = {
   scrollTo: (frac: number) => void
 }
 
+/** When each card was first opened in this demo session, by task id. */
+const cardClock = new Map<string, number>()
+
 const SampleTaskDetail = forwardRef<SampleTaskDetailHandle, {
   task: BingoTask
   teamName: string
   marshalPassword: string
   completed: boolean
+  /** The board's default bonus window, so the card timer matches the real card page. */
+  bonusDefaults?: BonusDefaults
   /** The chain around this card, resolved by the page from the demo's own
    *  state: the card it unlocks after (and whether that is done), and the
    *  card it unlocks. */
@@ -945,7 +952,7 @@ const SampleTaskDetail = forwardRef<SampleTaskDetailHandle, {
   /** Scroll position as a fraction, so a shared screen can follow along. */
   onScrollFrac?: (frac: number) => void
 }>(function SampleTaskDetail({
-  task, teamName, marshalPassword, completed, chain, onJump, onComplete, onUncomplete, onClose, onStep,
+  task, teamName, marshalPassword, completed, bonusDefaults, chain, onJump, onComplete, onUncomplete, onClose, onStep,
   onScrollFrac,
 }, ref) {
   const { pages } = useBingoTaskPages(task.id)
@@ -1012,16 +1019,26 @@ const SampleTaskDetail = forwardRef<SampleTaskDetailHandle, {
   }
 
   const [aitbStepsDone, setAitbStepsDone] = useState<number[]>([])
-  // The demo has no check-in row to read a start time from, so the timer
-  // just starts whenever this card is first opened.
-  const [aitbStartedAt] = useState(() => Date.now())
+  // The demo has no check-in row to read a start time from, so the clock
+  // starts the first time a card is opened and is kept for the session: leaving
+  // and reopening a card carries on, as it does for a real team.
   const [now, setNow] = useState(Date.now())
+  const openedAt = useMemo(() => {
+    const known = cardClock.get(task.id)
+    if (known) return known
+    const t = Date.now()
+    cardClock.set(task.id, t)
+    return t
+  }, [task.id])
+  const finishedAt = useRef<number | null>(null)
+  if (completed && finishedAt.current === null) finishedAt.current = Date.now()
+  if (!completed) finishedAt.current = null
 
   useEffect(() => {
-    if (!aitbActivity || completed) return
+    if (completed) return
     const t = setInterval(() => setNow(Date.now()), 1000)
     return () => clearInterval(t)
-  }, [aitbActivity, completed])
+  }, [completed])
 
   const toggleAitbStep = (i: number) => {
     if (completed) return
@@ -1203,6 +1220,7 @@ const SampleTaskDetail = forwardRef<SampleTaskDetailHandle, {
             >
               ← Board
             </button>
+            <LanguageToggle className="mt-1 flex-shrink-0" />
             <div>
               <p className="text-sm font-bold opacity-80 uppercase tracking-wider">Team: {teamName}</p>
               <h1 className="text-3xl font-black tracking-tight">{task.title}</h1>
@@ -1256,7 +1274,17 @@ const SampleTaskDetail = forwardRef<SampleTaskDetailHandle, {
           </div>
         )}
 
-        {/* AI Team Building brief — a live bonus timer, the real description
+        {/* Bonus timer — every card, from the moment the team opens it. */}
+        {!chain.locked && (
+          <CardBonusTimer
+            elapsedMs={Math.max(0, (completed ? (finishedAt.current ?? now) : now) - openedAt)}
+            window={resolveBonusWindow(task, bonusDefaults)}
+            basePoints={task.points ?? 0}
+            completed={completed}
+          />
+        )}
+
+        {/* AI Team Building brief — a live bonus bar, the real description
             + skill tag, then the module and a tickable mission checklist
             instead of swipeable instruction pages. */}
         {aitbActivity ? (
@@ -1269,7 +1297,6 @@ const SampleTaskDetail = forwardRef<SampleTaskDetailHandle, {
                 <span className="px-2 py-1 rounded-lg text-xs font-black bg-emerald-400/20 text-emerald-300">✓ Completed</span>
               )}
             </div>
-            <CardBonusTimer elapsedMs={completed ? 0 : now - aitbStartedAt} window={resolveBonusWindow(task)} basePoints={task.points ?? 0} completed={completed} />
             <div className="rounded-2xl p-4 mb-6" style={{ background: 'rgba(255,255,255,0.05)', border: '2px solid rgba(255,255,255,0.1)' }}>
               <h2 className="text-white font-black text-lg mb-2">{aitbActivity.tagline}</h2>
               <p className="text-gray-300 text-sm leading-relaxed">{aitbActivity.description}</p>
@@ -2140,6 +2167,7 @@ function SampleProjector() {
       setTasksLoading(false)
     })
     setScanState({})
+    cardClock.clear()
     setQuickWinSlots(new Set())
     setOpenTask(null)
     return () => { cancelled = true }
@@ -2415,6 +2443,7 @@ function SampleProjector() {
           teamName={teamName ?? 'Sample Team'}
           marshalPassword={marshalPassword}
           completed={scanState[openTask.id] === 'completed'}
+          bonusDefaults={selectedSection ?? undefined}
           chain={{
             prev: gridTasks.find(t => t.id === openTask.prerequisite_task_id) ?? null,
             locked: !!openTask.prerequisite_task_id && scanState[openTask.prerequisite_task_id] !== 'completed',
@@ -2987,6 +3016,7 @@ function SampleController({ code, readOnly = false }: { code: string; readOnly?:
               teamName={teamName ?? 'Sample Team'}
               marshalPassword={DEMO_MARSHAL_PASSWORD}
               completed={scanState[openTaskObj.id] === 'completed'}
+              bonusDefaults={watchSection ?? undefined}
               /* Same chain the projector builds - it comes from gridTasks and
                  scanState, both of which a viewer already has. */
               chain={{
