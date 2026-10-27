@@ -629,6 +629,11 @@ export function BingoDashParticipant() {
   }
   const drawnPrompt = needsDrawnAnswer ? (scanRecord?.words?.[0] || '') : ''
   const riddleSolved = !needsDrawnAnswer || !!scanRecord?.answerOk
+  // Photo/video + versus: the team picks the opponent and result, adds the
+  // file, and presses ONE Submit that sends both. Once either part is already
+  // in (or approved) the remaining one falls back to its own button.
+  const combinedVersus = !!inputs.versus && !!(inputs.photo || inputs.video) && photoSubmissionsEnabled && riddleSolved
+    && !versusSent && !approvedKinds.versus && !photoSubmitted && !approvedKinds.photo && !approvedKinds.video
 
   /** The guess goes to Postgres; only a yes/no comes back. */
   const checkDrawnAnswer = async () => {
@@ -660,7 +665,8 @@ export function BingoDashParticipant() {
   // A card can ask for several things at once, so a correct answer no longer
   // finishes the card on its own — it satisfies one input, and the tile turns
   // green when every compulsory one is in.
-  const answerSatisfied = answerMatches || ((numberMode || blocksMode) && !!scanRecord?.answerOk)
+  // A drawn riddle/quiz answer is marked by check_draw_answer, which sets answerOk.
+  const answerSatisfied = answerMatches || ((numberMode || blocksMode || needsDrawnAnswer) && !!scanRecord?.answerOk)
   useEffect(() => {
     if (isSnakeLadder) return
     if (!answerSatisfied || !scanRecord || scanRecord.completed || completing) return
@@ -732,9 +738,11 @@ export function BingoDashParticipant() {
   /** Send everything staged, one submission row per file. */
   const submitStaged = async () => {
     const text = combinedText ? freeText.trim() : ''
-    if (staged.length === 0 && !text) return
+    const withVersus = combinedVersus && !!opponentId && versusWon !== null
+    if (staged.length === 0 && !text && !withVersus) return
     setPhotoUploading(true)
     try {
+      const alsoSent: InputKind[] = []
       // Photo + free-text cards share one Submit: the typed answer goes as
       // its own row so the admin approves each part, but the team presses
       // once.
@@ -745,9 +753,20 @@ export function BingoDashParticipant() {
         })
         if (error) { alert('Could not send your answer: ' + error.message); return }
         setFreeTextSent(true)
-        if (staged.length === 0) await finishIfDone(['answer'])
+        alsoSent.push('answer')
       }
-      for (const item of staged) await uploadOne(item.file, text ? ['answer'] : [])
+      if (withVersus && team && taskId && scanRecord) {
+        const { error } = await supabase.from('bingo_photo_submissions').insert({
+          team_id: team.id, task_id: taskId, scan_id: scanRecord.id,
+          photo_url: '', media_type: 'versus', status: statusFor('versus'),
+          opponent_id: opponentId, versus_won: versusWon,
+        })
+        if (error) { alert('Could not send your result: ' + error.message); return }
+        setVersusSent(true)
+        alsoSent.push('versus')
+      }
+      if (staged.length === 0 && alsoSent.length > 0) await finishIfDone(alsoSent)
+      for (const item of staged) await uploadOne(item.file, alsoSent)
       staged.forEach(x => URL.revokeObjectURL(x.preview))
       setStaged([])
       if (staged.length > 0) setPhotoSubmitted(true)
@@ -933,7 +952,7 @@ export function BingoDashParticipant() {
       <header className="px-6 py-5 text-white relative z-10 overflow-hidden">
         <div className="absolute inset-0" style={{ backgroundColor: task.hex_code, opacity: 0.35 }} />
         <div className="absolute inset-0 bg-black/30" />
-        <div className={`${containerMaxW} mx-auto relative z-10 flex items-start justify-between gap-4`}>
+        <div className={`${containerMaxW} mx-auto relative z-10 flex flex-wrap items-start justify-between gap-x-4 gap-y-3`}>
           <div className="flex items-start gap-3">
             <button
               onClick={() => navigate(backPath)}
@@ -945,22 +964,6 @@ export function BingoDashParticipant() {
                 the language switch belongs here too — not only on the board
                 they came from. */}
             <LanguageToggle className="mt-1 flex-shrink-0" />
-            <div>
-              <p className="text-sm font-bold opacity-80 uppercase tracking-wider">
-                {isSnakeLadder
-                  ? (snakeTile != null ? `🐍🪜 Tile ${snakeTile}` : '🐍🪜 Snake & Ladder')
-                  : `Team: ${team?.name}`}
-              </p>
-              <h1 className="text-3xl font-black tracking-tight">{task.title}</h1>
-              <div className="flex items-center gap-2 mt-1">
-                <span className="text-sm opacity-70 uppercase tracking-wider">{task.color} Challenge</span>
-                {(task.points ?? 0) > 0 && (
-                  <span className="px-2 py-0.5 rounded-full text-xs font-black bg-white/20 text-white">
-                    {task.points} pts
-                  </span>
-                )}
-              </div>
-            </div>
           </div>
           {!isSnakeLadder && (
             <div className="flex-shrink-0 mt-1">
@@ -988,6 +991,22 @@ export function BingoDashParticipant() {
               )}
             </div>
           )}
+          <div className="w-full order-last">
+            <p className="text-sm font-bold opacity-80 uppercase tracking-wider">
+              {isSnakeLadder
+                ? (snakeTile != null ? `🐍🪜 Tile ${snakeTile}` : '🐍🪜 Snake & Ladder')
+                : `Team: ${team?.name}`}
+            </p>
+            <h1 className="text-3xl font-black tracking-tight">{task.title}</h1>
+            <div className="flex items-center gap-2 mt-1">
+              <span className="text-sm opacity-70 uppercase tracking-wider">{task.color} Challenge</span>
+              {(task.points ?? 0) > 0 && (
+                <span className="px-2 py-0.5 rounded-full text-xs font-black bg-white/20 text-white">
+                  {task.points} pts
+                </span>
+              )}
+            </div>
+          </div>
         </div>
       </header>
 
@@ -1452,14 +1471,16 @@ export function BingoDashParticipant() {
                           </button>
                         ))}
                       </div>
-                      <button
-                        onClick={() => void submitVersus()}
-                        disabled={versusBusy || !opponentId || versusWon === null}
-                        className="w-full py-3.5 rounded-2xl font-black uppercase tracking-wider transition-all active:scale-95 disabled:opacity-40"
-                        style={{ backgroundColor: task.hex_code, color: '#000' }}
-                      >
-                        {versusBusy ? 'Sending…' : inputs.versus === 'auto' ? 'Submit result' : 'Submit result for approval'}
-                      </button>
+                      {!combinedVersus && (
+                        <button
+                          onClick={() => void submitVersus()}
+                          disabled={versusBusy || !opponentId || versusWon === null}
+                          className="w-full py-3.5 rounded-2xl font-black uppercase tracking-wider transition-all active:scale-95 disabled:opacity-40"
+                          style={{ backgroundColor: task.hex_code, color: '#000' }}
+                        >
+                          {versusBusy ? 'Sending…' : inputs.versus === 'auto' ? 'Submit result' : 'Submit result for approval'}
+                        </button>
+                      )}
                       <p className="text-white/40 text-xs font-bold text-center">
                         Only the team that started the challenge sends this.
                       </p>
@@ -1712,21 +1733,27 @@ export function BingoDashParticipant() {
                         <p className="text-white/40 text-xs font-bold text-center mt-3">Max 100 MB per clip</p>
                       )}
 
-                      {(staged.length > 0 || (combinedText && freeText.trim())) && (() => {
+                      {(staged.length > 0 || combinedVersus || (combinedText && freeText.trim())) && (() => {
                         const fileRequired = isCompulsory(inputs.photo) || isCompulsory(inputs.video)
                         const textRequired = isCompulsory(inputs.answer)
-                        const missingFile = combinedText && fileRequired && staged.length === 0
+                        const missingFile = (combinedText || combinedVersus) && fileRequired && staged.length === 0
                         const missingText = combinedText && textRequired && !freeText.trim()
+                        const missingVersus = combinedVersus && (!opponentId || versusWon === null)
+                        const forApproval = inputKinds(inputs).some(k => inputs[k] === 'required') ? ' for approval' : ''
+                        const parts = [
+                          staged.length > 0 ? `${staged.length} ${fileNoun(inputs, staged.length !== 1)}` : null,
+                          combinedText && freeText.trim() ? 'answer' : null,
+                          combinedVersus ? 'result' : null,
+                        ].filter(Boolean).join(' + ')
                         const label = photoUploading ? 'Sending…'
                           : missingFile ? `Add your ${fileNoun(inputs)} to submit`
                           : missingText ? 'Write your answer above to submit'
-                          : combinedText && freeText.trim()
-                            ? `Submit ${fileNoun(inputs, staged.length !== 1)} + answer for approval`
-                            : `Submit ${staged.length} ${fileNoun(inputs, staged.length !== 1)} for approval`
+                          : missingVersus ? 'Pick the team and result to submit'
+                          : `Submit ${parts}${forApproval}`
                         return (
                           <button
                             onClick={submitStaged}
-                            disabled={photoUploading || missingFile || missingText}
+                            disabled={photoUploading || missingFile || missingText || missingVersus}
                             className="w-full mt-4 py-3.5 rounded-2xl font-black uppercase tracking-wider transition-all active:scale-95 disabled:opacity-50"
                             style={{ backgroundColor: task.hex_code, color: '#000' }}
                           >
@@ -1809,9 +1836,11 @@ export function BingoDashParticipant() {
                     <div className="p-4 rounded-2xl bg-green-400/15 border border-green-400/40 text-center">
                       <div className="text-3xl mb-2">✅</div>
                       <p className="text-green-300 font-black">Cracked it!</p>
-                      <p className="text-green-300/60 text-sm mt-1">
-                        Now film your reaction at the place — doing what the riddle describes.
-                      </p>
+                      {(inputs.photo || inputs.video) && (
+                        <p className="text-green-300/60 text-sm mt-1">
+                          Now film your reaction at the place — doing what the riddle describes.
+                        </p>
+                      )}
                     </div>
                   ) : (
                     <div className="flex flex-col gap-3">

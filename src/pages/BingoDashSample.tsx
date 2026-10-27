@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom'
 import { QRCodeSVG } from 'qrcode.react'
 import { supabase } from '../lib/supabase'
 import { fetchBoardTasks, tasksForFace } from '../lib/boardCards'
-import { effectiveInputs, fileAccept, fileEmoji, fileHeading, fileNoun } from '../lib/completionInputs'
+import { effectiveInputs, inputKinds, isCompulsory, fileAccept, fileEmoji, fileHeading, fileNoun } from '../lib/completionInputs'
 import { activeFaces, faceName, faceColor, normaliseFaceCount } from '../lib/cubeFaces'
 import { buildBingoSlots, completedBingoLines, scoreWithBingoLines } from '../lib/bingoLines'
 import { useSampleRemote, makeRemoteCode, HEARTBEAT_MS, HEARTBEAT_TIMEOUT_MS, type RemoteCommand, type RemoteState, type SampleView, type DetailStep } from '../hooks/useSampleRemote'
@@ -1066,6 +1066,13 @@ const SampleTaskDetail = forwardRef<SampleTaskDetailHandle, {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [answerMatches])
 
+  // A correct drawn answer finishes the card unless it also needs a file, link
+  // or result - same rule as the real card page.
+  useEffect(() => {
+    if (riddleOk && !completed && !(inputs.photo || inputs.video || inputs.link || inputs.versus)) onComplete()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [riddleOk])
+
   // Clean up the local object URL preview
   useEffect(() => () => { if (photoPreview) URL.revokeObjectURL(photoPreview) }, [photoPreview])
 
@@ -1097,7 +1104,12 @@ const SampleTaskDetail = forwardRef<SampleTaskDetailHandle, {
     })
   }
 
+  // Photo/video + versus: one Submit sends the file and the result together.
+  const combinedVersus = !!inputs.versus && !!(inputs.photo || inputs.video) && !versusSent && !photoSubmitted
+
   const submitStaged = () => {
+    if (staged.length === 0 && !combinedVersus) return
+    if (combinedVersus) setVersusSent(true)
     if (staged.length === 0) return
     // The demo keeps the last frame to show the marshal what arrived, then
     // clears the tray the way a real send does.
@@ -1212,7 +1224,7 @@ const SampleTaskDetail = forwardRef<SampleTaskDetailHandle, {
       <header className="px-6 py-5 text-white relative z-10 overflow-hidden">
         <div className="absolute inset-0" style={{ backgroundColor: task.hex_code, opacity: 0.35 }} />
         <div className="absolute inset-0 bg-black/30" />
-        <div className={`${containerMaxW} mx-auto relative z-10 flex items-start justify-between gap-4`}>
+        <div className={`${containerMaxW} mx-auto relative z-10 flex flex-wrap items-start justify-between gap-x-4 gap-y-3`}>
           <div className="flex items-start gap-3">
             <button
               onClick={onClose}
@@ -1221,15 +1233,15 @@ const SampleTaskDetail = forwardRef<SampleTaskDetailHandle, {
               ← Board
             </button>
             <LanguageToggle className="mt-1 flex-shrink-0" />
-            <div>
-              <p className="text-sm font-bold opacity-80 uppercase tracking-wider">Team: {teamName}</p>
-              <h1 className="text-3xl font-black tracking-tight">{task.title}</h1>
-              <div className="flex items-center gap-2 mt-1">
-                <span className="text-sm opacity-70 uppercase tracking-wider">{task.color} Challenge</span>
-                {(task.points ?? 0) > 0 && (
-                  <span className="px-2 py-0.5 rounded-full text-xs font-black bg-white/20 text-white">{task.points} pts</span>
-                )}
-              </div>
+          </div>
+          <div className="w-full">
+            <p className="text-sm font-bold opacity-80 uppercase tracking-wider">Team: {teamName}</p>
+            <h1 className="text-3xl font-black tracking-tight">{task.title}</h1>
+            <div className="flex items-center gap-2 mt-1">
+              <span className="text-sm opacity-70 uppercase tracking-wider">{task.color} Challenge</span>
+              {(task.points ?? 0) > 0 && (
+                <span className="px-2 py-0.5 rounded-full text-xs font-black bg-white/20 text-white">{task.points} pts</span>
+              )}
             </div>
           </div>
         </div>
@@ -1633,15 +1645,28 @@ const SampleTaskDetail = forwardRef<SampleTaskDetailHandle, {
                           <p className="text-white/40 text-xs font-bold text-center mt-3">Max 100 MB per clip</p>
                         )}
 
-                        {staged.length > 0 && (
-                          <button
-                            onClick={submitStaged}
-                            className="w-full mt-4 py-3.5 rounded-2xl font-black uppercase tracking-wider transition-all active:scale-95"
-                            style={{ backgroundColor: task.hex_code, color: '#000' }}
-                          >
-                            {`Submit ${staged.length} ${fileNoun(inputs, staged.length !== 1)} for approval`}
-                          </button>
-                        )}
+                        {(staged.length > 0 || combinedVersus) && (() => {
+                          const fileRequired = isCompulsory(inputs.photo) || isCompulsory(inputs.video)
+                          const missingFile = combinedVersus && fileRequired && staged.length === 0
+                          const missingVersus = combinedVersus && (!opponent || versusWon === null)
+                          const parts = [
+                            staged.length > 0 ? `${staged.length} ${fileNoun(inputs, staged.length !== 1)}` : null,
+                            combinedVersus ? 'result' : null,
+                          ].filter(Boolean).join(' + ')
+                          const forApproval = inputKinds(inputs).some(k => inputs[k] === 'required') ? ' for approval' : ''
+                          return (
+                            <button
+                              onClick={submitStaged}
+                              disabled={missingFile || missingVersus}
+                              className="w-full mt-4 py-3.5 rounded-2xl font-black uppercase tracking-wider transition-all active:scale-95 disabled:opacity-50"
+                              style={{ backgroundColor: task.hex_code, color: '#000' }}
+                            >
+                              {missingFile ? `Add your ${fileNoun(inputs)} to submit`
+                                : missingVersus ? 'Pick the team and result to submit'
+                                : `Submit ${parts}${forApproval}`}
+                            </button>
+                          )
+                        })()}
                       </>
                     )}
                   </>
@@ -1687,14 +1712,16 @@ const SampleTaskDetail = forwardRef<SampleTaskDetailHandle, {
                             </button>
                           ))}
                         </div>
-                        <button
-                          onClick={() => setVersusSent(true)}
-                          disabled={!opponent || versusWon === null}
-                          className="w-full py-3.5 rounded-2xl font-black uppercase tracking-wider transition-all active:scale-95 disabled:opacity-40"
-                          style={{ backgroundColor: task.hex_code, color: '#000' }}
-                        >
-                          Submit result for approval
-                        </button>
+                        {!combinedVersus && (
+                          <button
+                            onClick={() => setVersusSent(true)}
+                            disabled={!opponent || versusWon === null}
+                            className="w-full py-3.5 rounded-2xl font-black uppercase tracking-wider transition-all active:scale-95 disabled:opacity-40"
+                            style={{ backgroundColor: task.hex_code, color: '#000' }}
+                          >
+                            Submit result for approval
+                          </button>
+                        )}
                         <p className="text-white/40 text-xs font-bold text-center">
                           Only the team that started the challenge sends this.
                         </p>
@@ -1816,9 +1843,11 @@ const SampleTaskDetail = forwardRef<SampleTaskDetailHandle, {
                       <div className="p-4 rounded-2xl bg-green-400/15 border border-green-400/40 text-center mb-4">
                         <div className="text-3xl mb-2">✅</div>
                         <p className="text-green-300 font-black">Cracked it!</p>
-                        <p className="text-green-300/60 text-sm mt-1">
-                          Now film your reaction at the place — doing what the riddle describes.
-                        </p>
+                        {(inputs.photo || inputs.video) && (
+                          <p className="text-green-300/60 text-sm mt-1">
+                            Now film your reaction at the place — doing what the riddle describes.
+                          </p>
+                        )}
                       </div>
                     ) : (
                       <div className="flex flex-col gap-3 mb-4">
