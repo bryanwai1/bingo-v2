@@ -391,21 +391,25 @@ export function BingoDashParticipant() {
     })
     return () => { live = false }
   }, [answerOkNow, scanIdNow, inputs.answer])
-  const checkBlocks = async () => {
-    if (!scanRecord || blocksBusy) return
+  const answerPassed = useRef(false)
+  /** True when every answer is right. */
+  const checkBlocks = async (): Promise<boolean> => {
+    if (!scanRecord || blocksBusy) return false
     setBlocksBusy(true)
     try {
       const { data, error } = await supabase.rpc('check_answer_blocks', {
         p_scan: scanRecord.id, p_values: answerBlocks.map((_, i) => blockValues[i] ?? ''),
       })
-      if (error) { alert('Could not check your answers: ' + error.message); return }
+      if (error) { alert('Could not check your answers: ' + error.message); return false }
       const res = data as { passed?: boolean; results?: boolean[] } | null
       if (res?.passed) {
         setBlockResults(null)
+        answerPassed.current = true
         setScanRecord(prev => (prev ? { ...prev, answerOk: true } : prev))
-      } else {
-        setBlockResults(Array.isArray(res?.results) ? res.results : [])
+        return true
       }
+      setBlockResults(Array.isArray(res?.results) ? res.results : [])
+      return false
     } finally {
       setBlocksBusy(false)
     }
@@ -413,20 +417,22 @@ export function BingoDashParticipant() {
 
   /** Send the number to Postgres; only it knows whether the floor is met,
    *  and it marks the scan's answer_ok itself. */
-  const checkNumber = async () => {
-    if (!scanRecord || numberBusy) return
+  const checkNumber = async (): Promise<boolean> => {
+    if (!scanRecord || numberBusy) return false
     const value = Number(numberValue.replace(/[,\s]/g, ''))
-    if (!Number.isFinite(value)) return
+    if (!Number.isFinite(value)) return false
     setNumberBusy(true)
     try {
       const { data, error } = await supabase.rpc('check_answer_min', { p_scan: scanRecord.id, p_value: value })
-      if (error) { alert('Could not check your number: ' + error.message); return }
+      if (error) { alert('Could not check your number: ' + error.message); return false }
       if (data === true) {
         setNumberRejected(null)
+        answerPassed.current = true
         setScanRecord(prev => (prev ? { ...prev, answerOk: true } : prev))
-      } else {
-        setNumberRejected(numberValue)
+        return true
       }
+      setNumberRejected(numberValue)
+      return false
     } finally {
       setNumberBusy(false)
     }
@@ -549,7 +555,9 @@ export function BingoDashParticipant() {
   const finishIfDone = async (justSent: InputKind[]) => {
     const auto = justSent.filter(k => inputs[k] === 'auto')
     if (auto.length === 0 || !scanRecord || scanRecord.completed) return
-    const done = { ...progress, ...Object.fromEntries(auto.map(k => [k, true])) }
+    // answerPassed: a number/answers check that passed a moment ago, which
+    // `progress` has not caught up with yet.
+    const done = { ...progress, answer: progress.answer || answerPassed.current, ...Object.fromEntries(auto.map(k => [k, true])) }
     if (!isComplete(inputs, done)) return
     await toggleComplete(scanRecord.id, true)
     setScanRecord(prev => (prev ? { ...prev, completed: true } : prev))
@@ -634,6 +642,14 @@ export function BingoDashParticipant() {
   // in (or approved) the remaining one falls back to its own button.
   const combinedVersus = !!inputs.versus && !!(inputs.photo || inputs.video) && photoSubmissionsEnabled && riddleSolved
     && !versusSent && !approvedKinds.versus && !photoSubmitted && !approvedKinds.photo && !approvedKinds.video
+
+  // A checked answer (a number over the line, or several typed questions)
+  // beside a photo/video: no separate Check button. Submit checks the answers
+  // first and only sends the file when they pass, so the card has ONE button.
+  const combinedCheck = (numberMode || blocksMode) && !!(inputs.photo || inputs.video)
+    && photoSubmissionsEnabled && !scanRecord?.answerOk
+  const checkAnswersMissing = combinedCheck
+    && (numberMode ? !numberValue.trim() : answerBlocks.some((_, i) => !(blockValues[i] ?? '').trim()))
 
   /** The guess goes to Postgres; only a yes/no comes back. */
   const checkDrawnAnswer = async () => {
@@ -739,9 +755,12 @@ export function BingoDashParticipant() {
   const submitStaged = async () => {
     const text = combinedText ? freeText.trim() : ''
     const withVersus = combinedVersus && !!opponentId && versusWon !== null
-    if (staged.length === 0 && !text && !withVersus) return
+    if (staged.length === 0 && !text && !withVersus && !combinedCheck) return
+    if (combinedCheck && checkAnswersMissing) return
     setPhotoUploading(true)
     try {
+      // Wrong answers stop here: nothing is uploaded, the fields show what to fix.
+      if (combinedCheck && !(await (numberMode ? checkNumber() : checkBlocks()))) return
       const alsoSent: InputKind[] = []
       // Photo + free-text cards share one Submit: the typed answer goes as
       // its own row so the admin approves each part, but the team presses
@@ -1573,7 +1592,7 @@ export function BingoDashParticipant() {
                               type="text" inputMode={b.kind === 'number' ? 'numeric' : 'text'} autoComplete="off"
                               value={blockValues[i] ?? ''}
                               onChange={e => { const v = e.target.value; setBlockValues(prev => { const n = [...prev]; n[i] = v; return n }); setBlockResults(null) }}
-                              onKeyDown={e => { if (e.key === 'Enter') void checkBlocks() }}
+                              onKeyDown={e => { if (e.key === 'Enter' && !combinedCheck) void checkBlocks() }}
                               placeholder={b.kind === 'number' ? 'Enter a number' : 'Type your answer'}
                               className={`w-full px-4 py-3 rounded-2xl bg-white/10 border-2 text-white placeholder-white/30 text-sm font-bold focus:outline-none ${
                                 wrong ? 'border-red-400/70' : right ? 'border-green-400/70' : 'border-white/25 focus:border-white/50'
@@ -1583,14 +1602,16 @@ export function BingoDashParticipant() {
                           </div>
                         )
                       })}
-                      <button
-                        onClick={() => void checkBlocks()}
-                        disabled={blocksBusy || answerBlocks.some((_, i) => !(blockValues[i] ?? '').trim())}
-                        className="w-full py-3.5 rounded-2xl font-black uppercase tracking-wider transition-all active:scale-95 disabled:opacity-40"
-                        style={{ backgroundColor: task.hex_code, color: '#000' }}
-                      >
-                        {blocksBusy ? 'Checking…' : answerBlocks.length > 1 ? 'Check my answers' : 'Check my answer'}
-                      </button>
+                      {!combinedCheck && (
+                        <button
+                          onClick={() => void checkBlocks()}
+                          disabled={blocksBusy || answerBlocks.some((_, i) => !(blockValues[i] ?? '').trim())}
+                          className="w-full py-3.5 rounded-2xl font-black uppercase tracking-wider transition-all active:scale-95 disabled:opacity-40"
+                          style={{ backgroundColor: task.hex_code, color: '#000' }}
+                        >
+                          {blocksBusy ? 'Checking…' : answerBlocks.length > 1 ? 'Check my answers' : 'Check my answer'}
+                        </button>
+                      )}
                     </>
                   )}
                 </div>
@@ -1618,19 +1639,21 @@ export function BingoDashParticipant() {
                         <input
                           type="text" inputMode="numeric" value={numberValue}
                           onChange={e => { setNumberValue(e.target.value); setNumberRejected(null) }}
-                          onKeyDown={e => { if (e.key === 'Enter') void checkNumber() }}
+                          onKeyDown={e => { if (e.key === 'Enter' && !combinedCheck) void checkNumber() }}
                           placeholder="Enter the total"
                           className="flex-1 min-w-0 px-4 py-3 rounded-2xl border-2 text-center text-xl font-black focus:outline-none bg-white/10 text-white placeholder-white/30"
                           style={{ borderColor: numberRejected ? '#ef4444' : numberValue ? task.hex_code : 'rgba(255,255,255,0.2)' }}
                         />
-                        <button
-                          onClick={() => void checkNumber()}
-                          disabled={numberBusy || !numberValue.trim()}
-                          className="px-5 rounded-2xl font-black uppercase tracking-wider text-sm transition-all active:scale-95 disabled:opacity-40"
-                          style={{ background: task.hex_code, color: '#000' }}
-                        >
-                          {numberBusy ? '…' : 'Check'}
-                        </button>
+                        {!combinedCheck && (
+                          <button
+                            onClick={() => void checkNumber()}
+                            disabled={numberBusy || !numberValue.trim()}
+                            className="px-5 rounded-2xl font-black uppercase tracking-wider text-sm transition-all active:scale-95 disabled:opacity-40"
+                            style={{ background: task.hex_code, color: '#000' }}
+                          >
+                            {numberBusy ? '…' : 'Check'}
+                          </button>
+                        )}
                       </div>
                       {numberRejected && (
                         <p className="text-red-400 text-xs font-bold text-center mt-2">
@@ -1733,10 +1756,10 @@ export function BingoDashParticipant() {
                         <p className="text-white/40 text-xs font-bold text-center mt-3">Max 100 MB per clip</p>
                       )}
 
-                      {(staged.length > 0 || combinedVersus || (combinedText && freeText.trim())) && (() => {
+                      {(staged.length > 0 || combinedVersus || combinedCheck || (combinedText && freeText.trim())) && (() => {
                         const fileRequired = isCompulsory(inputs.photo) || isCompulsory(inputs.video)
                         const textRequired = isCompulsory(inputs.answer)
-                        const missingFile = (combinedText || combinedVersus) && fileRequired && staged.length === 0
+                        const missingFile = (combinedText || combinedVersus || combinedCheck) && fileRequired && staged.length === 0
                         const missingText = combinedText && textRequired && !freeText.trim()
                         const missingVersus = combinedVersus && (!opponentId || versusWon === null)
                         const forApproval = inputKinds(inputs).some(k => inputs[k] === 'required') ? ' for approval' : ''
@@ -1744,8 +1767,10 @@ export function BingoDashParticipant() {
                           staged.length > 0 ? `${staged.length} ${fileNoun(inputs, staged.length !== 1)}` : null,
                           combinedText && freeText.trim() ? 'answer' : null,
                           combinedVersus ? 'result' : null,
+                          combinedCheck ? (answerBlocks.length > 1 ? 'answers' : 'answer') : null,
                         ].filter(Boolean).join(' + ')
                         const label = photoUploading ? 'Sending…'
+                          : checkAnswersMissing ? (answerBlocks.length > 1 ? 'Fill in all answers to submit' : 'Enter your answer to submit')
                           : missingFile ? `Add your ${fileNoun(inputs)} to submit`
                           : missingText ? 'Write your answer above to submit'
                           : missingVersus ? 'Pick the team and result to submit'
@@ -1753,7 +1778,7 @@ export function BingoDashParticipant() {
                         return (
                           <button
                             onClick={submitStaged}
-                            disabled={photoUploading || missingFile || missingText || missingVersus}
+                            disabled={photoUploading || missingFile || missingText || missingVersus || checkAnswersMissing}
                             className="w-full mt-4 py-3.5 rounded-2xl font-black uppercase tracking-wider transition-all active:scale-95 disabled:opacity-50"
                             style={{ backgroundColor: task.hex_code, color: '#000' }}
                           >
