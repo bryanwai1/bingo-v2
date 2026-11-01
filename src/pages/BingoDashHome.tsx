@@ -288,8 +288,9 @@ function BingoTile({
             ? `0 0 0 3px #fde68a, 0 0 0 5px ${task.hex_code}, 0 6px 24px ${task.hex_code}cc`
             : `0 0 0 3px white, 0 0 0 5px ${task.hex_code}, 0 6px 20px ${task.hex_code}88`
           : `0 3px 10px ${task.hex_code}55`,
-        opacity: status === 'locked' ? 0.72 : 1,
-        filter: chained ? 'grayscale(0.85) brightness(0.8)' : undefined,
+        // Grab: the art behind must not show through, so dim with a filter, not opacity
+        opacity: status === 'locked' && !autoContrast ? 0.72 : 1,
+        filter: chained ? 'grayscale(0.85) brightness(0.8)' : status === 'locked' && autoContrast ? 'brightness(0.82)' : undefined,
       }}
     >
       {/* Chain lock */}
@@ -339,7 +340,7 @@ function BingoTile({
       )}
 
       {/* Icon or words — whichever this board is set to in the admin */}
-      <TileFace task={task} display={display} autoContrast={autoContrast} />
+      <TileFace task={task} display={display} autoContrast={autoContrast} chip={(task.points ?? 0) > 0 ? 'br' : null} />
 
       {/* Points badge */}
       {(task.points ?? 0) > 0 && (
@@ -724,7 +725,7 @@ function BoardScreen({
               <p className="text-sm mt-1">Ask your facilitator to configure the grid</p>
             </div>
           ) : (
-            <div className="grid grid-cols-5 gap-2">
+            <div className="board-grid grid grid-cols-5 gap-2">
               {slots.map((task, i) =>
                 task ? (
                   <BingoTile

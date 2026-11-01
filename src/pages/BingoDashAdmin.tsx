@@ -299,8 +299,8 @@ function previewWindow(bFull: string, bTimer: string, uFull?: number | null, uTi
   return { full, timer }
 }
 /** What "Apply to all" can change on every card of a category. undefined = leave alone; a bonus of null = board default. */
-type BulkPatch = { hex?: string; points?: number; bonusFull?: number | null; bonusTimer?: number | null }
-type BulkColumns = { hex_code?: string; points?: number; bonus_full_minutes?: number | null; bonus_timer_minutes?: number | null }
+type BulkPatch = { hex?: string; points?: number; bonusFull?: number | null; bonusTimer?: number | null; tileIcon?: string | null }
+type BulkColumns = { hex_code?: string; points?: number; bonus_full_minutes?: number | null; bonus_timer_minutes?: number | null; tile_icon?: string | null }
 
 function BulkApplyPanel({ group, onApply, iconKey, onIcon, scope = 'library' }: {
   /** 'board': the cards listed are this board's own placements (each gets its own copy first). */
@@ -386,6 +386,7 @@ function BulkApplyPanel({ group, onApply, iconKey, onIcon, scope = 'library' }: 
         if (f !== undefined) patch.bonusFull = f
         if (t !== undefined) patch.bonusTimer = t
       }
+      if (scope === 'board' && iconChanged) patch.tileIcon = icon
       await onApply(group.tasks, patch)
       if (canIcon && iconChanged) await onIcon(icon)
       setOpen(false)
@@ -492,14 +493,17 @@ function BulkApplyPanel({ group, onApply, iconKey, onIcon, scope = 'library' }: 
               </div>
             ))}
 
-            {canIcon && row('Icon', 'Fallback for cards with no icon of their own', (
+            {(canIcon || (scope === 'board' && group.key !== '__none__')) && row('Icon',
+              scope === 'board' ? 'Set on every card' : 'Fallback for cards with no icon of their own', (
               <div>
                 <button type="button" onClick={() => setShowIcons(v => !v)} aria-expanded={showIcons}
                   className="w-full flex items-center gap-3 px-3 py-2 rounded-lg border a-border hover:border-teal-500 transition-colors text-left">
                   <span className="w-9 h-9 rounded-lg flex items-center justify-center text-white flex-shrink-0" style={{ backgroundColor: hex }}>
                     <CategoryIcon category={group.label} iconKey={icon} className="w-5 h-5" />
                   </span>
-                  <span className="flex-1 text-sm a-text-3">{icon ? 'Custom icon' : 'Auto (from the category name)'}</span>
+                  <span className="flex-1 text-sm a-text-3">
+                    {icon && (scope !== 'board' || iconChanged) ? 'Custom icon' : scope === 'board' ? 'Keep each card as it is' : 'Auto (from the category name)'}
+                  </span>
                   <span className="text-xs font-bold text-teal-600">{showIcons ? 'Hide' : 'Change'}</span>
                 </button>
                 {showIcons && (
@@ -620,10 +624,6 @@ function CategoryGroupBlock({
               boxShadow: 'var(--a-shadow-1)',
             }}>
             <div className="px-4 pt-4 pb-3 flex-1">
-              <p className="a-text-2 text-xs font-bold uppercase tracking-widest mb-1 flex items-center gap-1.5">
-                <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: task.hex_code }} />
-                {task.color}
-              </p>
               <h3 className="a-text font-black text-lg leading-tight">{task.title}</h3>
               {editingCategoryId === task.id ? (
                 <select
@@ -2482,6 +2482,7 @@ export function BingoDashAdmin() {
     // null = back to the board default
     if (patch.bonusFull !== undefined) next.bonus_full_minutes = patch.bonusFull
     if (patch.bonusTimer !== undefined) next.bonus_timer_minutes = patch.bonusTimer
+    if (patch.tileIcon !== undefined) next.tile_icon = patch.tileIcon
     if (Object.keys(next).length === 0) return
 
     // Snapshot BEFORE the optimistic update, and only the fields being changed
@@ -2492,6 +2493,7 @@ export function BingoDashAdmin() {
       points: t.points ?? 0,
       bonus_full_minutes: t.bonus_full_minutes ?? null,
       bonus_timer_minutes: t.bonus_timer_minutes ?? null,
+      tile_icon: t.tile_icon ?? null,
     }))
 
     const idSet = new Set(ids)
@@ -2511,6 +2513,7 @@ export function BingoDashAdmin() {
           if (patch.points !== undefined) restore.points = b.points
           if (patch.bonusFull !== undefined) restore.bonus_full_minutes = b.bonus_full_minutes
           if (patch.bonusTimer !== undefined) restore.bonus_timer_minutes = b.bonus_timer_minutes
+          if (patch.tileIcon !== undefined) restore.tile_icon = b.tile_icon
           const key = JSON.stringify(restore)
           const bucket = buckets.get(key) ?? { patch: restore, ids: [] }
           bucket.ids.push(b.id)
@@ -4324,7 +4327,6 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                                 })()}
                                 <div style={{ height: 5, background: task.hex_code }} />
                                 <div className="px-4 pt-4 pb-3 flex-1">
-                                  <p className="text-xs font-bold uppercase tracking-widest mb-1" style={{ color: ink.mid }}>{task.color}</p>
                                   <h3 className="font-black text-lg leading-tight" style={{ color: ink.strong }}>{task.title}</h3>
                                   {/* Layer 2: the card's opening instruction —
                                       what a player is actually asked to DO,

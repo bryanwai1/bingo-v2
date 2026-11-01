@@ -913,6 +913,16 @@ html.admin-dark {
 .grab-ui .text-gray-500,
 .grab-ui .text-gray-600 { color: #f3f4f6; }
 .grab-ui .bg-gray-600 { background-color: #f3f4f6; }
+/* Grab: calm panel behind only the 5x5 grid so tiles don't fight the art.
+   The backdrop image itself is untouched. No-op on other themes. */
+.grab-ui .board-grid {
+  padding: 8px;
+  border-radius: 16px;
+  background: rgba(8, 10, 16, 0.58);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  -webkit-backdrop-filter: blur(3px);
+  backdrop-filter: blur(3px);
+}
 
 /* ── Admin tinted buttons (Teams tab) ──────────────────────────
    Icon + label, coloured by what the button does, readable in both themes. */

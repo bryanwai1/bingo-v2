@@ -404,8 +404,9 @@ function BingoTile({
             ? `0 0 0 2px #fde68a, 0 0 0 3px ${task.hex_code}`
             : `0 0 0 2px white, 0 0 0 3px ${task.hex_code}`
           : 'none',
-        opacity: status === 'locked' ? 0.65 : 1,
-        filter: chained ? 'grayscale(0.85) brightness(0.8)' : undefined,
+        // Grab: the art behind must not show through, so dim with a filter, not opacity
+        opacity: status === 'locked' && !autoContrast ? 0.65 : 1,
+        filter: chained ? 'grayscale(0.85) brightness(0.8)' : status === 'locked' && autoContrast ? 'brightness(0.82)' : undefined,
       }}
     >
       {chained && (
@@ -777,7 +778,7 @@ function BoardScreen({
               <p className="text-sm mt-1">Ask your facilitator to configure the grid</p>
             </div>
           ) : (
-            <div className="grid grid-cols-5 gap-1.5">
+            <div className="board-grid grid grid-cols-5 gap-1.5">
               {slots.map((task, i) =>
                 task ? (
                   <BingoTile

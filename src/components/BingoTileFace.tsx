@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import { GRAB_ICON_FILES } from '../lib/tileIcons'
 import { resolveIconKey, shortenTitle, type TileDisplay } from '../lib/bingoTileDisplay'
 
 // ── Bingo tile face ───────────────────────────────────────────────────────────
@@ -132,6 +133,8 @@ const ICONS: Record<string, ReactNode> = {
 }
 
 export function CategoryIcon({ category, className, iconKey }: { category: string; className?: string; iconKey?: string | null }) {
+  const file = iconKey ? GRAB_ICON_FILES[iconKey] : undefined
+  if (file) return <img src={file} alt="" draggable={false} className={className} style={{ objectFit: 'contain' }} />
   return (
     <svg
       viewBox="0 0 24 24"
@@ -152,7 +155,7 @@ export function CategoryIcon({ category, className, iconKey }: { category: strin
 // (BingoDashHome / Sample, gap-2) and 'sm' for the tighter one (BingoDashJoin,
 // gap-1.5).
 export function TileFace({
-  task, display, size = 'md', autoContrast = false,
+  task, display, size = 'md', autoContrast = false, chip = null,
 }: {
   task: { title: string; color: string; category?: string | null; hex_code?: string | null; tile_icon?: string | null; category_icon?: string | null }
   display: TileDisplay
@@ -160,6 +163,8 @@ export function TileFace({
   /** Pick white or near-black text from the tile colour. The default text
    *  colour follows the admin theme and can vanish on a coloured tile. */
   autoContrast?: boolean
+  /** Where the points chip sits on the tile, so an illustrated icon can make room. */
+  chip?: 'tl' | 'br' | null
 }) {
   const dark = autoContrast && !!task.hex_code && isLightColor(task.hex_code)
   const textColor = autoContrast ? (dark ? '#111827' : '#ffffff') : undefined
@@ -171,6 +176,20 @@ export function TileFace({
   // cards.
   const category = ((task.category || '').trim() || task.color || '').trim()
   if (display === 'icon') {
+    const iconKey = task.tile_icon ?? task.category_icon
+    if (iconKey && GRAB_ICON_FILES[iconKey]) {
+      // Illustrated icon: bare picture, no outline filter. 54% of the tile, 48% and
+      // nudged 6% of its height away from the chip when one is shown.
+      return (
+        <div className="relative z-0 flex items-center justify-center w-full h-full">
+          <CategoryIcon
+            category={category}
+            iconKey={iconKey}
+            className={!chip ? 'w-[54%] h-[54%]' : `w-[48%] h-[48%] ${chip === 'tl' ? 'translate-y-[6%]' : '-translate-y-[6%]'}`}
+          />
+        </div>
+      )
+    }
     return (
       <div
         className="relative z-0 flex items-center justify-center w-full h-full text-white"

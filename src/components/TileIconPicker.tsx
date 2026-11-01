@@ -1,5 +1,6 @@
+import { Fragment } from 'react'
 import { CategoryIcon } from './BingoTileFace'
-import { TILE_ICON_POOL } from '../lib/tileIcons'
+import { GRAB_ICON_POOL, TILE_ICON_POOL } from '../lib/tileIcons'
 
 /**
  * Pick the icon shown on this card's board tile. "Auto" follows the category;
@@ -29,13 +30,18 @@ export function TileIconPicker({
         </span>
         <span className="text-[11px] font-bold text-gray-600">Auto</span>
       </button>
-      {TILE_ICON_POOL.map(i => (
-        <button key={i.key} type="button" onClick={() => onChange(i.key)} className={tile(value === i.key)} title={i.label}>
-          <span className="w-12 h-12 rounded-lg flex items-center justify-center text-white" style={{ background: color }}>
-            <CategoryIcon category={category} iconKey={i.key} className="w-7 h-7" />
-          </span>
-          <span className="text-[11px] text-gray-500 leading-tight text-center">{i.label}</span>
-        </button>
+      {[...TILE_ICON_POOL, ...GRAB_ICON_POOL].map(i => (
+        <Fragment key={i.key}>
+          {i.key === GRAB_ICON_POOL[0].key && (
+            <p className="col-span-full text-xs font-bold text-gray-600 mt-2">New Grab set</p>
+          )}
+          <button type="button" onClick={() => onChange(i.key)} className={tile(value === i.key)} title={i.label}>
+            <span className="w-12 h-12 rounded-lg flex items-center justify-center text-white" style={{ background: color }}>
+              <CategoryIcon category={category} iconKey={i.key} className="w-7 h-7" />
+            </span>
+            <span className="text-[11px] text-gray-500 leading-tight text-center">{i.label}</span>
+          </button>
+        </Fragment>
       ))}
     </div>
   )

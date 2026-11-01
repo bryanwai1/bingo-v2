@@ -1,6 +1,7 @@
 // The pool of board icons a card can pick from (bingo_tasks.tile_icon).
-// Every key must exist in ICONS in components/BingoTileFace.tsx. A card with no
-// pick (null) takes the icon of its category instead.
+// Every key must exist in ICONS in components/BingoTileFace.tsx, or in
+// GRAB_ICON_FILES below (illustrated PNGs). A card with no pick (null) takes the
+// icon of its category instead.
 
 export const TILE_ICON_POOL: ReadonlyArray<{ key: string; label: string }> = [
   { key: 'target', label: 'Target' },
@@ -41,4 +42,54 @@ export const TILE_ICON_POOL: ReadonlyArray<{ key: string; label: string }> = [
   { key: 'message', label: 'Chat' },
   { key: 'compass', label: 'Compass' },
   { key: 'bag', label: 'Bag' },
+]
+
+// Illustrated Grab set: key -> PNG in public/grab/icons (trimmed by
+// scripts/trim-grab-icons.py). Drawn on the tile as a picture, not an outline.
+export const GRAB_ICON_FILES: Readonly<Record<string, string>> = {
+  grab_cash: '/grab/icons/icon-01.png',
+  grab_scooter: '/grab/icons/icon-02.png',
+  grab_car: '/grab/icons/icon-03.png',
+  grab_motorbike: '/grab/icons/icon-04.png',
+  grab_food: '/grab/icons/icon-05.png',
+  grab_durian: '/grab/icons/icon-06.png',
+  grab_bag: '/grab/icons/icon-07.png',
+  grab_driver: '/grab/icons/icon-08.png',
+  grab_phone: '/grab/icons/icon-09.png',
+  grab_rp: '/grab/icons/icon-10.png',
+  grab_gamepad: '/grab/icons/icon-11.png',
+  grab_rm: '/grab/icons/icon-12.png',
+  grab_video: '/grab/icons/icon-13.png',
+  grab_hotel: '/grab/icons/icon-14.png',
+  grab_pin: '/grab/icons/icon-15.png',
+  grab_doctor: '/grab/icons/icon-16.png',
+  grab_trophy: '/grab/icons/icon-17.png',
+  grab_heart: '/grab/icons/icon-18.png',
+  grab_growth: '/grab/icons/icon-19.png',
+  grab_tools: '/grab/icons/icon-20.png',
+  grab_ticket: '/grab/icons/icon-21.png',
+}
+
+export const GRAB_ICON_POOL: ReadonlyArray<{ key: string; label: string }> = [
+  { key: 'grab_cash', label: 'Cash' },
+  { key: 'grab_scooter', label: 'Scooter' },
+  { key: 'grab_car', label: 'Car' },
+  { key: 'grab_motorbike', label: 'Motorbike' },
+  { key: 'grab_food', label: 'Food' },
+  { key: 'grab_durian', label: 'Durian' },
+  { key: 'grab_bag', label: 'Grocery bag' },
+  { key: 'grab_driver', label: 'Driver' },
+  { key: 'grab_phone', label: 'Phone' },
+  { key: 'grab_rp', label: 'RP' },
+  { key: 'grab_gamepad', label: 'Gamepad' },
+  { key: 'grab_rm', label: 'RM' },
+  { key: 'grab_video', label: 'Video' },
+  { key: 'grab_hotel', label: 'Hotel' },
+  { key: 'grab_pin', label: 'Map pin' },
+  { key: 'grab_doctor', label: 'Doctor' },
+  { key: 'grab_trophy', label: 'Trophy' },
+  { key: 'grab_heart', label: 'Heart' },
+  { key: 'grab_growth', label: 'Growth' },
+  { key: 'grab_tools', label: 'Tools' },
+  { key: 'grab_ticket', label: 'Ticket' },
 ]
