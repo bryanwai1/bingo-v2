@@ -1,0 +1,42 @@
+{
+  "imageWidth": 1448,
+  "imageHeight": 1086,
+  "coordinateSystem": "pixel origin top-left",
+  "hotspots": [
+    {
+      "id": 1,
+      "name": "Different dish on cafe window poster",
+      "x": 373,
+      "y": 286,
+      "radius": 55
+    },
+    {
+      "id": 2,
+      "name": "Phone map pin changes red to purple",
+      "x": 1027,
+      "y": 421,
+      "radius": 35
+    },
+    {
+      "id": 3,
+      "name": "Top Grab logo missing on delivery bag",
+      "x": 799,
+      "y": 527,
+      "radius": 87
+    },
+    {
+      "id": 4,
+      "name": "Second traffic cone missing",
+      "x": 1350,
+      "y": 655,
+      "radius": 82
+    },
+    {
+      "id": 5,
+      "name": "Cat collar changes red to blue",
+      "x": 257,
+      "y": 784,
+      "radius": 36
+    }
+  ]
+}

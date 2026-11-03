@@ -30,6 +30,8 @@ import { RetroGamesSample } from '../components/RetroGamesSample'
 import { BundleCard } from '../components/BundleCard'
 import { AitbMissionModule } from '../components/AitbMissionModule'
 import { CardBonusTimer } from '../components/CardBonusTimer'
+import { CoopPlay } from '../components/CoopPlay'
+import { gameKeyForTitle } from '../lib/coopGames/gameCards'
 import { resolveBonusWindow, activeElapsedMs, type BonusDefaults } from '../lib/timeBonus'
 import { aitbByName, aitbToolUrl, aitbToolCaption, AITB_POINTS } from '../lib/aitbActivities'
 import { normalizeUrl } from '../lib/normalizeUrl'
@@ -158,6 +160,7 @@ export function BingoDashParticipant() {
   const [linkBusy, setLinkBusy] = useState(false)
   const [now, setNow] = useState(Date.now())
   const [scanRecorded, setScanRecorded] = useState(false)
+  const [coopOpen, setCoopOpen] = useState(false)
   const [currentPage, setCurrentPage] = useState(0)
   const [completing, setCompleting] = useState(false)
   const [showLeaveConfirm, setShowLeaveConfirm] = useState(false)
@@ -1101,11 +1104,25 @@ export function BingoDashParticipant() {
           )
         })()}
 
+        {/* Cooperative game (PRD-004): Play button on game cards only; opens the lobby and
+            game in place of the instruction cards. Everything else on the card is unchanged. */}
+        {scanRecord && !chainLocked && gameKeyForTitle(task.title) && (
+          <CoopPlay
+            memberId={localStorage.getItem('bingo-dash-member-id')}
+            scanId={scanRecord.id}
+            gameKey={gameKeyForTitle(task.title)!}
+            role={isObserver ? 'observer' : 'player'}
+            color={task.hex_code}
+            onSolved={() => setScanRecord(prev => (prev ? { ...prev, completed: true } : prev))}
+            onOpenChange={setCoopOpen}
+          />
+        )}
+
         {/* AI Team Building brief — replaces the generic pages entirely: a
             live bonus timer, the real description + skill tag, then the
             module and a tickable mission checklist instead of swipeable
             instruction pages. */}
-        {aitbActivity && scanRecord ? (
+        {coopOpen ? null : aitbActivity && scanRecord ? (
           <>
             <div className="flex items-center gap-2 mb-4">
               <span className="px-2 py-1 rounded-lg text-xs font-black uppercase" style={{ background: `${aitbActivity.color}22`, color: aitbActivity.color }}>

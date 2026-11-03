@@ -2765,6 +2765,16 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
     await fetchAll()
   }
 
+  // Cooperative games (PRD-004, AC-12): clear this team's game sessions and undo the
+  // completion they gave, so the team can play again. Server-side admin check.
+  const resetTeamGames = async (id: string, name: string) => {
+    if (!confirm(`Reset the cooperative games for "${name}"? Any game they finished is un-completed and can be played again.`)) return
+    const { data, error } = await supabase.rpc('coop_reset_team', { p_team: id })
+    if (error) { alert('Could not reset the games: ' + error.message); return }
+    alert(data ? `Reset ${data} game${data === 1 ? '' : 's'}.` : 'This team has no games to reset.')
+    await fetchAll()
+  }
+
   // Delete every team on the CURRENT board, cascading their members, scans and
   // photo submissions (FK ON DELETE CASCADE) and cleaning up storage photos.
   // Strictly scoped to currentSectionId, so other boards are never touched.
@@ -5779,6 +5789,13 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                                       title="Reset this team's scans, photo submissions, and bonus points"
                                     >
                                       <Ico d="reset" />Reset score
+                                    </button>
+                                    <button
+                                      onClick={e => { closeMenu(e); resetTeamGames(team.id, team.name) }}
+                                      className="a-live"
+                                      title="Clear this team's cooperative games so they can be played again"
+                                    >
+                                      <Ico d="reset" />Reset games
                                     </button>
                                     <button onClick={e => { closeMenu(e); deleteTeam(team.id, team.name) }} className="a-danger-text">
                                       <Ico d="trash" />Delete group
