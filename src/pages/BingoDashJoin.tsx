@@ -768,7 +768,7 @@ function BoardScreen({
               />
             )}
             <button
-              onClick={() => navigate(`/bingo-dash/projector/${sectionSlug}`)}
+              onClick={() => navigate(`/bingo-dash/projector/${sectionSlug}?view=player`)}
               className="text-xs font-bold text-teal-300 hover:text-teal-200 transition-colors"
             >
               🏆 Scoreboard

@@ -300,7 +300,7 @@ function previewWindow(bFull: string, bTimer: string, uFull?: number | null, uTi
 }
 /** What "Apply to all" can change on every card of a category. undefined = leave alone; a bonus of null = board default. */
 type BulkPatch = { hex?: string; points?: number; bonusFull?: number | null; bonusTimer?: number | null; tileIcon?: string | null }
-type BulkColumns = { hex_code?: string; points?: number; bonus_full_minutes?: number | null; bonus_timer_minutes?: number | null; tile_icon?: string | null }
+type BulkColumns = { hex_code?: string; hex_custom?: boolean; points?: number; bonus_full_minutes?: number | null; bonus_timer_minutes?: number | null; tile_icon?: string | null }
 
 function BulkApplyPanel({ group, onApply, iconKey, onIcon, scope = 'library' }: {
   /** 'board': the cards listed are this board's own placements (each gets its own copy first). */
@@ -1158,7 +1158,7 @@ export function BingoDashAdmin() {
     }
     return tasks.filter(t => !t.is_board_copy).map(t => {
       const c = copies.get(t.id)
-      return c ? { ...t, title: c.title, color: c.color, hex_code: c.hex_code, points: c.points, category: c.category,
+      return c ? { ...t, title: c.title, color: c.color, hex_code: c.hex_code, hex_custom: c.hex_custom, points: c.points, category: c.category,
         tile_icon: c.tile_icon, bonus_full_minutes: c.bonus_full_minutes, bonus_timer_minutes: c.bonus_timer_minutes } : t
     })
   }, [tasks, currentSectionId, canEditLibrary])
@@ -1453,7 +1453,8 @@ export function BingoDashAdmin() {
       // House shared library — skipped for a facilitator working on house
       // data (myOwnerValue null): those sections already ARE their boards.
       for (const section of sections.filter(s => s.owner_id === null)) {
-        const list = tasks.filter(t => t.section_id === section.id && t.owner_id === null)
+        // Library cards only — the owner's per-board copies are not part of the catalogue.
+        const list = tasks.filter(t => t.section_id === section.id && t.owner_id === null && !t.is_board_copy)
         if (list.length === 0) continue
         groups.push({
           section: { id: `house:${section.id}`, name: `Main library — ${section.name}`, foreign: true },
@@ -1528,12 +1529,19 @@ export function BingoDashAdmin() {
         }, ...orphanGroup]
       }
 
-      // Own Library is a shortcut to this account's own cards, not a silo.
-      // Main Library is the whole shared pool — INCLUDING this account's
-      // cards, which is what the owner sees too. Excluding them made a card
-      // a tenant admin had just created vanish from the shared library, as
-      // though it had not been added to the pool at all.
-      const own = flat.filter(t => isMineRow(t.owner_id))
+      // Main Library is exactly the owner's house catalogue. Own Library is
+      // a shortcut to cards this account made itself.
+      // Own Library lists only cards this account made itself: a card that
+      // repeats a house card (left over from the old Give board) adds nothing.
+      const houseKeys = new Set(flat.filter(t => !isMineRow(t.owner_id)).map(keyOf))
+      const ownSeen = new Set<string>()
+      const own = flat.filter(t => {
+        if (!isMineRow(t.owner_id)) return false
+        const k = keyOf(t)
+        if (houseKeys.has(k) || ownSeen.has(k)) return false
+        ownSeen.add(k)
+        return true
+      })
       // Exactly the owner's house library: none of this account's own cards.
       const shared = flat.filter(t => !isMineRow(t.owner_id))
       const out: typeof groups = []
@@ -1656,7 +1664,7 @@ export function BingoDashAdmin() {
       for (const list of byAccount.values()) countBucket(list)
     } else if (myOwnerValue !== null) {
       for (const section of sections.filter(x => x.owner_id === null)) {
-        countBucket(tasks.filter(t => t.section_id === section.id && t.owner_id === null))
+        countBucket(tasks.filter(t => t.section_id === section.id && t.owner_id === null && !t.is_board_copy))
       }
     }
     // The Unassigned group, counted in full like it is listed (no dedupe).
@@ -2284,7 +2292,7 @@ export function BingoDashAdmin() {
       owner_id: myOwnerValue,
       cloned_from: opts.clonedFrom !== undefined ? opts.clonedFrom : task.id,
       title: opts.title ?? task.title,
-      color: task.color, hex_code: task.hex_code, category: task.category,
+      color: task.color, hex_code: task.hex_code, ...('hex_custom' in task ? { hex_custom: task.hex_custom } : {}), category: task.category,
       points: task.points, in_grid: false,
       task_type: task.task_type,
       answer_question: task.answer_question, answer_text: task.answer_text,
@@ -2409,6 +2417,7 @@ export function BingoDashAdmin() {
   const tilePlacementId = (editingTile as Partial<PlacedCard> | null)?.placementId ?? null
   const saveTile = async () => {
     if (!editingTile || !tileTitle.trim()) return
+    if (!/^#[0-9a-f]{6}$/i.test(tileHex)) { notify('Color code must look like #1A2B3C.', 'warn'); return }
     setTileSaving(true)
     try {
       // Opened from a tile on a board: write to this board's own copy of the card.
@@ -2420,7 +2429,12 @@ export function BingoDashAdmin() {
         category: tileCategory.trim(),
         points: roundPoints(Math.max(0, parseFloat(tilePoints) || 0)),
         tile_icon: tileIcon,
+        hex_code: tileHex,
       }
+      // A colour changed here is this card's own: it must beat the category colour.
+      // (hex_custom exists once 20261115_card_hex_custom.sql has been run.)
+      const colorChanged = tileHex.toLowerCase() !== (editingTile.hex_code ?? '').toLowerCase()
+      if (colorChanged && 'hex_custom' in editingTile) updates.hex_custom = true
       const { error: upErr } = await supabase.from('bingo_tasks').update(updates).eq('id', targetId)
       if (upErr) throw upErr
       if (tilePlacementId) await fetchAll()
@@ -2499,7 +2513,11 @@ export function BingoDashAdmin() {
     const ids = tasksInGroup.map(t => t.id)
     if (ids.length === 0) return
     const next: BulkColumns = {}
-    if (patch.hex !== undefined) next.hex_code = patch.hex
+    if (patch.hex !== undefined) {
+      next.hex_code = patch.hex
+      // "Color for all" brings every card back to the category colour.
+      if (tasks.some(t => 'hex_custom' in t)) next.hex_custom = false
+    }
     if (patch.points !== undefined) next.points = roundPoints(patch.points)
     // null = back to the board default
     if (patch.bonusFull !== undefined) next.bonus_full_minutes = patch.bonusFull
@@ -3137,18 +3155,20 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
   // so it shows in that group's own Bonus popup like a line typed there.
   // Groups left at 0 are untouched.
   const saveBulkBonus = async () => {
-    const label = bulkBonusTitle.trim()
+    const label = bulkBonusTitle.trim() || 'Bonus'
     const changes = scopedTeams.flatMap(team => {
+      // A group is changed once its amount has been typed in, even if that
+      // amount is 0; groups never touched are left alone.
       const d = bulkBonusDraft[team.id]
-      if (!d || !d.points) return []
+      if (!d) return []
       const saved = team.bonus_breakdown ?? []
       // Same legacy rule as openBonusModal: a bare total becomes a "Bonus" line.
       const base: BonusItem[] = saved.length > 0 ? saved
         : (team.bonus_points ?? 0) !== 0 ? [{ label: 'Bonus', points: team.bonus_points }] : []
-      const bonus_breakdown = [...base, { label, points: d.deduct ? -d.points : d.points }]
+      const bonus_breakdown = [...base, { label, points: d.deduct && d.points ? -d.points : d.points }]
       return [{ id: team.id, bonus_breakdown, bonus_points: bonus_breakdown.reduce((sum, i) => sum + i.points, 0) }]
     })
-    if (!label || changes.length === 0) return
+    if (changes.length === 0) { setBulkBonusOpen(false); return }
     setBulkBonusSaving(true)
     try {
       setTeams(prev => prev.map(t => {
@@ -6268,6 +6288,30 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                 </div>
               </div>
               <div>
+                <label className="block text-sm font-medium a-text-3 mb-1">Card color</label>
+                <div className="flex items-center flex-wrap gap-2">
+                  <input type="color" value={/^#[0-9a-f]{6}$/i.test(tileHex) ? tileHex : '#3B82F6'}
+                    onChange={e => setTileHex(e.target.value)}
+                    aria-label="Card color"
+                    className="w-11 h-11 rounded-lg border a-border cursor-pointer bg-transparent p-0.5" />
+                  <input type="text" value={tileHex} maxLength={7} spellCheck={false}
+                    aria-label="Color code"
+                    onChange={e => {
+                      let v = e.target.value.trim()
+                      if (v && !v.startsWith('#')) v = '#' + v
+                      setTileHex(v.toUpperCase())
+                    }}
+                    className={`w-24 px-2 py-2 rounded-lg border focus:outline-none text-sm font-mono uppercase a-surface ${
+                      /^#[0-9a-f]{6}$/i.test(tileHex) ? 'a-border a-text' : 'border-red-500/60 text-red-400'}`} />
+                  {['#EF4444', '#F97316', '#EAB308', '#22C55E', '#14B8A6', '#3B82F6', '#8B5CF6', '#EC4899', '#64748B'].map(c => (
+                    <button key={c} type="button" onClick={() => setTileHex(c)} aria-label={`Use ${c}`}
+                      className="w-8 h-8 rounded-full border-2 transition-transform hover:scale-110"
+                      style={{ backgroundColor: c, borderColor: tileHex.toLowerCase() === c.toLowerCase() ? 'var(--a-text)' : 'transparent' }} />
+                  ))}
+                </div>
+                <p className="text-[11px] a-text-3 mt-1">Shows on the player board and the sample board.</p>
+              </div>
+              <div>
                 <label className="block text-sm font-medium a-text-3 mb-1">Board icon</label>
                 <button type="button" onClick={() => setShowIconPicker(v => !v)}
                   className="w-full flex items-center gap-3 px-3 py-2 rounded-lg border a-border hover:border-teal-500 transition-colors text-left"
@@ -6754,8 +6798,8 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
         const rowOf = (id: string) => bulkBonusDraft[id] ?? { points: 0, deduct: false }
         const setRow = (id: string, patch: Partial<{ points: number; deduct: boolean }>) =>
           setBulkBonusDraft(prev => ({ ...prev, [id]: { ...rowOf(id), ...patch } }))
-        const changed = scopedTeams.filter(t => rowOf(t.id).points > 0).length
-        const canApply = !!bulkBonusTitle.trim() && changed > 0 && !bulkBonusSaving
+        const changed = scopedTeams.filter(t => !!bulkBonusDraft[t.id]).length
+        const canApply = !bulkBonusSaving
         return (
           <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 px-4" onClick={close}>
             <div className="a-surface rounded-2xl shadow-2xl w-full max-w-lg animate-bounce-in flex flex-col max-h-[90vh]"
@@ -6763,7 +6807,7 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
               <div className="px-4 sm:px-6 py-5 border-b a-border flex items-center justify-between flex-shrink-0">
                 <div>
                   <h3 className="text-lg font-bold a-text">Bulk Bonus &amp; Deductions</h3>
-                  <p className="text-xs a-text-2 mt-0.5">One activity for all groups · groups left at 0 are not changed</p>
+                  <p className="text-xs a-text-2 mt-0.5">One activity for all groups · groups you don't touch are not changed · title is optional</p>
                 </div>
                 <button onClick={close} className="a-text-2 hover:a-text-3 text-2xl font-light">&times;</button>
               </div>
@@ -6788,7 +6832,7 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                     <div key={team.id} className="flex items-center gap-2">
                       <span className="flex-1 min-w-0 truncate text-sm font-bold a-text">{team.name}</span>
                       <span className="text-xs a-text-2 font-mono w-16 text-right" title="Bonus now → after">
-                        {current}{row.points > 0 && <> → <span className={row.deduct ? 'text-red-500' : 'text-emerald-500'}>{next}</span></>}
+                        {current}{!!bulkBonusDraft[team.id] && row.points > 0 && <> → <span className={row.deduct ? 'text-red-500' : 'text-emerald-500'}>{next}</span></>}
                       </span>
                       <button
                         onClick={() => setRow(team.id, { deduct: !row.deduct })}
@@ -6825,7 +6869,6 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                     Cancel
                   </button>
                   <button onClick={saveBulkBonus} disabled={!canApply}
-                    title={!bulkBonusTitle.trim() ? 'Type an activity title first' : undefined}
                     className="px-5 py-2 rounded-lg text-sm font-bold a-text bg-teal-600 hover:bg-violet-700 disabled:opacity-50 transition-colors">
                     {bulkBonusSaving ? 'Saving…' : 'Apply'}
                   </button>

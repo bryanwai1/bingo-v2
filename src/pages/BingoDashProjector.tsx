@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, useLayoutEffect, useRef } from 'react'
-import { useParams } from 'react-router-dom'
+import { useParams, useSearchParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { ParticleBackground } from '../components/ParticleBackground'
 import { FitBoard } from '../components/FitBoard'
@@ -95,6 +95,10 @@ export function BingoDashProjector() {
   // board (used by sub-account admins). Without it, falls back to the global
   // active board (the owner's front door).
   const { sectionSlug } = useParams<{ sectionSlug?: string }>()
+  // Players open this page from their own board with ?view=player: they get the
+  // live scoreboard only, without the facilitator's "Total after Bonus" switch.
+  const [searchParams] = useSearchParams()
+  const playerView = searchParams.get('view') === 'player'
   const [tasks, setTasks] = useState<BingoTask[]>([])
   const [boardCards, setBoardCards] = useState<BingoBoardCard[]>([])
   const [teams, setTeams] = useState<BingoTeam[]>([])
@@ -245,7 +249,7 @@ export function BingoDashProjector() {
 
   // "Total after Bonus" is a DISPLAY choice — the score itself always carries
   // the manual bonus. Both the figure shown and the ordering follow the toggle.
-  const scoreOf = (r: Row) => (showBonus ? r.total : r.basePoints)
+  const scoreOf = (r: Row) => (showBonus && !playerView ? r.total : r.basePoints)
   const fmt = (v: unknown) => formatScore(v)
   rows.sort((a, b) => compareTeamScores(a, b, { includeBonus: showBonus }))
 
@@ -445,7 +449,7 @@ export function BingoDashProjector() {
               {liveState === 'live' ? 'Live' : liveState === 'offline' ? 'Reconnecting' : 'Connecting'}
               {lastSync > 0 && <span className="opacity-60">· synced {Math.max(0, Math.round((nowTick - lastSync) / 1000))}s ago</span>}
             </p>
-            <button
+            {!playerView && <button
               onClick={() => setShowBonus(v => !v)}
               className={`px-3 py-2 sm:px-5 sm:py-2.5 rounded-xl text-xs sm:text-sm font-black uppercase tracking-wider transition-all ${
                 showBonus
@@ -454,7 +458,7 @@ export function BingoDashProjector() {
               }`}
             >
               {showBonus ? '✓ Total after Bonus' : '＋ Total after Bonus'}
-            </button>
+            </button>}
 
             {/* In-page zoom: scales the board only, never the browser UI.
                 Hidden where the board is not scaled at all (narrow screens

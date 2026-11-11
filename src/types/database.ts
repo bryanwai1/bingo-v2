@@ -160,6 +160,8 @@ export interface BingoTask {
   title: string
   color: string
   hex_code: string
+  /** True once this card's colour was picked by hand; it then beats its category's colour on the board. */
+  hex_custom?: boolean
   sort_order: number
   in_grid: boolean
   category: string

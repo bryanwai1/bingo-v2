@@ -5,6 +5,10 @@ import { useBingoAuth } from '../hooks/useBingoAuth'
 import { FacilitatorSessions } from '../components/FacilitatorSessions'
 import { errText } from '../lib/errText'
 import type { BingoAccount, BingoSection } from '../types/database'
+import {
+  PlansPanel, EnrollPanel, toDateInput, fromDateInput, addDays,
+  type BingoPlan, type AccountInvite,
+} from '../components/PlansAndEnroll'
 
 const STATUS_STYLES: Record<BingoAccount['status'], string> = {
   pending:  'bg-amber-400/15 text-amber-300 border-amber-400/40',
@@ -54,6 +58,8 @@ export function BingoDashAccounts() {
   const [templateId, setTemplateId] = useState<string | null>(null)
   // Board chosen per account for "Give board" ('' = the default template)
   const [pickedBoard, setPickedBoard] = useState<Record<string, string>>({})
+  const [plans, setPlans] = useState<BingoPlan[]>([])
+  const [invites, setInvites] = useState<AccountInvite[]>([])
   const [loading, setLoading] = useState(true)
   const [busyId, setBusyId] = useState<string | null>(null)
   const [notice, setNotice] = useState('')
@@ -61,11 +67,17 @@ export function BingoDashAccounts() {
   const inviteUrl = `${window.location.origin}/bingo-dash/login`
 
   const load = useCallback(async () => {
-    const [accountsRes, boardsRes, settingsRes] = await Promise.all([
+    const [accountsRes, boardsRes, settingsRes, plansRes, invitesRes] = await Promise.all([
       supabase.from('bingo_accounts').select('*').order('created_at', { ascending: false }),
       supabase.from('bingo_sections').select('*').is('owner_id', null).order('sort_order'),
       supabase.from('bingo_settings').select('template_section_id').eq('id', 'main').maybeSingle(),
+      supabase.from('bingo_plans').select('*').order('sort_order'),
+      supabase.from('bingo_account_invites').select('*').order('created_at', { ascending: false }),
     ])
+    // Both tables come from 20261113_plans_and_enroll.sql; until it is run the
+    // queries error and the page falls back to the built-in three plans.
+    setPlans((plansRes.data as BingoPlan[] | null) ?? [])
+    setInvites((invitesRes.data as AccountInvite[] | null) ?? [])
     if (accountsRes.data) setAccounts(accountsRes.data as BingoAccount[])
     if (boardsRes.data) setBoards(boardsRes.data as BingoSection[])
     if (settingsRes.data) setTemplateId(settingsRes.data.template_section_id ?? null)
@@ -96,6 +108,7 @@ export function BingoDashAccounts() {
   // direct UPDATE: a renter must never be able to raise their own caps.
   const savePlan = async (a: BingoAccount, patch: {
     plan?: string; max_boards?: number; max_teams_per_board?: number
+    expires?: string | null   // undefined = keep, null = no expiry
   }) => {
     setBusyId(a.id)
     const { error } = await supabase.rpc('set_account_plan', {
@@ -103,11 +116,20 @@ export function BingoDashAccounts() {
       p_plan: patch.plan ?? a.plan ?? 'trial',
       p_max_boards: patch.max_boards ?? a.max_boards ?? 3,
       p_max_teams: patch.max_teams_per_board ?? a.max_teams_per_board ?? 20,
-      p_expires: a.plan_expires_at ?? null,
+      p_expires: patch.expires !== undefined ? patch.expires : (a.plan_expires_at ?? null),
     })
     setBusyId(null)
     if (error) alert(error.message)
     else await load()
+  }
+
+  const deleteAccount = async (a: BingoAccount) => {
+    if (!confirm(`Permanently delete ${a.email ?? 'this account'}? Their login and account are removed and this cannot be undone.`)) return
+    setBusyId(a.id)
+    const { error } = await supabase.rpc('owner_delete_account', { p_account: a.id })
+    setBusyId(null)
+    if (error) setNotice(`Could not delete: ${errText(error)}`)
+    else { setNotice(`Deleted ${a.email ?? 'account'}.`); await load() }
   }
 
   const toggleGame = async (a: BingoAccount, field: 'can_bingo' | 'can_flag') => {
@@ -220,6 +242,12 @@ export function BingoDashAccounts() {
                 {a.status === 'approved' ? 'Revoke' : 'Reject'}
               </button>
             )}
+            {a.id !== me?.id && (
+              <button onClick={() => deleteAccount(a)} disabled={busyId === a.id}
+                className="px-3 py-1.5 rounded-xl text-xs font-black bg-white/10 hover:bg-red-600 a-text transition-colors disabled:opacity-50">
+                Delete
+              </button>
+            )}
           </div>
         )}
       </div>
@@ -275,12 +303,25 @@ export function BingoDashAccounts() {
         <div className="flex items-center flex-wrap gap-2 mt-3 pt-3 border-t a-border">
           <span className="text-[11px] a-text-3 font-bold uppercase tracking-widest mr-1">Plan:</span>
           <select
+            key={a.plan}
             defaultValue={a.plan ?? 'trial'}
-            onChange={e => void savePlan(a, { plan: e.target.value })}
+            onChange={e => {
+              // Choosing a plan fills in its limits and default length.
+              const p = plans.find(x => x.key === e.target.value)
+              void savePlan(a, p
+                ? {
+                    plan: p.key, max_boards: p.max_boards, max_teams_per_board: p.max_teams_per_board,
+                    expires: p.default_days ? addDays(p.default_days) : null,
+                  }
+                : { plan: e.target.value })
+            }}
             className="px-3 py-1.5 rounded-xl bg-black/30 border-2 border-white/15 a-text text-xs focus:border-teal-500 outline-none">
-            <option value="trial">Trial</option>
-            <option value="standard">Standard</option>
-            <option value="pro">Pro</option>
+            {(plans.length ? plans : [
+              { key: 'trial', name: 'Trial' }, { key: 'standard', name: 'Standard' }, { key: 'pro', name: 'Pro' },
+            ]).map(p => <option key={p.key} value={p.key}>{p.name}</option>)}
+            {a.plan && !plans.some(p => p.key === a.plan) && plans.length > 0 && (
+              <option value={a.plan}>{a.plan} (removed)</option>
+            )}
           </select>
           <label className="flex items-center gap-1 text-[11px] a-text-2 font-bold">
             Boards
@@ -294,6 +335,23 @@ export function BingoDashAccounts() {
               onBlur={e => void savePlan(a, { max_teams_per_board: Number(e.target.value) })}
               className="w-16 px-2 py-1.5 rounded-xl bg-black/30 border-2 border-white/15 a-text text-xs focus:border-teal-500 outline-none" />
           </label>
+          <label className="flex items-center gap-1 text-[11px] a-text-2 font-bold">
+            Expires
+            <input type="date" key={a.plan_expires_at ?? 'none'} defaultValue={toDateInput(a.plan_expires_at)}
+              onChange={e => void savePlan(a, { expires: fromDateInput(e.target.value) })}
+              className="px-2 py-1.5 rounded-xl bg-black/30 border-2 border-white/15 a-text text-xs focus:border-teal-500 outline-none" />
+          </label>
+          <button onClick={() => void savePlan(a, { expires: addDays(30, a.plan_expires_at) })}
+            className="px-2 py-1.5 rounded-xl text-[11px] font-bold a-text border border-white/20 hover:bg-white/10">+30d</button>
+          <button onClick={() => void savePlan(a, { expires: addDays(365, a.plan_expires_at) })}
+            className="px-2 py-1.5 rounded-xl text-[11px] font-bold a-text border border-white/20 hover:bg-white/10">+1y</button>
+          <button onClick={() => void savePlan(a, { expires: null })} disabled={!a.plan_expires_at}
+            className="px-2 py-1.5 rounded-xl text-[11px] font-bold a-text border border-white/20 hover:bg-white/10 disabled:opacity-40">No expiry</button>
+          {a.plan_expires_at && (
+            <span className={`text-[11px] font-black ${new Date(a.plan_expires_at).getTime() < Date.now() ? 'text-red-300' : 'a-text-3'}`}>
+              {new Date(a.plan_expires_at).getTime() < Date.now() ? 'expired' : `ends ${toDateInput(a.plan_expires_at)}`}
+            </span>
+          )}
           {a.company_name && (
             <span className="text-[11px] a-text-3 ml-auto">{a.company_name}</span>
           )}
@@ -345,6 +403,13 @@ export function BingoDashAccounts() {
                 </button>
               </div>
             </section>
+
+            <EnrollPanel plans={plans} invites={invites} loginUrl={inviteUrl} onChanged={load} onNotice={setNotice} />
+            <PlansPanel
+              plans={plans}
+              usage={accounts.reduce<Record<string, number>>((m, x) => { if (x.role !== 'owner') m[x.plan ?? 'trial'] = (m[x.plan ?? 'trial'] ?? 0) + 1; return m }, {})}
+              onChanged={load}
+            />
 
             <section className="px-4 py-4 rounded-2xl a-surface-2 border a-border">
               <h2 className="a-text text-sm font-black uppercase tracking-widest mb-2">Default board template</h2>

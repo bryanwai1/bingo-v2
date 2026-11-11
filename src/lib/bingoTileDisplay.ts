@@ -64,12 +64,12 @@ export function shortenTitle(title: string, maxChars = 20): string {
 // The category's colour is the one most of its cards already carry (ties go
 // to the earliest card), so nothing changes on a board that is already tidy.
 
-export function categoryColors(tasks: ReadonlyArray<{ category?: string | null; hex_code: string; sort_order?: number }>): Record<string, string> {
+export function categoryColors(tasks: ReadonlyArray<{ category?: string | null; hex_code: string; sort_order?: number; hex_custom?: boolean }>): Record<string, string> {
   const tally: Record<string, Map<string, { n: number; first: number }>> = {}
   const sorted = [...tasks].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
   sorted.forEach((t, i) => {
     const cat = (t.category ?? '').trim()
-    if (!cat || !t.hex_code) return
+    if (!cat || !t.hex_code || t.hex_custom) return
     const m = (tally[cat] ??= new Map())
     const e = m.get(t.hex_code)
     if (e) e.n += 1; else m.set(t.hex_code, { n: 1, first: i })
@@ -86,9 +86,11 @@ export function categoryColors(tasks: ReadonlyArray<{ category?: string | null; 
 }
 
 /** The same cards, each painted with its category's colour. */
-export function withCategoryColors<T extends { category?: string | null; hex_code: string; sort_order?: number }>(tasks: T[]): T[] {
+export function withCategoryColors<T extends { category?: string | null; hex_code: string; sort_order?: number; hex_custom?: boolean }>(tasks: T[]): T[] {
   const colors = categoryColors(tasks)
   return tasks.map(t => {
+    // A colour picked on the card itself wins over its category's.
+    if (t.hex_custom) return t
     const hex = colors[(t.category ?? '').trim()]
     return hex && hex !== t.hex_code ? { ...t, hex_code: hex } : t
   })
