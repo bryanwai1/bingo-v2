@@ -52,6 +52,8 @@ export function BingoDashAccounts() {
   const [accounts, setAccounts] = useState<BingoAccount[]>([])
   const [boards, setBoards] = useState<BingoSection[]>([])
   const [templateId, setTemplateId] = useState<string | null>(null)
+  // Board chosen per account for "Give board" ('' = the default template)
+  const [pickedBoard, setPickedBoard] = useState<Record<string, string>>({})
   const [loading, setLoading] = useState(true)
   const [busyId, setBusyId] = useState<string | null>(null)
   const [notice, setNotice] = useState('')
@@ -122,17 +124,18 @@ export function BingoDashAccounts() {
     await supabase.from('bingo_settings').update({ template_section_id: value }).eq('id', 'main')
   }
 
-  const provision = async (a: BingoAccount) => {
-    if (!templateId) {
+  const provision = async (a: BingoAccount, boardId: string | null) => {
+    if (!boardId && !templateId) {
       setNotice('Pick a template board first.')
       return
     }
     setBusyId(a.id)
     setNotice('')
     try {
-      const { error } = await supabase.rpc('admin_clone_template_for', { p_target: a.id })
+      const { error } = await supabase.rpc('admin_clone_template_for', { p_target: a.id, p_template: boardId })
       if (error) throw error
-      setNotice(`Gave ${a.email ?? 'account'} a fresh copy of the template board.`)
+      const name = boardId ? boards.find(b => b.id === boardId)?.name : null
+      setNotice(`Gave ${a.email ?? 'account'} a fresh copy of ${name ? `“${name}”` : 'the template board'}.`)
     } catch (err) {
       setNotice(`Could not clone board: ${errText(err)}`)
     } finally { setBusyId(null) }
@@ -250,11 +253,20 @@ export function BingoDashAccounts() {
           <span className="text-[11px] a-text-3 font-bold uppercase tracking-widest mr-1">Games:</span>
           <GameToggle label="Bingo Dash" on={a.can_bingo} busy={busyId === a.id} onToggle={() => toggleGame(a, 'can_bingo')} />
           <GameToggle label="Flag Retrieval" on={a.can_flag} busy={busyId === a.id} onToggle={() => toggleGame(a, 'can_flag')} />
-          <div className="flex gap-2 ml-auto">
-            <button onClick={() => provision(a)} disabled={busyId === a.id || !templateId}
-              title={templateId ? 'Clone the template board into this account' : 'Pick a template board first'}
+          <div className="flex gap-2 ml-auto items-center">
+            <select
+              aria-label="Board to give"
+              value={pickedBoard[a.id] ?? ''}
+              onChange={e => setPickedBoard(p => ({ ...p, [a.id]: e.target.value }))}
+              className="px-2 py-1.5 rounded-xl bg-black/30 border-2 border-white/15 a-text text-xs focus:border-teal-500 outline-none max-w-[11rem]">
+              <option value="">Default template</option>
+              {boards.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+            </select>
+            <button onClick={() => provision(a, pickedBoard[a.id] || null)}
+              disabled={busyId === a.id || (!templateId && !pickedBoard[a.id])}
+              title="Clone the chosen board into this account"
               className="px-3 py-1.5 rounded-xl text-xs font-bold a-text border border-white/20 hover:bg-white/10 transition-colors disabled:opacity-40">
-              Give default board
+              {pickedBoard[a.id] ? 'Give board' : 'Give default board'}
             </button>
           </div>
         </div>

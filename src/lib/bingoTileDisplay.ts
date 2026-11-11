@@ -93,3 +93,60 @@ export function withCategoryColors<T extends { category?: string | null; hex_cod
     return hex && hex !== t.hex_code ? { ...t, hex_code: hex } : t
   })
 }
+
+// ── Chain role ────────────────────────────────────────────────────────────────
+// Chained cards (bingo_tasks.prerequisite_task_id) open one after another. The
+// card that opens the chain is its 'start' (no prerequisite, but something
+// follows it); the card nothing follows is its 'end' (the treasure).
+export type ChainRole = 'start' | 'end' | null
+
+type ChainTask = { id: string; prerequisite_task_id?: string | null; cloned_from?: string | null }
+
+export interface ChainInfo {
+  role: Exclude<ChainRole, null> | 'middle'
+  /** 1-based position in its chain. */
+  step: number
+  /** Length of that chain, so the board can say "step 2 of 6". */
+  total: number
+}
+
+export function chainInfoFn(tasks: ReadonlyArray<ChainTask>) {
+  // A board holds copies of library cards, and a prerequisite may name either
+  // the copy or the library original it was cloned from — match both.
+  const byKey = new Map<string, string>()
+  for (const t of tasks) { byKey.set(t.id, t.id); if (t.cloned_from) byKey.set(t.cloned_from, t.id) }
+  const prereq = new Map<string, string>()
+  const followed = new Set<string>()
+  for (const t of tasks) {
+    // A prerequisite that is not on this board does not make a chain here.
+    const p = t.prerequisite_task_id ? byKey.get(t.prerequisite_task_id) : undefined
+    if (p && p !== t.id) { prereq.set(t.id, p); followed.add(p) }
+  }
+  const walk = (id: string) => { let n = 0, root = id; for (let c = prereq.get(id); c && n < 100; c = prereq.get(c)) { n++; root = c } return { depth: n, root } }
+  const totals = new Map<string, number>()
+  for (const t of tasks) {
+    if (!prereq.has(t.id) && !followed.has(t.id)) continue
+    const { depth, root } = walk(t.id)
+    totals.set(root, Math.max(totals.get(root) ?? 0, depth + 1))
+  }
+  // Only the single card at the very end of the longest chain is the treasure.
+  let endId: string | null = null, best = 0
+  for (const t of tasks) {
+    if (prereq.has(t.id) && !followed.has(t.id)) { const d = walk(t.id).depth; if (d > best) { best = d; endId = t.id } }
+  }
+  return (t: ChainTask): ChainInfo | null => {
+    const inChain = prereq.has(t.id) || followed.has(t.id)
+    if (!inChain) return null
+    const { depth, root } = walk(t.id)
+    const role = !prereq.has(t.id) ? 'start' : t.id === endId ? 'end' : 'middle'
+    return { role, step: depth + 1, total: totals.get(root) ?? depth + 1 }
+  }
+}
+
+export function chainRoleFn(tasks: ReadonlyArray<ChainTask>) {
+  const info = chainInfoFn(tasks)
+  return (t: ChainTask): ChainRole => {
+    const r = info(t)?.role
+    return r === 'start' || r === 'end' ? r : null
+  }
+}

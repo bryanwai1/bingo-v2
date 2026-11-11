@@ -132,21 +132,21 @@ function LinkRow({
   }
 
   return (
-    <div className="flex items-center gap-2 p-2 rounded-lg border border-gray-200 bg-white">
+    <div className="flex flex-wrap items-center gap-2 p-2 rounded-lg border border-gray-200 bg-white">
       <span className="w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold a-text shrink-0" style={{ backgroundColor: hexCode }}>🔗</span>
       <input
         type="text"
         value={label}
         onChange={e => setLabel(e.target.value)}
         placeholder="Button label"
-        className="w-36 px-2 py-1.5 rounded border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+        className="flex-1 sm:flex-none sm:w-36 min-w-[8rem] px-2 py-1.5 rounded border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
       />
       <input
         type="url"
         value={url}
         onChange={e => setUrl(e.target.value)}
         placeholder="https://..."
-        className="flex-1 px-2 py-1.5 rounded border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+        className="basis-full sm:basis-0 flex-1 min-w-[8rem] px-2 py-1.5 rounded border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
       />
       <button
         onClick={handleSave}

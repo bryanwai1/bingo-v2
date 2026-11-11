@@ -12,7 +12,7 @@ import { MyQrButton } from '../components/MyQrButton'
 import { SupportChat } from '../components/SupportChat'
 import { LanguageToggle } from '../components/LanguageToggle'
 import { IncomingDuelBanner } from '../components/ContestCard'
-import { normalizeTileDisplay, withCategoryColors, type TileDisplay } from '../lib/bingoTileDisplay'
+import { normalizeTileDisplay, withCategoryColors, chainInfoFn, type ChainInfo, type TileDisplay } from '../lib/bingoTileDisplay'
 import type { BingoTask, BingoScan, BingoSection, BingoTeam, BingoMember, BoardTimer } from '../types/database'
 
 /* ── helpers ─────────────────────────────────────────────────────────────────── */
@@ -384,19 +384,19 @@ function JoinScreen({
 /* ── Bingo Tile ──────────────────────────────────────────────────────────────── */
 
 function BingoTile({
-  task, status, chained, review, isInBingoLine, display, autoContrast, onClick,
+  task, status, chained, chain, glowing, review, isInBingoLine, display, autoContrast, onClick,
 }: {
   review?: ReviewFlag
   // chained: a card whose prerequisite this team has not finished — still
   // tappable, but greyed with a padlock.
-  task: BingoTask; status: TileStatus; chained: boolean; isInBingoLine: boolean; display: TileDisplay; autoContrast?: boolean; onClick: () => void
+  task: BingoTask; status: TileStatus; chained: boolean; chain?: ChainInfo | null; glowing?: boolean; isInBingoLine: boolean; display: TileDisplay; autoContrast?: boolean; onClick: () => void
 }) {
   return (
     <button
       onClick={onClick}
       title={chained ? `${task.title} (locked)` : task.title}
       aria-label={chained ? `${task.title} (locked)` : task.title}
-      className="relative rounded-lg overflow-hidden flex items-center justify-center aspect-square transition-all duration-200 active:scale-95 focus:outline-none"
+      className={`relative rounded-lg overflow-hidden flex items-center justify-center aspect-square transition-all duration-200 active:scale-95 focus:outline-none${glowing ? ' bingo-glow-on' : ''}`}
       style={{
         backgroundColor: task.hex_code,
         boxShadow: status === 'completed'
@@ -409,10 +409,33 @@ function BingoTile({
         filter: chained ? 'grayscale(0.85) brightness(0.8)' : status === 'locked' && autoContrast ? 'brightness(0.82)' : undefined,
       }}
     >
+      {/* Spotlight from the presenter (Sample page): lights while the team
+          has not finished the card. */}
+      {glowing && status !== 'completed' && (
+        <>
+          <div className="absolute inset-0 rounded-[inherit] pointer-events-none z-20"
+            style={{ boxShadow: 'inset 0 0 0 3px rgba(255,255,255,0.92), inset 0 0 14px rgba(255,255,255,0.45)' }} />
+          <div className="tile-sparks absolute inset-[5px] rounded-xl pointer-events-none z-30" aria-hidden="true">
+            <span /><span /><span />
+          </div>
+        </>
+      )}
+      {/* Chained card: its step in the chain, and a pulsing ring on the one
+          the team can open next. */}
+      {chain && status !== 'completed' && (
+        <>
+          {!chained && (
+            <div className="absolute inset-0 rounded-[inherit] ring-[3px] ring-inset ring-emerald-300 animate-pulse z-20 pointer-events-none" />
+          )}
+          <div className={`absolute top-0.5 left-0.5 z-20 text-[8px] font-black rounded px-1 leading-tight shadow pointer-events-none ${chained ? 'bg-black/60 text-white' : 'bg-emerald-400 text-black'}`}>
+            {chain.role === 'start' ? 'START' : `${chain.step}/${chain.total}`}
+          </div>
+        </>
+      )}
       {chained && (
         <div className="absolute inset-0 bg-black/35 flex items-center justify-center z-10 pointer-events-none">
           <div className="bg-white/85 rounded-full w-5 h-5 flex items-center justify-center">
-            <span className="text-[11px] leading-none">🔒</span>
+            {chain?.role === 'end' ? <img src="/grab/icons/treasure.png" alt="" draggable={false} className="w-[80%] h-[80%] object-contain" /> : <span className="text-[11px] leading-none">🔒</span>}
           </div>
         </div>
       )}
@@ -449,7 +472,7 @@ function BingoTile({
         <div className="absolute top-1 right-1 z-10 w-2 h-2 rounded-full border-2 border-white/80" />
       )}
       {/* Icon or words — whichever this board is set to in the admin */}
-      <TileFace task={task} display={display} size="sm" autoContrast={autoContrast} />
+      <TileFace task={chain?.role === 'end' ? { ...task, tile_icon: 'treasure' } : task} display={display} size="sm" autoContrast={autoContrast} />
     </button>
   )
 }
@@ -615,6 +638,8 @@ function BoardScreen({
   const isChainLocked = (task: BingoTask) =>
     !!task.prerequisite_task_id &&
     !scans.some(s => s.task_id === task.prerequisite_task_id && s.completed)
+  const chainInfoOf = chainInfoFn(gridTasks)
+  const glowSet = new Set<number>((settings as { glow_slots?: number[] | null } | null)?.glow_slots ?? [])
   const completedCount = gridTasks.filter(t => getStatus(t) === 'completed').length
 
   const slots: (BingoTask | null)[] = (() => {
@@ -786,6 +811,8 @@ function BoardScreen({
                     task={task}
                     status={getStatus(task)}
                     chained={isChainLocked(task)}
+                    chain={chainInfoOf(task)}
+                    glowing={glowSet.has(i)}
                     review={reviews[task.id]}
                     isInBingoLine={bingoSlots.has(i)}
                     display={tileDisplay}

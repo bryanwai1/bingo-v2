@@ -129,6 +129,7 @@ const ICONS: Record<string, ReactNode> = {
   team: <><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></>,
   hand: <><path d="M8 13V5a1.5 1.5 0 0 1 3 0v6M11 10V3.5a1.5 1.5 0 0 1 3 0V10M14 10V5a1.5 1.5 0 0 1 3 0v7M17 8.5a1.5 1.5 0 0 1 3 0V15a7 7 0 0 1-7 7h-1a7 7 0 0 1-5.6-2.8L3.5 15.5a1.6 1.6 0 0 1 2.4-2.1L8 15"/></>,
   cards: <><rect x="3" y="6" width="12" height="15" rx="2"/><path d="M8 3h11a2 2 0 0 1 2 2v13"/><path d="M7 12h4M7 16h4"/></>,
+  treasure: <><path d="M3 11a9 8 0 0 1 18 0v9H3v-9Z"/><path d="M3 12h18"/><rect x="10" y="10" width="4" height="5" rx="1"/></>,
   lock: <><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/><path d="M12 15.5v2"/></>,
 }
 

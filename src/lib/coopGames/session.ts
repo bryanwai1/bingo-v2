@@ -6,7 +6,7 @@ export type CoopRole = 'player' | 'observer'
 export type CoopStatus = 'lobby' | 'playing' | 'completed'
 export const MAX_OBSERVERS = 9
 
-export interface CoopMember { member_id: string; name: string; role: CoopRole }
+export interface CoopMember { member_id: string; name: string; role: CoopRole; slot?: number | null }
 export interface CoopSnapshot {
   session_id: string
   scan_id: string
@@ -25,15 +25,31 @@ export interface CoopPuzzleLogic<S, A> {
   initState(): S
   reduce(s: S, a: A): S
   isSolved(s: S): boolean
+  /** Games where both players act in the same turn (PRD-007): an action that the server
+   *  merges itself (coop_pick / coop_hide) instead of a whole-state coop_move. */
+  remote?(a: A): { kind: 'pick'; index: number } | { kind: 'hide' } | null
 }
 
-export function lobbyNeeds(members: CoopMember[]) {
+/** Players a game needs (PRD-007): Icon Matching 2, everything else 1. The server enforces the same. */
+export const playersNeeded = (gameKey?: string) => (gameKey === 'icon-matching' ? 2 : 1)
+
+export function lobbyNeeds(members: CoopMember[], gameKey?: string) {
+  const need = playersNeeded(gameKey)
   const players = members.filter(m => m.role === 'player').length
   const observers = members.filter(m => m.role === 'observer').length
   const missing: CoopRole[] = []
-  if (players < 1) missing.push('player')
+  if (players < need) missing.push('player')
   if (observers < 1) missing.push('observer')
-  return { players, observers, missing, canStart: players === 1 && observers >= 1 && observers <= MAX_OBSERVERS }
+  return { players, observers, need, missing, canStart: players === need && observers >= 1 && observers <= MAX_OBSERVERS }
+}
+
+/** What the lobby says is missing, or null when the game can start. */
+export function lobbyMessage(members: CoopMember[], gameKey?: string): string | null {
+  const n = lobbyNeeds(members, gameKey)
+  if (n.canStart) return null
+  if (n.need === 1) return `Waiting for ${n.missing.map(m => `a ${m}`).join(' and ') || 'exactly one player'}.`
+  const parts = [n.players < n.need ? `${n.need} players` : '', n.observers < 1 ? 'at least 1 observer' : ''].filter(Boolean)
+  return parts.length ? `Needs ${parts.join(' and ')}.` : `Needs exactly ${n.need} players.`
 }
 
 export function playLabel(status: CoopStatus | null): string {
@@ -41,7 +57,7 @@ export function playLabel(status: CoopStatus | null): string {
 }
 
 const CODES = ['NOT_ON_TEAM', 'PLAYER_TAKEN', 'OBSERVERS_FULL', 'LOBBY_INCOMPLETE', 'NOT_PLAYER',
-  'STALE', 'ALREADY_COMPLETED', 'NOT_PLAYING', 'NOT_ADMIN', 'NOT_IN_SESSION', 'STATE_TOO_BIG'] as const
+  'STALE', 'PICK_LOCKED', 'PICK_TAKEN', 'ALREADY_COMPLETED', 'NOT_PLAYING', 'NOT_ADMIN', 'NOT_IN_SESSION', 'STATE_TOO_BIG'] as const
 export type CoopErrorCode = typeof CODES[number] | 'UNKNOWN'
 
 export function coopErrorCode(e: unknown): CoopErrorCode {
@@ -64,6 +80,18 @@ export function createCoopApi(rpc: Rpc) {
     start: async (member: string, session: string) =>
       (await rpc('coop_start', { p_member: member, p_session: session })) as CoopSnapshot,
     leave: async (member: string, session: string) => { await rpc('coop_leave', { p_member: member, p_session: session }) },
+    /** PRD-007: each player's own pick. The server decides the slot; `init` is used only if no state exists yet. */
+    pick: async (member: string, session: string, index: number, init: unknown): Promise<MoveResult> => {
+      const r = (await rpc('coop_pick', { p_member: member, p_session: session, p_index: index, p_init: init })) as
+        { snapshot: CoopSnapshot; first_completion: boolean }
+      return { snapshot: r.snapshot, firstCompletion: r.first_completion }
+    },
+    /** End of the viewing period; safe to call from both players (no-op when nothing is shown). */
+    hide: async (member: string, session: string): Promise<MoveResult> => {
+      const r = (await rpc('coop_hide', { p_member: member, p_session: session })) as
+        { snapshot: CoopSnapshot; first_completion: boolean }
+      return { snapshot: r.snapshot, firstCompletion: r.first_completion }
+    },
     move: async (member: string, session: string, baseVersion: number, state: unknown, solved: boolean): Promise<MoveResult> => {
       const r = (await rpc('coop_move', {
         p_member: member, p_session: session, p_base_version: baseVersion, p_state: state, p_solved: solved,
@@ -85,6 +113,11 @@ export async function submitMove<S, A>(
   api: CoopApi, puzzle: CoopPuzzleLogic<S, A>, memberId: string, snap: CoopSnapshot, action: A, role: CoopRole = 'player',
 ): Promise<MoveResult | null> {
   if (role !== 'player' || snap.status !== 'playing') return null
+  const remote = puzzle.remote?.(action)
+  if (remote) {
+    return remote.kind === 'pick' ? api.pick(memberId, snap.session_id, remote.index, puzzle.initState())
+      : api.hide(memberId, snap.session_id)
+  }
   const next = puzzle.reduce(currentState(snap, puzzle), action)
   return api.move(memberId, snap.session_id, snap.version, next, puzzle.isSolved(next))
 }

@@ -245,9 +245,9 @@ export function PageForm({ page, index, hexCode, onSave, onDelete, onMoveUp, onM
 
       <div className="flex flex-col gap-4">
         {/* Pointers */}
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           {pointers.map((val, i) => (
-            <div key={i}>
+            <div key={i} className="min-w-0">
               <label className="block text-sm font-medium text-gray-600 mb-1">
                 Pointer {i + 1} {i >= 3 && <span className="text-gray-300">(optional)</span>}
               </label>
@@ -260,7 +260,7 @@ export function PageForm({ page, index, hexCode, onSave, onDelete, onMoveUp, onM
                 >
                   {icons[i] || '🔢'}
                 </button>
-                <input type="text" value={val} onChange={(e) => updatePointer(i, e.target.value)} placeholder={`Enter pointer ${i + 1}...`} className="flex-1 px-3 py-2 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                <input type="text" value={val} onChange={(e) => updatePointer(i, e.target.value)} placeholder={`Enter pointer ${i + 1}...`} className="flex-1 min-w-0 px-3 py-2 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
               </div>
               {iconPickerOpen === i && (
                 <div className="mt-1.5 bg-white border border-gray-200 rounded-xl shadow-lg overflow-hidden">

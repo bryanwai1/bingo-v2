@@ -17,6 +17,7 @@ returns boolean language sql stable security definer set search_path = public as
     select 1 from public.bingo_accounts
     where id = auth.uid() and role = 'owner' and status = 'approved'
   );
+$$;
 
 create or replace function public.is_bingo_approved()
 returns boolean language sql stable security definer set search_path = public as $$
@@ -384,7 +385,9 @@ $$;
 
 -- Owner-callable manual provisioning (accounts panel button), for accounts
 -- approved before a template existed, or to hand out a fresh copy later.
-create or replace function public.admin_clone_template_for(p_target uuid)
+-- p_template is optional: omit it to use the designated default template.
+drop function if exists public.admin_clone_template_for(uuid);
+create or replace function public.admin_clone_template_for(p_target uuid, p_template uuid default null)
 returns uuid language plpgsql security definer set search_path = public as $$
 declare
   tmpl uuid;
@@ -393,7 +396,10 @@ begin
   if not public.is_bingo_owner() then
     raise exception 'owner only';
   end if;
-  select template_section_id into tmpl from bingo_settings where id = 'main';
+  tmpl := p_template;
+  if tmpl is null then
+    select template_section_id into tmpl from bingo_settings where id = 'main';
+  end if;
   if tmpl is null then
     raise exception 'no template board designated';
   end if;
@@ -733,7 +739,7 @@ grant execute on function public.shared_section_ids() to authenticated;
 grant execute on function public.import_library_pack(uuid, uuid) to authenticated;
 -- Called directly from the Accounts page ("Give default board"). Missing from
 -- this file until 2026-09-25, so the button failed for anyone but a superuser.
-grant execute on function public.admin_clone_template_for(uuid) to authenticated;
+grant execute on function public.admin_clone_template_for(uuid, uuid) to authenticated;
 -- anon needs the two join-flow functions: the join page reads the session
 -- before signing in, and supabase-js may still carry the anon role on the
 -- first call after an anonymous sign-in.

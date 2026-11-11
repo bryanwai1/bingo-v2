@@ -1079,13 +1079,26 @@ export function BingoDashAdmin() {
     () => { try { return localStorage.getItem('bingo-admin-lib-compartment') ?? 'all' } catch { return 'all' } },
   )
   // Library: category filter, only meaningful on the "All Compartments" view
-  const [libraryCategoryFilter, setLibraryCategoryFilter] = useState<'all' | string>(
-    () => { try { return localStorage.getItem('bingo-admin-lib-category') ?? 'all' } catch { return 'all' } },
-  )
+  // Kept per board: each board's library has its own filter, so filtering on
+  // one board never changes what another board's library shows.
+  const [libraryCategoryByBoard, setLibraryCategoryByBoard] = useState<Record<string, string>>(() => {
+    try {
+      const raw = localStorage.getItem('bingo-admin-lib-category-by-board')
+      const parsed = raw ? JSON.parse(raw) : {}
+      return parsed && typeof parsed === 'object' ? parsed : {}
+    } catch { return {} }
+  })
+  const libraryFilterKey = currentSectionId ?? '_none'
+  const libraryCategoryFilter: 'all' | string = libraryCategoryByBoard[libraryFilterKey] ?? 'all'
+  const setLibraryCategoryFilter = (v: string) =>
+    setLibraryCategoryByBoard(m => ({ ...m, [libraryFilterKey]: v }))
   // Library: free-text search across card title / category / colour label.
   // Deliberately NOT persisted — a stale term silently hiding most of the
-  // library on your next visit is worse than retyping it.
-  const [librarySearch, setLibrarySearch] = useState('')
+  // library on your next visit is worse than retyping it. Per board, too.
+  const [librarySearchByBoard, setLibrarySearchByBoard] = useState<Record<string, string>>({})
+  const librarySearch = librarySearchByBoard[libraryFilterKey] ?? ''
+  const setLibrarySearch = (v: string) =>
+    setLibrarySearchByBoard(m => ({ ...m, [libraryFilterKey]: v }))
   // Which card's three-dot action menu is open (library cards)
   const [cardMenuId, setCardMenuId] = useState<string | null>(null)
   const [cardMenuPos, setCardMenuPos] = useState<{ top: number; right: number } | null>(null)
@@ -1250,8 +1263,8 @@ export function BingoDashAdmin() {
     try { localStorage.setItem('bingo-admin-lib-compartment', libraryCompartmentFilter) } catch { /* private mode */ }
   }, [libraryCompartmentFilter])
   useEffect(() => {
-    try { localStorage.setItem('bingo-admin-lib-category', libraryCategoryFilter) } catch { /* private mode */ }
-  }, [libraryCategoryFilter])
+    try { localStorage.setItem('bingo-admin-lib-category-by-board', JSON.stringify(libraryCategoryByBoard)) } catch { /* private mode */ }
+  }, [libraryCategoryByBoard])
 
   // A restored compartment can point at a board that has since been deleted,
   // or one belonging to another tenant — which would leave the library stuck
@@ -1494,12 +1507,11 @@ export function BingoDashAdmin() {
       // Sub-account cards need no check — the owner already gets them from
       // byAccount whatever board they were on.
       const sectionIds = new Set(sections.map(s => s.id))
+      // The library is the catalogue: a deleted board must not change where
+      // its cards live. They join the normal catalogue under their category.
       const orphans = libraryTasks.filter(t => !sectionIds.has(t.section_id) && isMineRow(t.owner_id))
-      const orphanGroup = orphans.length > 0 ? [{
-        section: { id: LIBRARY_ORPHAN_ID, name: 'Unassigned — board deleted', foreign: false },
-        categories: byCategory(orphans),
-        totalTasks: orphans.length,
-      }] : []
+      flat.push(...orphans)
+      const orphanGroup: typeof groups = []
 
       if (flat.length === 0) return orphanGroup
 
@@ -1557,8 +1569,12 @@ export function BingoDashAdmin() {
       if (!visibleSectionIds.has(c.section_id)) continue
       if (!seen.has(c.name)) seen.set(c.name, c.name)
     }
+    // Keep the picked category selectable even if it has since been removed.
+    if (libraryCategoryFilter !== 'all' && !seen.has(libraryCategoryFilter)) {
+      seen.set(libraryCategoryFilter, libraryCategoryFilter === '__none__' ? 'Uncategorized' : libraryCategoryFilter)
+    }
     return [...seen.entries()].map(([key, label]) => ({ key, label })).sort((a, b) => a.label.localeCompare(b.label))
-  }, [groupedLibraryAll, categories, libraryCompartmentFilter, myBoards])
+  }, [groupedLibraryAll, categories, libraryCompartmentFilter, myBoards, libraryCategoryFilter])
 
   // True when the picked category exists but holds no cards yet — drives an
   // explanatory empty state instead of a blank library.
@@ -3309,7 +3325,7 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
         onClose={() => setNavOpen(false)}
         downloadOnly={!!account?.download_only}
       />
-      <div className="flex-1 min-w-0">
+      <div className="flex-1 min-w-0 overflow-x-clip">
       {/* Header */}
       <header className="sticky top-0 z-40 border-b a-border a-surface shadow-sm">
         {/* No overflow-hidden here: the Open/Manage/account dropdowns are
@@ -3401,8 +3417,8 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
         </div>
 
         {/* ── Board tab bar ─────────────────────────────────────────────────── */}
-        <div className="max-w-6xl mx-auto px-3 sm:px-6 py-2.5 flex items-center gap-1.5 overflow-x-auto border-t a-border">
-          <span className="text-[9px] font-black a-text-3 uppercase tracking-widest mr-2 flex-shrink-0">Boards</span>
+        <div className="max-w-6xl mx-auto px-3 sm:px-6 py-2.5 flex flex-wrap sm:flex-nowrap items-center gap-1.5 sm:overflow-x-auto border-t a-border">
+          <span className="text-[9px] font-black a-text-3 uppercase tracking-widest mr-2 flex-shrink-0 w-full sm:w-auto">Boards</span>
           {myBoards.map(s => {
             const isActive = currentSectionId === s.id
             const isLive = activeBoardPointer === s.id || s.game_started
@@ -3444,7 +3460,7 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
               + New Board
             </button>
           )}
-          <div className="ml-auto flex items-center gap-2 flex-shrink-0">
+          <div className="ml-auto flex items-center gap-2 flex-shrink-0 max-sm:w-full max-sm:justify-end max-sm:pt-1">
             {currentSectionId && activeBoardPointer === currentSectionId ? (
               <span className="text-xs font-bold text-green-400 flex items-center gap-1.5 px-2.5 py-1.5 bg-green-950/50 border border-green-800 rounded-lg">
                 <span className="w-1.5 h-1.5 rounded-full bg-green-400 inline-block animate-pulse" /> Live
@@ -4021,15 +4037,15 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                 {activeBoardPointer === s.id && <span className="ml-1 text-green-400">●</span>}
               </button>
             ))}
-            <div className="ml-auto flex items-center gap-2">
-              <div className="relative">
+            <div className="sm:ml-auto flex flex-wrap items-center gap-2 w-full sm:w-auto">
+              <div className="relative w-full sm:w-auto">
                 <input
                   type="search"
                   value={librarySearch}
                   onChange={e => setLibrarySearch(e.target.value)}
                   placeholder="Search cards…"
                   aria-label="Search cards"
-                  className="w-52 pl-8 pr-3 py-1.5 rounded-full text-xs font-bold border a-border a-surface-2 a-text focus:outline-none focus:ring-2 focus:ring-teal-500"
+                  className="w-full sm:w-52 pl-8 pr-3 py-2 sm:py-1.5 rounded-full text-xs font-bold border a-border a-surface-2 a-text focus:outline-none focus:ring-2 focus:ring-teal-500"
                 />
                 <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs a-text-3 pointer-events-none">🔍</span>
               </div>
@@ -4038,7 +4054,7 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                 id="lib-cat-filter"
                 value={libraryCategoryFilter}
                 onChange={e => setLibraryCategoryFilter(e.target.value)}
-                className="px-3 py-1.5 rounded-full text-xs font-bold border a-border a-surface-2 a-text focus:outline-none focus:ring-2 focus:ring-teal-500"
+                className="px-3 py-2 sm:py-1.5 rounded-full text-xs font-bold border a-border a-surface-2 a-text focus:outline-none focus:ring-2 focus:ring-teal-500 min-w-0 flex-1 sm:flex-none"
               >
                 <option value="all">All categories</option>
                 {libraryCategoryOptions.map(c => (
@@ -4115,7 +4131,7 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                       no sibling to be told apart from. The Own/Main split does
                       need headings. */}
                   {!(section.id === LIBRARY_ALL_ID && groupedLibrary.length === 1) && (
-                  <div className="flex items-center gap-3 mb-3">
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mb-3">
                     <div className="flex items-center gap-2">
                       <h2 className="text-base font-black a-text uppercase tracking-wider">{section.name}</h2>
                       {activeBoardPointer === section.id && (
@@ -4129,8 +4145,10 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                     {section.id === LIBRARY_ORPHAN_ID && (
                       <span className="text-xs a-text-3">Their board no longer exists.</span>
                     )}
-                    <div className="flex-1 h-px a-surface/10" />
-                    {section.id === LIBRARY_ORPHAN_ID && currentSectionId && (!isOwner || canEditLibrary) && (() => {
+                    <div className="flex-1 h-px a-surface/10 hidden sm:block" />
+                    {/* Not gated on canEditLibrary: stranded cards belong to no board, so
+                        re-homing them is not an edit to the shared library. */}
+                    {section.id === LIBRARY_ORPHAN_ID && currentSectionId && (() => {
                       const target = myBoards.find(b => b.id === currentSectionId)
                       if (!target) return null
                       const ids = categoryGroups.flatMap(c => c.tasks.map(t => t.id))
@@ -4699,7 +4717,7 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                   ? 'Players can open cards and score. Open the scoreboard for the room.'
                   : 'Until you start, players see a waiting screen.'}
                 action={
-                  <div className="flex gap-2">
+                  <div className="flex flex-wrap gap-2">
                     <a href={currentBoard ? `/bingo-dash/projector/${currentBoard.slug}` : '/bingo-dash/projector'}
                        target="_blank" rel="noreferrer"
                        className={btn} style={{ background: 'var(--a-surface-2)', color: 'var(--a-text)' }}>
@@ -4722,7 +4740,7 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
         {activeTab === 'settings' && (
           <div className="max-w-3xl space-y-3">
             <div className="mb-6">
-              <h1 className="text-3xl font-black a-text tracking-tight">Board settings</h1>
+              <h1 className="text-2xl sm:text-3xl font-black a-text tracking-tight">Board settings</h1>
               <p className="a-text-2 mt-1.5 text-sm">Options for <strong>{currentBoard?.name}</strong>. Each row shows its current value.</p>
             </div>
             <AdminSection icon="⏱️" title="Bonus Timer"

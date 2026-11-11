@@ -614,10 +614,10 @@ export function BingoDashTaskEdit() {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <header className="bg-white border-b border-gray-200 px-6 py-4">
-        <div className="max-w-4xl mx-auto flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <button onClick={handleBack} className="text-gray-400 hover:text-gray-600 transition-colors">
+      <header className="bg-white border-b border-gray-200 px-3 sm:px-6 py-3 sm:py-4">
+        <div className="max-w-4xl mx-auto flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
+          <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
+            <button onClick={handleBack} className="text-gray-400 hover:text-gray-600 transition-colors shrink-0 min-h-11 pr-1">
               ← Back
             </button>
             <div className="w-6 h-6 rounded-full shrink-0" style={{ backgroundColor: task.hex_code }} />
@@ -632,22 +632,22 @@ export function BingoDashTaskEdit() {
                   if (e.key === 'Enter') handleTitleSave()
                   if (e.key === 'Escape') { setEditingTitle(false); setTitleValue(task.title) }
                 }}
-                className="text-xl font-bold text-gray-900 border-b-2 border-violet-500 outline-none bg-transparent px-1 min-w-0 w-64"
+                className="text-xl font-bold text-gray-900 border-b-2 border-violet-500 outline-none bg-transparent px-1 min-w-0 w-full sm:w-64"
               />
             ) : (
               <button
                 onClick={() => { setEditingTitle(true); setTitleValue(task.title) }}
-                className="text-xl font-bold text-gray-900 hover:text-violet-600 text-left group flex items-center gap-1.5"
+                className="text-lg sm:text-xl font-bold text-gray-900 hover:text-violet-600 text-left group flex items-center gap-1.5 min-w-0"
                 title="Click to edit title"
               >
                 {task.title}
                 <span className="text-gray-300 group-hover:text-violet-400 text-sm font-normal">✏️</span>
               </button>
             )}
-            <span className="text-sm text-gray-400">{task.color}</span>
+            <span className="text-sm text-gray-400 hidden sm:inline">{task.color}</span>
           </div>
-          <div className="flex items-center gap-2">
-            <span className={`text-xs font-bold whitespace-nowrap ${isDirty ? 'text-amber-600' : 'text-green-600'}`}>
+          <div className="flex items-center gap-2 w-full sm:w-auto">
+            <span className={`text-xs font-bold whitespace-nowrap mr-auto sm:mr-0 ${isDirty ? 'text-amber-600' : 'text-green-600'}`}>
               {isDirty ? '● Unsaved changes' : '✓ All changes saved'}
             </span>
             <button
@@ -675,7 +675,7 @@ export function BingoDashTaskEdit() {
         )}
       </header>
 
-      <main className="max-w-4xl mx-auto px-6 py-8">
+      <main className="max-w-4xl mx-auto px-3 sm:px-6 py-5 sm:py-8">
         {isNew && (
           <div className="mb-6 px-4 py-3 rounded-xl bg-violet-50 border border-violet-200 text-sm text-violet-800">
             <span className="font-bold">New challenge</span> — give it a name, pick a category, points and card type, then add instructions and photos below. Press <span className="font-bold">Save</span> when you are done; instructions, photos and links apply straight away.
@@ -684,7 +684,7 @@ export function BingoDashTaskEdit() {
 
         {task.is_board_copy && (
           <div className="mb-6 rounded-xl border border-teal-400/50 bg-teal-50 px-5 py-4 flex flex-wrap items-center gap-3">
-            <div className="flex-1 min-w-[16rem]">
+            <div className="flex-1 min-w-0 sm:min-w-[16rem]">
               <p className="text-sm font-bold text-teal-800">Board copy{copyBox ? ` for ${copyBox.boardName}` : ''}</p>
               <p className="text-xs text-teal-700 mt-0.5">
                 Everything you change here applies to this board only. The Card Library and other boards are not affected.

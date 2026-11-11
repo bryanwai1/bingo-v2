@@ -33,7 +33,7 @@ import { SignSpliceCard } from '../components/SignSpliceCard'
 import { BreakoutHuntCard } from '../components/BreakoutHuntCard'
 import { useCardDrawConfig } from '../hooks/useCardDrawConfig'
 import { RetroGamesSample } from '../components/RetroGamesSample'
-import { normalizeTileDisplay, withCategoryColors, type TileDisplay } from '../lib/bingoTileDisplay'
+import { normalizeTileDisplay, withCategoryColors, chainInfoFn, type ChainInfo, type TileDisplay } from '../lib/bingoTileDisplay'
 import { normalizeUrl } from '../lib/normalizeUrl'
 import type { BingoSection, BingoTask } from '../types/database'
 
@@ -392,7 +392,7 @@ function JoinScreen({ selected, onSelect, onJoin, theme }: {
 // ── Bingo Tile ────────────────────────────────────────────────────────────────
 
 function BingoTile({
-  task, status, chained, isInBingoLine, display, glowing, autoContrast, onClick,
+  task, status, chained, chain, isInBingoLine, display, glowing, autoContrast, onClick,
 }: {
   autoContrast?: boolean
   task: BingoTask
@@ -400,6 +400,7 @@ function BingoTile({
   /** A chained card whose prerequisite this demo team has not finished —
    *  greyed with a padlock, but still tappable. Mirrors the player board. */
   chained: boolean
+  chain?: ChainInfo | null
   isInBingoLine: boolean
   display: TileDisplay
   /** Demo only — a tile the presenter has lit up to draw the room's eye. */
@@ -426,10 +427,22 @@ function BingoTile({
         filter: chained ? 'grayscale(0.85) brightness(0.8)' : status === 'locked' && autoContrast ? 'brightness(0.82)' : undefined,
       }}
     >
+      {/* Chained card: its step in the chain, and a pulsing ring on the one
+          the team can open next. */}
+      {chain && status !== 'completed' && (
+        <>
+          {!chained && (
+            <div className="absolute inset-0 rounded-[inherit] ring-[3px] ring-inset ring-emerald-300 animate-pulse z-20 pointer-events-none" />
+          )}
+          <div className={`absolute top-0.5 left-0.5 z-20 text-[8px] font-black rounded px-1 leading-tight shadow pointer-events-none ${chained ? 'bg-black/60 text-white' : 'bg-emerald-400 text-black'}`}>
+            {chain.role === 'start' ? 'START' : `${chain.step}/${chain.total}`}
+          </div>
+        </>
+      )}
       {chained && (
         <div className="absolute inset-0 bg-black/35 flex items-center justify-center z-10 pointer-events-none">
           <div className="bg-white/85 rounded-full w-7 h-7 flex items-center justify-center shadow">
-            <span className="text-sm leading-none">🔒</span>
+            {chain?.role === 'end' ? <img src="/grab/icons/treasure.png" alt="" draggable={false} className="w-[80%] h-[80%] object-contain" /> : <span className="text-sm leading-none">🔒</span>}
           </div>
         </div>
       )}
@@ -467,7 +480,7 @@ function BingoTile({
       )}
 
       {/* Icon or words — whichever this board is set to in the admin */}
-      <TileFace task={task} display={display} autoContrast={autoContrast} chip={(task.points ?? 0) > 0 ? 'tl' : null} />
+      <TileFace task={chain?.role === 'end' ? { ...task, tile_icon: 'treasure' } : task} display={display} autoContrast={autoContrast} chip={(task.points ?? 0) > 0 ? 'tl' : null} />
 
       {/* Points chip — top-left corner, clear of the title and the top-right scanned ring */}
       {(task.points ?? 0) > 0 && (
@@ -652,6 +665,7 @@ const BoardScreen = forwardRef<BoardScreenHandle, {
   const isChainLocked = (task: BingoTask) =>
     !!task.prerequisite_task_id && scanState[task.prerequisite_task_id] !== 'completed'
 
+  const chainInfoOf = chainInfoFn(visibleTasks)
   const slots = buildSlots(visibleTasks)
   const completedCount = slots.reduce(
     (n, t, i) => (t && getStatusAt(t.id, i) === 'completed' ? n + 1 : n), 0,
@@ -861,6 +875,7 @@ const BoardScreen = forwardRef<BoardScreenHandle, {
                     task={task}
                     status={getStatusAt(task.id, i)}
                     chained={isChainLocked(task)}
+                    chain={chainInfoOf(task)}
                     isInBingoLine={bingoSlots.has(i)}
                     display={tileDisplay}
                     autoContrast={theme === 'grab'}

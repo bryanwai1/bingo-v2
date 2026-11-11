@@ -1,3 +1,4 @@
+import { ChainTrail, type TrailStep } from '../components/ChainTrail'
 import { useEffect, useState, useRef, useCallback, useMemo } from 'react'
 import { parseAnswerBlocks } from '../lib/answerBlocks'
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
@@ -145,6 +146,8 @@ export function BingoDashParticipant() {
     prevDone: boolean
     next: { id: string; title: string } | null
   }>({ prev: null, prevDone: true, next: null })
+  // Every card in this card's chain, in order, for the "Step n of N" trail.
+  const [trail, setTrail] = useState<TrailStep[]>([])
   // A card whose answer belongs to the item the team drew (Escape the Mall's
   // riddle) rather than to the card as a whole.
   const [guess, setGuess] = useState('')
@@ -257,6 +260,33 @@ export function BingoDashParticipant() {
         supabase.from('bingo_tasks').select('id, title').eq('prerequisite_task_id', task.id).eq('section_id', task.section_id).limit(1).maybeSingle(),
       ])
       if (cancelled) return
+      // The whole chain: walk back to the first card, then forward. Board copies
+      // can be named by either their own id or the library card they came from.
+      const [secRes, doneAllRes] = await Promise.all([
+        supabase.from('bingo_tasks').select('id, title, prerequisite_task_id, cloned_from').eq('section_id', task.section_id).not('prerequisite_task_id', 'is', null),
+        supabase.from('bingo_scans').select('task_id').eq('team_id', team.id).eq('completed', true),
+      ])
+      if (cancelled) return
+      const rows = (secRes.data ?? []) as { id: string; title: string; prerequisite_task_id: string; cloned_from: string | null }[]
+      const doneIds = new Set((doneAllRes.data ?? []).map(r => (r as { task_id: string }).task_id))
+      const byPrereq = new Map<string, typeof rows[number]>()
+      for (const r of rows) byPrereq.set(r.prerequisite_task_id, r)
+      let firstId = task.id, firstTitle = task.title, guard = 0
+      const titleOf = new Map<string, string>([[task.id, task.title]])
+      for (const r of rows) titleOf.set(r.id, r.title)
+      for (let cur: string | null = task.prerequisite_task_id ?? null; cur && guard < 50; guard++) {
+        firstId = cur
+        const known = rows.find(r => r.id === cur)
+        if (known) { firstTitle = known.title; cur = known.prerequisite_task_id } else { firstTitle = prevRes.data ? (prevRes.data as { title: string }).title : firstTitle; cur = null }
+      }
+      const steps: TrailStep[] = [{ id: firstId, title: firstTitle, done: doneIds.has(firstId) }]
+      for (let cur = firstId, g = 0; g < 50; g++) {
+        const nxt = byPrereq.get(cur)
+        if (!nxt) break
+        steps.push({ id: nxt.id, title: nxt.title, done: doneIds.has(nxt.id) })
+        cur = nxt.id
+      }
+      setTrail(steps.some(x => x.id === task.id) ? steps : [])
       setChain({
         prev: (prevRes.data as { id: string; title: string; hex_code: string } | null) ?? null,
         prevDone: !prereqId || !!doneRes.data,
@@ -274,6 +304,7 @@ export function BingoDashParticipant() {
         ({ new: updated }) => {
           const row = updated as Partial<BingoScan>
           if (!row.completed) return
+          setTrail(t => t.map(x => (x.id === row.task_id ? { ...x, done: true } : x)))
           if (prereqId && row.task_id === prereqId) setChain(c => ({ ...c, prevDone: true }))
           if (row.task_id === task.id) setScanRecord(prev => (prev && prev.id === row.id ? { ...prev, completed: true } : prev))
         }
@@ -1267,6 +1298,8 @@ export function BingoDashParticipant() {
             </div>
           )
         })()}
+
+        <ChainTrail steps={trail} currentId={task.id} onOpen={id => navigate(`/bingo-dash/task/${id}`)} />
 
         {/* Observer notice */}
         {isObserver && (

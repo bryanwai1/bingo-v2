@@ -950,3 +950,17 @@ html.admin-dark { --a-info: #7dd3fc; --a-info-soft: #0c2d40; }
 .a-menu svg { width: 14px; height: 14px; flex: none; }
 details.a-details > summary { list-style: none; cursor: pointer; }
 details.a-details > summary::-webkit-details-marker { display: none; }
+
+/* Phones: the row menus are anchored to their trigger, which in the stacked
+   team cards runs off one side of the screen or the other. Anchor them to the
+   enclosing card instead and stretch them across it, so they always fit. */
+@media (max-width: 767px) {
+  .a-details { position: static !important; }
+  .a-menu { position: absolute; left: .5rem; right: .5rem; width: auto; min-width: 11rem; max-width: none;
+    max-height: 60dvh; overflow-y: auto; box-shadow: 0 10px 40px rgba(0,0,0,.35); padding: .5rem; }
+  .a-menu button, .a-menu label { min-height: 44px; font-size: .875rem; }
+}
+
+/* Text fields have an intrinsic width (~200px) that stops a `flex-1` input
+   from shrinking, which pushed whole pages wider than a phone. Let them shrink. */
+input, select, textarea { min-width: 0; max-width: 100%; }

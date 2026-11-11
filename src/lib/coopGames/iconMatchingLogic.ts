@@ -16,8 +16,10 @@ export interface IconState {
   flipped: number[]    // 0 to 2 positions turned over and not matched
   matched: number[]
   last: 'match' | 'miss' | null
+  /** PRD-007: each player's pick of the current turn, by player slot (0 or 1). Absent in older sessions. */
+  picks?: Record<string, number>
 }
-export type IconAction = { type: 'flip'; index: number } | { type: 'hide' }
+export type IconAction = { type: 'flip'; index: number } | { type: 'pick'; index: number; slot: number } | { type: 'hide' }
 
 function shuffle<T>(xs: T[], rng: () => number): T[] {
   const a = [...xs]
@@ -34,10 +36,24 @@ export function createIconMatching(
     key: 'icon-matching',
     initState: () => {
       const icons = shuffle(ICON_POOL, rng).slice(0, n / 2)
-      return { v: 1, cols: board.cols, cards: shuffle([...icons, ...icons], rng), flipped: [], matched: [], last: null }
+      return { v: 1, cols: board.cols, cards: shuffle([...icons, ...icons], rng), flipped: [], matched: [], last: null, picks: {} }
     },
+    remote: a => (a.type === 'pick' ? { kind: 'pick', index: a.index } : a.type === 'hide' ? { kind: 'hide' } : null),
     reduce: (s, a) => {
-      if (a.type === 'hide') return s.flipped.length === 2 ? { ...s, flipped: [], last: null } : s
+      if (a.type === 'hide') return s.flipped.length === 2 ? { ...s, flipped: [], last: null, picks: {} } : s
+      if (a.type === 'pick') {
+        // Mirror of coop_pick on the server: one locked pick per player, never the other player's card.
+        const i = a.index, mine = String(a.slot), other = String(1 - a.slot)
+        const picks = s.picks ?? {}
+        if (!Number.isInteger(i) || i < 0 || i >= s.cards.length || (a.slot !== 0 && a.slot !== 1)) return s
+        if (s.flipped.length >= 2 || s.matched.includes(i) || mine in picks || picks[other] === i) return s
+        const both = { ...picks, [mine]: i }
+        if (!(other in picks)) return { ...s, picks: both, last: null }
+        const x = both['0'], y = both['1']
+        return s.cards[x] === s.cards[y]
+          ? { ...s, flipped: [], matched: [...s.matched, x, y], last: 'match', picks: {} }
+          : { ...s, flipped: [x, y], last: 'miss', picks: {} }
+      }
       const i = a.index
       if (!Number.isInteger(i) || i < 0 || i >= s.cards.length) return s
       if (s.flipped.length >= 2 || s.flipped.includes(i) || s.matched.includes(i)) return s

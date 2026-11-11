@@ -74,7 +74,7 @@ export function useCoopSession(memberId: string | null, scanId: string | null) {
     } catch (e) {
       const c = coopErrorCode(e)
       setError(c)
-      if (c === 'STALE' || c === 'ALREADY_COMPLETED') void refetch()
+      if (c === 'STALE' || c === 'ALREADY_COMPLETED' || c === 'PICK_LOCKED' || c === 'PICK_TAKEN') void refetch()
       return null
     } finally { setBusy(false) }
   }, [nudge, refetch])

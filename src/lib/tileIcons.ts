@@ -34,6 +34,7 @@ export const TILE_ICON_POOL: ReadonlyArray<{ key: string; label: string }> = [
   { key: 'book', label: 'Book' },
   { key: 'quiz', label: 'Question' },
   { key: 'lock', label: 'Lock' },
+  { key: 'treasure', label: 'Treasure' },
   { key: 'math', label: 'Maths' },
   { key: 'cpu', label: 'Tech' },
   { key: 'sparkles', label: 'Sparkles' },
@@ -68,6 +69,7 @@ export const GRAB_ICON_FILES: Readonly<Record<string, string>> = {
   grab_growth: '/grab/icons/icon-19.png',
   grab_tools: '/grab/icons/icon-20.png',
   grab_ticket: '/grab/icons/icon-21.png',
+  treasure: '/grab/icons/treasure.png',
 }
 
 export const GRAB_ICON_POOL: ReadonlyArray<{ key: string; label: string }> = [
