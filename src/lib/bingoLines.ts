@@ -130,3 +130,25 @@ export function scoreWithBingoLines(
 
   return { total, tilePoints, lineBonus, bingos: lineOrder.length }
 }
+
+// ── Which lines this team has already been congratulated for ─────────────────
+// Kept on the device, per team. The board screen remounts every time a player
+// comes back from a card page, and its in-memory memory of "already celebrated"
+// went with it - so an old line (B) popped up again after finishing any other
+// card. A line pops up once, the first time it is completed, and never again
+// until a NEW line is completed (then BI, and so on).
+const celebratedKey = (teamId: string) => `bingo-celebrated-lines-${teamId}`
+
+/** Line indices already celebrated, or null if this device has never recorded any. */
+export function loadCelebratedLines(teamId: string): Set<number> | null {
+  try {
+    const raw = localStorage.getItem(celebratedKey(teamId))
+    if (raw === null) return null
+    const arr = JSON.parse(raw)
+    return Array.isArray(arr) ? new Set(arr.filter((n): n is number => typeof n === 'number')) : null
+  } catch { return null }
+}
+
+export function saveCelebratedLines(teamId: string, lines: Set<number>): void {
+  try { localStorage.setItem(celebratedKey(teamId), JSON.stringify([...lines])) } catch { /* private mode */ }
+}

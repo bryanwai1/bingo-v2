@@ -1,3 +1,4 @@
+import { loadCelebratedLines, saveCelebratedLines } from '../lib/bingoLines'
 import { useEffect, useRef, useState, useMemo } from 'react'
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
@@ -682,8 +683,14 @@ function BoardScreen({
   // multiple lines at once.
   useEffect(() => {
     if (celebratedLinesRef.current === null) {
-      celebratedLinesRef.current = new Set(completedLineIndices)
-      return
+      // Remember across visits to the board: coming back from a card page must
+      // not celebrate a line the team was already congratulated for.
+      const stored = loadCelebratedLines(team.id)
+      celebratedLinesRef.current = stored ?? new Set(completedLineIndices)
+      if (stored === null) {
+        saveCelebratedLines(team.id, celebratedLinesRef.current)
+        return
+      }
     }
     const newLines: number[] = []
     completedLineIndices.forEach(idx => {
@@ -692,6 +699,7 @@ function BoardScreen({
     if (newLines.length === 0) return
     const baseSize = celebratedLinesRef.current.size
     newLines.forEach(idx => celebratedLinesRef.current!.add(idx))
+    saveCelebratedLines(team.id, celebratedLinesRef.current)
     const queued = newLines.map((_, i) =>
       BINGO_WORD.slice(0, Math.min(baseSize + i + 1, 5))
     )
