@@ -163,6 +163,27 @@ export function BingoDashAccounts() {
     } finally { setBusyId(null) }
   }
 
+  // Bring boards that were given to an account back in step with the board they
+  // were copied from (cards, unlock chain, colours, pages ...). Teams, scores and
+  // progress are kept. One account, or every account when `a` is null.
+  const syncBoards = async (a: BingoAccount | null) => {
+    if (!confirm(a
+      ? `Update ${a.email ?? 'this account'}'s given board(s) to match the board they were copied from? Their teams and scores are kept.`
+      : 'Update EVERY given board to match the board it was copied from? All teams and scores are kept.')) return
+    setBusyId(a?.id ?? 'sync-all')
+    setNotice('')
+    try {
+      const { data, error } = await supabase.rpc('owner_sync_account_boards', { p_account: a?.id ?? null })
+      if (error) throw error
+      const n = (data as { boards?: number } | null)?.boards ?? 0
+      setNotice(n === 0
+        ? 'Nothing to sync: no board here remembers its source yet (only boards given after the sync SQL was run do).'
+        : `Synced ${n} board${n === 1 ? '' : 's'}${a ? ` for ${a.email ?? 'the account'}` : ''}. Teams and scores were not touched.`)
+    } catch (err) {
+      setNotice(`Could not sync: ${errText(err)}`)
+    } finally { setBusyId(null) }
+  }
+
   const endFacilitatorAccess = async (a: BingoAccount) => {
     setBusyId(a.id)
     try {
@@ -296,6 +317,11 @@ export function BingoDashAccounts() {
               className="px-3 py-1.5 rounded-xl text-xs font-bold a-text border border-white/20 hover:bg-white/10 transition-colors disabled:opacity-40">
               {pickedBoard[a.id] ? 'Give board' : 'Give default board'}
             </button>
+            <button onClick={() => syncBoards(a)} disabled={busyId === a.id}
+              title="Update this account's given board to match the board it was copied from — keeps their teams and scores"
+              className="px-3 py-1.5 rounded-xl text-xs font-bold a-text border border-teal-400/40 hover:bg-teal-500/20 transition-colors disabled:opacity-40">
+              Sync board
+            </button>
           </div>
         </div>
       )}
@@ -410,6 +436,18 @@ export function BingoDashAccounts() {
               usage={accounts.reduce<Record<string, number>>((m, x) => { if (x.role !== 'owner') m[x.plan ?? 'trial'] = (m[x.plan ?? 'trial'] ?? 0) + 1; return m }, {})}
               onChanged={load}
             />
+
+            <section className="px-4 py-4 rounded-2xl a-surface-2 border a-border">
+              <h2 className="a-text text-sm font-black uppercase tracking-widest mb-2">Sync given boards</h2>
+              <p className="a-text-3 text-xs mb-3">
+                Changed a card, the unlock chain or a colour on your board? Push it to every board you already gave out —
+                no need to give a new one. Teams, scores and progress are kept; nothing is deleted.
+              </p>
+              <button onClick={() => syncBoards(null)} disabled={busyId === 'sync-all'}
+                className="px-4 py-2 rounded-xl text-sm font-black bg-teal-600 hover:bg-teal-500 a-text transition-colors disabled:opacity-40">
+                {busyId === 'sync-all' ? 'Syncing…' : 'Sync all given boards'}
+              </button>
+            </section>
 
             <section className="px-4 py-4 rounded-2xl a-surface-2 border a-border">
               <h2 className="a-text text-sm font-black uppercase tracking-widest mb-2">Default board template</h2>
