@@ -1290,21 +1290,27 @@ export function BingoDashParticipant() {
             neighbours: the card that has to be finished first while this one
             is locked, and the card this one unlocks once something has been
             sent (it opens on its own when the marshal approves). */}
+        {links.length > 0 && (
+          <div className="mt-8 animate-slide-up">
+            <TaskLinkButtons links={links} hexCode={task.hex_code} heading="Use these links to complete your tasks" />
+          </div>
+        )}
+
+        <ChainTrail steps={trail} currentId={task.id} onOpen={id => navigate(`/bingo-dash/task/${id}`)} />
+
+        {/* The hand-off to the next card sits under the whole trail, so the
+            team reads where they are first and the way forward last. */}
         {(() => {
           const submitted = !!scanRecord?.completed || photoSubmitted || photosSent > 0 || linkSent
-          const items: LinkItem[] = [...links]
-          if (chain.next && !chainLocked && submitted) {
-            items.push({ id: 'chain-next', label: chain.next.title, url: '', to: `/bingo-dash/task/${chain.next.id}`,
-              icon: '🎬', sub: scanRecord?.completed ? 'Unlocked - your next card' : 'Next card - opens once approved' })
-          }
-          return items.length > 0 && (
-            <div className="mt-8 animate-slide-up">
-              <TaskLinkButtons links={items} hexCode={task.hex_code} heading="Use these links to complete your tasks" />
+          if (!chain.next || chainLocked || !submitted) return null
+          const nextItem: LinkItem = { id: 'chain-next', label: chain.next.title, url: '', to: `/bingo-dash/task/${chain.next.id}`,
+            icon: '🎬', sub: scanRecord?.completed ? 'Unlocked - your next card' : 'Next card - opens once approved' }
+          return (
+            <div className="mt-4 animate-slide-up">
+              <TaskLinkButtons links={[nextItem]} hexCode={task.hex_code} heading="Next card" />
             </div>
           )
         })()}
-
-        <ChainTrail steps={trail} currentId={task.id} onOpen={id => navigate(`/bingo-dash/task/${id}`)} />
 
         {/* Observer notice */}
         {isObserver && (
