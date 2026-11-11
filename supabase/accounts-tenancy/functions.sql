@@ -323,8 +323,13 @@ begin
         'id', new_task,
         'section_id', new_section,
         'owner_id', p_target_owner,
-        'cloned_from', r.id,
-        'is_board_copy', false,
+        -- Board-only copies: they belong to this board, are hidden from the
+        -- account's Card Library, and are deleted with the board. (As library
+        -- cards, every "Give board" left ~25 duplicates behind in the library,
+        -- and deleting the board did not remove them.) No lineage to the
+        -- template's card, which belongs to another account.
+        'cloned_from', null,
+        'is_board_copy', true,
         'created_at', now()
       ))).*;
     new_ids := new_ids || new_task;
