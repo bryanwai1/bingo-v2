@@ -17,7 +17,7 @@ import { WaitingTiger } from '../components/WaitingTiger'
 import { activeFaces, faceName, faceColor, normaliseFaceCount } from '../lib/cubeFaces'
 import { tasksForFace } from '../lib/boardCards'
 import { normalizePlayerTheme, GRAB_GREEN, type PlayerTheme } from '../lib/playerThemes'
-import { normalizeTileDisplay, withCategoryColors, chainInfoFn, type ChainInfo, type TileDisplay } from '../lib/bingoTileDisplay'
+import { normalizeTileDisplay, withCategoryColors, chainInfoFn, prereqResolver, type ChainInfo, type TileDisplay } from '../lib/bingoTileDisplay'
 import type { BingoTask, BingoScan, BingoSection, BingoTeam, BoardTimer } from '../types/database'
 
 function formatTime(totalSeconds: number): string {
@@ -552,9 +552,11 @@ function BoardScreen({
     return 'locked'
   }
   // Chained cards grey out until the team has finished the card they follow.
-  const isChainLocked = (task: BingoTask) =>
-    !!task.prerequisite_task_id &&
-    !scans.some(s => s.task_id === task.prerequisite_task_id && s.completed)
+  const prereqOf = prereqResolver(gridTasks)
+  const isChainLocked = (task: BingoTask) => {
+    const p = prereqOf(task)
+    return !!p && !scans.some(s => s.task_id === p && s.completed)
+  }
   const chainInfoOf = chainInfoFn(visibleTasks)
   const glowSet = new Set<number>((settings as { glow_slots?: number[] | null } | null)?.glow_slots ?? [])
   const completedCount = visibleTasks.filter(t => getStatus(t) === 'completed').length

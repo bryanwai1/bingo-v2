@@ -1,4 +1,5 @@
 import { ChainTrail, type TrailStep } from '../components/ChainTrail'
+import { prereqResolver } from '../lib/bingoTileDisplay'
 import { useEffect, useState, useRef, useCallback, useMemo } from 'react'
 import { parseAnswerBlocks } from '../lib/answerBlocks'
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
@@ -245,52 +246,56 @@ export function BingoDashParticipant() {
 
   // Resolve the chain around this card, and watch the previous card's
   // completion so this one opens the moment the marshal approves it.
+  // The chain is read from the cards actually on this team's board. A card's
+  // prerequisite may name the board copy or the library card it was copied
+  // from, so each link is matched by either id (see prereqResolver).
   const prereqId = task?.prerequisite_task_id ?? null
   useEffect(() => {
     if (!task || !team) return
     let cancelled = false
+    let prevCardId: string | null = null
+    type Card = { id: string; title: string; hex_code: string; prerequisite_task_id: string | null; cloned_from: string | null }
+    const cols = 'id, title, hex_code, prerequisite_task_id, cloned_from'
     ;(async () => {
-      const [prevRes, doneRes, nextRes] = await Promise.all([
-        prereqId
-          ? supabase.from('bingo_tasks').select('id, title, hex_code').eq('id', prereqId).maybeSingle()
-          : Promise.resolve({ data: null }),
-        prereqId
-          ? supabase.from('bingo_scans').select('id').eq('team_id', team.id).eq('task_id', prereqId).eq('completed', true).limit(1).maybeSingle()
-          : Promise.resolve({ data: null }),
-        supabase.from('bingo_tasks').select('id, title').eq('prerequisite_task_id', task.id).eq('section_id', task.section_id).limit(1).maybeSingle(),
-      ])
+      const bc = await supabase.from('bingo_board_cards').select('task_id').eq('section_id', team.section_id)
+      const ids = (bc.data ?? []).map(r => (r as { task_id: string }).task_id)
+      const cardsRes = ids.length > 0
+        ? await supabase.from('bingo_tasks').select(cols).in('id', ids)
+        : await supabase.from('bingo_tasks').select(cols).eq('section_id', task.section_id)
+      const doneRes = await supabase.from('bingo_scans').select('task_id').eq('team_id', team.id).eq('completed', true)
       if (cancelled) return
-      // The whole chain: walk back to the first card, then forward. Board copies
-      // can be named by either their own id or the library card they came from.
-      const [secRes, doneAllRes] = await Promise.all([
-        supabase.from('bingo_tasks').select('id, title, prerequisite_task_id, cloned_from').eq('section_id', task.section_id).not('prerequisite_task_id', 'is', null),
-        supabase.from('bingo_scans').select('task_id').eq('team_id', team.id).eq('completed', true),
-      ])
-      if (cancelled) return
-      const rows = (secRes.data ?? []) as { id: string; title: string; prerequisite_task_id: string; cloned_from: string | null }[]
-      const doneIds = new Set((doneAllRes.data ?? []).map(r => (r as { task_id: string }).task_id))
-      const byPrereq = new Map<string, typeof rows[number]>()
-      for (const r of rows) byPrereq.set(r.prerequisite_task_id, r)
-      let firstId = task.id, firstTitle = task.title, guard = 0
-      const titleOf = new Map<string, string>([[task.id, task.title]])
-      for (const r of rows) titleOf.set(r.id, r.title)
-      for (let cur: string | null = task.prerequisite_task_id ?? null; cur && guard < 50; guard++) {
-        firstId = cur
-        const known = rows.find(r => r.id === cur)
-        if (known) { firstTitle = known.title; cur = known.prerequisite_task_id } else { firstTitle = prevRes.data ? (prevRes.data as { title: string }).title : firstTitle; cur = null }
+      const cards = [...((cardsRes.data ?? []) as Card[])]
+      if (!cards.some(c => c.id === task.id)) {
+        cards.push({ id: task.id, title: task.title, hex_code: task.hex_code, prerequisite_task_id: task.prerequisite_task_id ?? null, cloned_from: task.cloned_from ?? null })
       }
-      const steps: TrailStep[] = [{ id: firstId, title: firstTitle, done: doneIds.has(firstId) }]
-      for (let cur = firstId, g = 0; g < 50; g++) {
-        const nxt = byPrereq.get(cur)
-        if (!nxt) break
-        steps.push({ id: nxt.id, title: nxt.title, done: doneIds.has(nxt.id) })
-        cur = nxt.id
+      const doneIds = new Set((doneRes.data ?? []).map(r => (r as { task_id: string }).task_id))
+      const prereqOf = prereqResolver(cards)
+      const byId = new Map(cards.map(c => [c.id, c]))
+      const nextOf = new Map<string, Card>()
+      for (const c of cards) { const p = prereqOf(c); if (p && !nextOf.has(p)) nextOf.set(p, c) }
+
+      // The whole chain: walk back to the first card, then forward.
+      let first = byId.get(task.id)!
+      for (let g = 0; g < 100; g++) {
+        const p = prereqOf(first)
+        const prevCard = p ? byId.get(p) : undefined
+        if (!prevCard) break
+        first = prevCard
       }
-      setTrail(steps.some(x => x.id === task.id) ? steps : [])
+      const steps: TrailStep[] = []
+      for (let cur: Card | undefined = first, g = 0; cur && g < 100; g++) {
+        steps.push({ id: cur.id, title: cur.title, done: doneIds.has(cur.id) })
+        cur = nextOf.get(cur.id)
+      }
+      const prevId = prereqOf(task)
+      const prevCard = prevId ? byId.get(prevId) ?? null : null
+      prevCardId = prevCard?.id ?? null
+      const nextCard = nextOf.get(task.id) ?? null
+      setTrail(steps.length > 1 && steps.some(x => x.id === task.id) ? steps : [])
       setChain({
-        prev: (prevRes.data as { id: string; title: string; hex_code: string } | null) ?? null,
-        prevDone: !prereqId || !!doneRes.data,
-        next: (nextRes.data as { id: string; title: string } | null) ?? null,
+        prev: prevCard ? { id: prevCard.id, title: prevCard.title, hex_code: prevCard.hex_code } : null,
+        prevDone: !prevCard || doneIds.has(prevCard.id),
+        next: nextCard ? { id: nextCard.id, title: nextCard.title } : null,
       })
     })()
     // One subscription on the team's scans covers both ends of the chain:
@@ -305,7 +310,7 @@ export function BingoDashParticipant() {
           const row = updated as Partial<BingoScan>
           if (!row.completed) return
           setTrail(t => t.map(x => (x.id === row.task_id ? { ...x, done: true } : x)))
-          if (prereqId && row.task_id === prereqId) setChain(c => ({ ...c, prevDone: true }))
+          if (prevCardId && row.task_id === prevCardId) setChain(c => ({ ...c, prevDone: true }))
           if (row.task_id === task.id) setScanRecord(prev => (prev && prev.id === row.id ? { ...prev, completed: true } : prev))
         }
       )

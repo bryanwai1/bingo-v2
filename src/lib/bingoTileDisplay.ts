@@ -112,6 +112,22 @@ export interface ChainInfo {
   total: number
 }
 
+/**
+ * Which card on this board a card's prerequisite really is. A prerequisite may
+ * name the board copy itself or the library original that copy came from (a
+ * board copied from another keeps pointing at the originals), so match both.
+ * Returns null when the prerequisite is not on this board — such a card is not
+ * chained here and must never be locked behind a card nobody can complete.
+ */
+export function prereqResolver(tasks: ReadonlyArray<ChainTask>) {
+  const byKey = new Map<string, string>()
+  for (const t of tasks) { byKey.set(t.id, t.id); if (t.cloned_from) byKey.set(t.cloned_from, t.id) }
+  return (t: ChainTask): string | null => {
+    const p = t.prerequisite_task_id ? byKey.get(t.prerequisite_task_id) : undefined
+    return p && p !== t.id ? p : null
+  }
+}
+
 export function chainInfoFn(tasks: ReadonlyArray<ChainTask>) {
   // A board holds copies of library cards, and a prerequisite may name either
   // the copy or the library original it was cloned from — match both.

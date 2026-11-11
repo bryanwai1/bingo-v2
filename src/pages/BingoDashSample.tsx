@@ -33,7 +33,7 @@ import { SignSpliceCard } from '../components/SignSpliceCard'
 import { BreakoutHuntCard } from '../components/BreakoutHuntCard'
 import { useCardDrawConfig } from '../hooks/useCardDrawConfig'
 import { RetroGamesSample } from '../components/RetroGamesSample'
-import { normalizeTileDisplay, withCategoryColors, chainInfoFn, type ChainInfo, type TileDisplay } from '../lib/bingoTileDisplay'
+import { normalizeTileDisplay, withCategoryColors, chainInfoFn, prereqResolver, type ChainInfo, type TileDisplay } from '../lib/bingoTileDisplay'
 import { normalizeUrl } from '../lib/normalizeUrl'
 import type { BingoSection, BingoTask } from '../types/database'
 
@@ -662,8 +662,11 @@ const BoardScreen = forwardRef<BoardScreenHandle, {
     quickWinSlots.has(slotIdx) ? 'completed' : getStatus(taskId)
   // Chained cards grey out until the demo team has completed the card they
   // follow — same rule as the player board, read from the demo's own state.
-  const isChainLocked = (task: BingoTask) =>
-    !!task.prerequisite_task_id && scanState[task.prerequisite_task_id] !== 'completed'
+  const prereqOf = prereqResolver(gridTasks)
+  const isChainLocked = (task: BingoTask) => {
+    const p = prereqOf(task)
+    return !!p && scanState[p] !== 'completed'
+  }
 
   const chainInfoOf = chainInfoFn(visibleTasks)
   const slots = buildSlots(visibleTasks)
@@ -2490,9 +2493,9 @@ function SampleProjector() {
           completed={scanState[openTask.id] === 'completed'}
           bonusDefaults={selectedSection ?? undefined}
           chain={{
-            prev: gridTasks.find(t => t.id === openTask.prerequisite_task_id) ?? null,
-            locked: !!openTask.prerequisite_task_id && scanState[openTask.prerequisite_task_id] !== 'completed',
-            next: gridTasks.find(t => t.prerequisite_task_id === openTask.id) ?? null,
+            prev: gridTasks.find(t => t.id === prereqResolver(gridTasks)(openTask)) ?? null,
+            locked: (() => { const p = prereqResolver(gridTasks)(openTask); return !!p && scanState[p] !== 'completed' })(),
+            next: gridTasks.find(t => prereqResolver(gridTasks)(t) === openTask.id) ?? null,
           }}
           onJump={handleOpenTask}
           onComplete={() => markComplete(openTask.id)}
@@ -3065,10 +3068,9 @@ function SampleController({ code, readOnly = false }: { code: string; readOnly?:
               /* Same chain the projector builds - it comes from gridTasks and
                  scanState, both of which a viewer already has. */
               chain={{
-                prev: gridTasks.find(t => t.id === openTaskObj.prerequisite_task_id) ?? null,
-                locked: !!openTaskObj.prerequisite_task_id
-                  && scanState[openTaskObj.prerequisite_task_id] !== 'completed',
-                next: gridTasks.find(t => t.prerequisite_task_id === openTaskObj.id) ?? null,
+                prev: gridTasks.find(t => t.id === prereqResolver(gridTasks)(openTaskObj)) ?? null,
+                locked: (() => { const p = prereqResolver(gridTasks)(openTaskObj); return !!p && scanState[p] !== 'completed' })(),
+                next: gridTasks.find(t => prereqResolver(gridTasks)(t) === openTaskObj.id) ?? null,
               }}
               onJump={() => {}}
               onComplete={() => {}}
