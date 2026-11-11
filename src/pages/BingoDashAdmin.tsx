@@ -1483,9 +1483,12 @@ export function BingoDashAdmin() {
       const keptIdByKey = new Map<string, string>()
       for (const g of groups) {
         const mine: BingoTask[] = []
+        // A tenant's own cards must not swallow same-titled house cards: their
+        // Main Library has to match the owner's house library exactly.
+        const ownShelf = !isOwner && !g.section.foreign
         for (const c of g.categories) {
           for (const t of c.tasks) {
-            if (claimed.has(keyOf(t))) {
+            if (!ownShelf && claimed.has(keyOf(t))) {
               const keptId = keptIdByKey.get(keyOf(t))
               if (keptId) hiddenByTaskId.set(keptId, (hiddenByTaskId.get(keptId) ?? 0) + 1)
               continue
@@ -1494,7 +1497,7 @@ export function BingoDashAdmin() {
           }
         }
         // Claim after the whole group, so duplicates inside one board survive.
-        for (const t of mine) {
+        for (const t of (ownShelf ? [] : mine)) {
           claimed.add(keyOf(t))
           if (!keptIdByKey.has(keyOf(t))) keptIdByKey.set(keyOf(t), t.id)
         }
@@ -1531,7 +1534,8 @@ export function BingoDashAdmin() {
       // a tenant admin had just created vanish from the shared library, as
       // though it had not been added to the pool at all.
       const own = flat.filter(t => isMineRow(t.owner_id))
-      const shared = flat
+      // Exactly the owner's house library: none of this account's own cards.
+      const shared = flat.filter(t => !isMineRow(t.owner_id))
       const out: typeof groups = []
       if (own.length > 0) {
         out.push({
@@ -1637,7 +1641,9 @@ export function BingoDashAdmin() {
       for (const t of fresh) claimed.add(key(t))
       total += fresh.length
     }
-    for (const section of myBoards) {
+    // A tenant's Main Library is the house library only (own cards are listed
+    // separately under Own Library), so the chip counts just that.
+    if (isOwner) for (const section of myBoards) {
       countBucket(tasks.filter(t => t.section_id === section.id && isMineRow(t.owner_id)))
     }
     if (isOwner) {
@@ -1655,7 +1661,7 @@ export function BingoDashAdmin() {
     }
     // The Unassigned group, counted in full like it is listed (no dedupe).
     const sectionIds = new Set(sections.map(s => s.id))
-    total += tasks.filter(t => !t.is_board_copy && !sectionIds.has(t.section_id) && isMineRow(t.owner_id)).length
+    if (isOwner) total += tasks.filter(t => !t.is_board_copy && !sectionIds.has(t.section_id) && isMineRow(t.owner_id)).length
     return total
   }, [tasks, myBoards, isOwner, isMineRow, myOwnerValue, sections])
 
@@ -4365,7 +4371,7 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                                       {blurbByTask.get(task.id)}
                                     </p>
                                   )}
-                                  {section.foreign && !isOwner ? (
+                                  {(section.foreign || libraryCompartmentFilter === 'all') && !isOwner ? (
                                     task.category && (
                                       <p className="mt-1.5 text-xs" style={{ color: ink.faint }}>📂 {task.category}</p>
                                     )
@@ -4396,7 +4402,7 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                                       {scanStatsByTask.get(task.id)?.completed ?? 0} completed ·{' '}
                                       {scanStatsByTask.get(task.id)?.scanned ?? 0} scanned
                                     </p>
-                                    {section.foreign && !isOwner ? (
+                                    {(section.foreign || libraryCompartmentFilter === 'all') && !isOwner ? (
                                       (task.points ?? 0) > 0 && (
                                         <span className="a-surface-2 a-text text-[10px] font-black rounded px-1.5 py-0.5">{task.points} pts</span>
                                       )
@@ -4433,7 +4439,7 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                                       ) : null
                                     })()}
                                   </p>
-                                  {(!section.foreign || isOwner) && (
+                                  {(isOwner || (!section.foreign && libraryCompartmentFilter !== 'all')) && (
                                     <button
                                       disabled={!canChangeShared(task)}
                                       onClick={async () => {
@@ -4455,7 +4461,7 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                                       The puzzle editor lives on the card's edit
                                       page; the tile just reports the state and
                                       links across. */}
-                                  {(!section.foreign || isOwner) && task.task_type === 'breakout_hunt' && (() => {
+                                  {(isOwner || (!section.foreign && libraryCompartmentFilter !== 'all')) && task.task_type === 'breakout_hunt' && (() => {
                                     const c = breakoutCounts[task.id]
                                     const missing = c ? c.total - c.withImage : 0
                                     return (
@@ -4481,7 +4487,7 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                                       the challenger scans another team's QR,
                                       both phones unlock the same clue, and the
                                       marshal declares the winner. */}
-                                  {(!section.foreign || isOwner) && (
+                                  {(isOwner || (!section.foreign && libraryCompartmentFilter !== 'all')) && (
                                     <div className="mt-1.5">
                                       <button
                                         disabled={!canChangeShared(task)}
@@ -4573,7 +4579,7 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                                         account's own cards, which are editable
                                         from Own Library where they also appear.
                                         One shelf to take from, one to edit in. */}
-                                    {(isOwner || !section.foreign) && renderCardMenu(task)}
+                                    {isOwner && renderCardMenu(task)}
                                   </div>
                                 ) : (
                                 <div className="px-3 pb-3 flex flex-wrap gap-1.5">
