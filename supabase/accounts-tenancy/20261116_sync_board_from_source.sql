@@ -84,6 +84,7 @@ begin
       array['bingo_task_links', 'task_id'],
       array['bingo_task_samples', 'task_id'],
       array['bingo_task_secrets', 'task_id'],
+      array['bingo_prize_secrets', 'task_id'],
       array['bingo_breakout_puzzles', 'task_id']
     ]
     loop

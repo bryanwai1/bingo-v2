@@ -37,6 +37,7 @@ import { gameKeyForTitle } from '../lib/coopGames/gameCards'
 import { resolveBonusWindow, activeElapsedMs, type BonusDefaults } from '../lib/timeBonus'
 import { aitbByName, aitbToolUrl, aitbToolCaption, AITB_POINTS } from '../lib/aitbActivities'
 import { normalizeUrl } from '../lib/normalizeUrl'
+import { isGridSlot } from '../lib/prizeCard/logic'
 import type { BingoScan, BingoTask } from '../types/database'
 
 async function compressToJpeg(file: File, maxDim = 1920, quality = 0.85): Promise<Blob> {
@@ -257,8 +258,9 @@ export function BingoDashParticipant() {
     type Card = { id: string; title: string; hex_code: string; prerequisite_task_id: string | null; cloned_from: string | null }
     const cols = 'id, title, hex_code, prerequisite_task_id, cloned_from'
     ;(async () => {
-      const bc = await supabase.from('bingo_board_cards').select('task_id').eq('section_id', team.section_id)
-      const ids = (bc.data ?? []).map(r => (r as { task_id: string }).task_id)
+      const bc = await supabase.from('bingo_board_cards').select('task_id, slot').eq('section_id', team.section_id)
+      // prize placements (slot 200+) are not part of any unlock chain
+      const ids = (bc.data ?? []).filter(r => isGridSlot((r as { slot: number }).slot)).map(r => (r as { task_id: string }).task_id)
       const cardsRes = ids.length > 0
         ? await supabase.from('bingo_tasks').select(cols).in('id', ids)
         : await supabase.from('bingo_tasks').select(cols).eq('section_id', task.section_id)

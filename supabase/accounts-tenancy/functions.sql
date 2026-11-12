@@ -347,6 +347,7 @@ begin
       array['bingo_task_links', 'task_id'],
       array['bingo_task_samples', 'task_id'],
       array['bingo_task_secrets', 'task_id'],
+      array['bingo_prize_secrets', 'task_id'],
       array['bingo_breakout_puzzles', 'task_id'],
       array['bingo_bundle_items', 'bundle_id']
     ]
@@ -543,10 +544,12 @@ begin
     end if;
     insert into bingo_tasks (section_id, owner_id, title, color, hex_code, category,
                              points, sort_order, in_grid, task_type,
-                             is_contest, contest_bonus, contest_game)
+                             is_contest, contest_bonus, contest_game,
+                             is_prize, prize_threshold)
     values (p_section, sec.owner_id, c.title, c.color, c.hex_code, c.category,
             c.points, c.sort_order, false, c.task_type,
-            c.is_contest, c.contest_bonus, c.contest_game);
+            c.is_contest, c.contest_bonus, c.contest_game,
+            coalesce(c.is_prize, false), coalesce(c.prize_threshold, 20));
     n := n + 1;
   end loop;
 

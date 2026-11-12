@@ -3,7 +3,8 @@ import { useEffect, useRef, useState, useMemo } from 'react'
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useTeamReviews, type ReviewFlag } from '../hooks/useTeamReviews'
-import { fetchBoardTasks } from '../lib/boardCards'
+import { fetchBoardTasks, fetchPrizeTasks } from '../lib/boardCards'
+import { PrizeCardStrips, PrizeRevealScreen } from '../components/PrizeCardArea'
 import { ParticleBackground } from '../components/ParticleBackground'
 import { PlayerBackdrop } from '../components/PlayerBackdrop'
 import { normalizePlayerTheme, GRAB_GREEN, type PlayerTheme } from '../lib/playerThemes'
@@ -584,6 +585,8 @@ function BoardScreen({
   teamPassword,
   chatSectionId,
   gridTasks: gridTasksProp,
+  prizeTasks,
+  sectionId,
   scans,
   reviews,
   settings,
@@ -593,6 +596,9 @@ function BoardScreen({
   theme,
   onLeave,
 }: {
+  /** PRD-008 prize cards (reserved slots 200+), shown as strips under the grid. */
+  prizeTasks: BingoTask[]
+  sectionId: string
   theme: PlayerTheme
   team: { id: string; name: string }
   sectionName: string
@@ -618,6 +624,10 @@ function BoardScreen({
   const [popupLetters, setPopupLetters] = useState<string | null>(null)
   const [popupQueue, setPopupQueue] = useState<string[]>([])
   const celebratedLinesRef = useRef<Set<number> | null>(null)
+  // Which prize card's reveal page is open (winner and the winner's observers only).
+  const [revealTask, setRevealTask] = useState<BingoTask | null>(null)
+  const memberId = localStorage.getItem(MEMBER_ID_KEY(sectionSlug))
+  const eventEnded = !!settings?.timer_end_at && new Date(settings.timer_end_at).getTime() < Date.now()
 
   // A card can sit in several boxes on one board, so status is looked up by
   // THIS box's placement first. Falls back to the card-wide scan (no
@@ -721,6 +731,10 @@ function BoardScreen({
     const t = setTimeout(() => setPopupLetters(null), 4000)
     return () => clearTimeout(t)
   }, [popupLetters])
+
+  if (revealTask) {
+    return <PrizeRevealScreen task={revealTask} memberId={memberId} theme={theme} eventEnded={eventEnded} onBack={() => setRevealTask(null)} />
+  }
 
   return (
     <div className={`min-h-screen bg-gray-950 relative overflow-x-hidden ${theme === 'grab' ? 'grab-ui' : ''}`}>
@@ -835,6 +849,12 @@ function BoardScreen({
               )}
             </div>
           )}
+          {gridTasks.length > 0 && (
+            <PrizeCardStrips
+              sectionId={sectionId} teamId={team.id} memberId={memberId} role={memberRole} theme={theme}
+              prizeTasks={prizeTasks} gridTasks={gridTasks} scans={scans} onOpen={setRevealTask}
+            />
+          )}
         </div>
       </main>
 
@@ -893,6 +913,7 @@ export function BingoDashJoin() {
   const [groups, setGroups] = useState<BingoTeam[]>([])
   const [memberCounts, setMemberCounts] = useState<Record<string, number>>({})
   const [gridTasks, setGridTasks] = useState<BingoTask[]>([])
+  const [prizeTasks, setPrizeTasks] = useState<BingoTask[]>([])
   const [scans, setScans] = useState<BingoScan[]>([])
   const reviews = useTeamReviews(team?.id)
   const [pageState, setPageState] = useState<'loading' | 'not-found' | 'join' | 'board'>('loading')
@@ -1008,6 +1029,7 @@ export function BingoDashJoin() {
 
         // Load grid tasks for this section (cards are placed via bingo_board_cards)
         fetchBoardTasks(data.id).then(tasks => setGridTasks(tasks))
+        fetchPrizeTasks(data.id).then(tasks => setPrizeTasks(tasks))
       })
   }, [sectionSlug])
 
@@ -1301,6 +1323,8 @@ export function BingoDashJoin() {
           teamPassword={groups.find(g => g.id === team.id)?.password ?? null}
           chatSectionId={section.id}
           gridTasks={gridTasks}
+          prizeTasks={prizeTasks}
+          sectionId={section.id}
           scans={scans}
           reviews={reviews}
           settings={section}

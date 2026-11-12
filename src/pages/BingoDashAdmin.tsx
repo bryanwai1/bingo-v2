@@ -7,11 +7,13 @@ import { supabase } from '../lib/supabase'
 import { CategoryIcon } from '../components/BingoTileFace'
 import { useBingoAuth } from '../hooks/useBingoAuth'
 import { announceBoardReset } from '../hooks/useBoardReset'
+import { timerPatchForGame } from '../lib/gameClock'
 import type { BingoTask, BingoTeam, BingoScan, BingoSettings, BingoSection, BingoCategory, BingoChallengeSection, BingoMember, BingoPhotoSubmission, BingoBoardCard, BingoDuel, BonusItem, PauseSpan } from '../types/database'
 import { BINGO_LINES, buildBingoSlots, completedBingoLines, scoreWithBingoLines } from '../lib/bingoLines'
 import { boxPoints, resolveBonusWindow, BONUS_PRESETS, DEFAULT_BONUS_FULL_MIN, DEFAULT_BONUS_TIMER_MIN } from '../lib/timeBonus'
 import { TileFace } from '../components/BingoTileFace'
 import { SCOREBOARD_THEMES, getScoreboardTheme } from '../lib/scoreboardThemes'
+import { isGridSlot, nextPrizeSlot, canAddPrize } from '../lib/prizeCard/logic'
 import { PLAYER_THEMES, normalizePlayerTheme } from '../lib/playerThemes'
 import { TileIconPicker } from '../components/TileIconPicker'
 import { BonusTimerPreview } from '../components/BonusTimerPreview'
@@ -1177,7 +1179,7 @@ export function BingoDashAdmin() {
   const taskById = useMemo(() => new Map(tasks.map(t => [t.id, t])), [tasks])
   const boardTasksForSection = useCallback((sectionId: string): PlacedCard[] =>
     boardCards
-      .filter(bc => bc.section_id === sectionId)
+      .filter(bc => bc.section_id === sectionId && isGridSlot(bc.slot))   // prize cards (slot 200+) are not tiles
       .sort((a, b) => a.slot - b.slot)
       .map(bc => {
         const t = taskById.get(bc.task_id)
@@ -2032,10 +2034,8 @@ export function BingoDashAdmin() {
       // is not already running gets its timer_end_at set here, so the
       // facilitator does not have to remember a second button at the whistle.
       const board = sections.find(s => s.id === sectionId)
-      const alreadyRunning = !!board?.timer_end_at && new Date(board.timer_end_at).getTime() > Date.now()
-      const startPatch: Partial<BingoSection> = { game_started: true, ...gameLockPauseLog(board, true) }
-      if (!alreadyRunning && (board?.timer_seconds ?? 0) > 0) {
-        startPatch.timer_end_at = new Date(Date.now() + (board!.timer_seconds ?? 0) * 1000).toISOString()
+      const startPatch: Partial<BingoSection> = {
+        game_started: true, ...gameLockPauseLog(board, true), ...timerPatchForGame(board ?? {}, true, Date.now()),
       }
       // Lock every other board OF THIS ACCOUNT and make this one live for its
       // players. Other accounts' boards are never touched.
@@ -2060,7 +2060,9 @@ export function BingoDashAdmin() {
         alert(boardWriteFailureMessage(failure?.message))
       }
     } else {
-      const lockPatch = { game_started: false, ...gameLockPauseLog(sections.find(s => s.id === sectionId), false) }
+      // Locking pauses a running countdown too, keeping the time left.
+      const lockBoard = sections.find(s => s.id === sectionId)
+      const lockPatch = { game_started: false, ...gameLockPauseLog(lockBoard, false), ...timerPatchForGame(lockBoard ?? {}, false, Date.now()) }
       setSections(prev => prev.map(s => s.id === sectionId ? { ...s, ...lockPatch } : s))
       const { data, error } = await supabase
         .from('bingo_sections').update(lockPatch).eq('id', sectionId).select('id')
@@ -2307,6 +2309,8 @@ export function BingoDashAdmin() {
       // inputs would show no submit UI at all.
       completion_inputs: task.completion_inputs, photo_multiple: task.photo_multiple,
       prerequisite_task_id: task.prerequisite_task_id ?? null,
+      // A prize card stays a prize card in the board's copy, with its target.
+      is_prize: task.is_prize ?? false, prize_threshold: task.prize_threshold ?? 20,
       sort_order: Math.max(25, tasks.filter(t => t.section_id === opts.sectionId).length + 25),
     }).select().single()
     if (error || !created) throw new Error(error?.message ?? 'Failed to copy card')
@@ -2321,6 +2325,11 @@ export function BingoDashAdmin() {
       linksRes.data?.length ? supabase.from('bingo_task_links').insert(reparent(linksRes.data)) : Promise.resolve(),
       samplesRes.data?.length ? supabase.from('bingo_task_samples').insert(reparent(samplesRes.data)) : Promise.resolve(),
     ])
+    // The reveal text lives in its own table keyed by card, so the copy needs its own row.
+    if (task.is_prize) {
+      const { data: sec } = await supabase.from('bingo_prize_secrets').select('*').eq('task_id', task.id).maybeSingle()
+      if (sec) await supabase.from('bingo_prize_secrets').upsert({ ...sec, task_id: created.id, updated_at: new Date().toISOString() })
+    }
     setTasks(prev => [...prev, created])
     return created as BingoTask
   }
@@ -2350,7 +2359,14 @@ export function BingoDashAdmin() {
     const resolvedId = await resolveOwnTaskForPlacement(taskId)
     if (!resolvedId) return
     let target = atIndex
-    if (target < 0 || target >= 25 || gridSlots[target] !== null) {
+    if (taskById.get(taskId)?.is_prize) {
+      // PRD-008: a prize card takes the first free reserved slot (200..209), never a grid box,
+      // and the same prize card is placed on a board once (remove it in the card editor).
+      if (!canAddPrize(boardCards, currentSectionId, [taskId, resolvedId])) { notify('This prize card is already on this board.', 'warn'); return }
+      const free = nextPrizeSlot(boardCards.filter(bc => bc.section_id === currentSectionId).map(bc => bc.slot))
+      if (free === null) { notify('This board already has 10 prize cards.', 'warn'); return }
+      target = free
+    } else if (target < 0 || target >= 25 || gridSlots[target] !== null) {
       target = gridSlots.findIndex(s => s === null)
       if (target === -1) return
     }
@@ -2452,8 +2468,12 @@ export function BingoDashAdmin() {
     // looked like it had worked.
     if (!currentSectionId) { notify('Pick a board first, then add the card to it.', 'warn'); return }
     const firstEmpty = gridSlots.findIndex(s => s === null)
-    if (gridTasks.length >= 25 || firstEmpty === -1) {
+    if (!task.is_prize && (gridTasks.length >= 25 || firstEmpty === -1)) {
       notify(`${currentBoard?.name ?? 'This board'} is full — all 25 boxes are taken.`, 'warn')
+      return
+    }
+    if (task.is_prize && !canAddPrize(boardCards, currentSectionId, [task.id])) {
+      notify('This prize card is already on this board.', 'warn')
       return
     }
     await insertIntoGrid(task.id, firstEmpty)
@@ -4665,7 +4685,7 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
             correct event without being told how — which is the whole point,
             since the people renting this are not developers. */}
         {activeTab === 'run' && (() => {
-          const placed = boardCards.filter(bc => bc.section_id === currentSectionId).length
+          const placed = boardCards.filter(bc => bc.section_id === currentSectionId && isGridSlot(bc.slot)).length
           const teamCount = scopedTeams.length
           const live = !!currentBoard?.game_started
           const btn = 'px-4 py-2 rounded-xl text-sm font-black transition-all active:scale-95'
@@ -4750,7 +4770,7 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                       📺 Scoreboard
                     </a>
                     <button
-                      onClick={() => updateBoardSettings({ game_started: !live, ...gameLockPauseLog(currentBoard, !live) })}
+                      onClick={() => updateBoardSettings({ game_started: !live, ...gameLockPauseLog(currentBoard, !live), ...timerPatchForGame(currentBoard ?? {}, !live, Date.now()) })}
                       className={`${btn} a-text`}
                       style={{ background: live ? '#b91c1c' : 'var(--a-live)' }}>
                       {live ? '■ Stop game' : '▶ Start game'}
