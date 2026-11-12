@@ -5,6 +5,9 @@ import { ParticleBackground } from '../components/ParticleBackground'
 import { FitBoard } from '../components/FitBoard'
 import { useFullscreen } from '../hooks/useFullscreen'
 import { getScoreboardTheme } from '../lib/scoreboardThemes'
+import { isGridSlot } from '../lib/prizeCard/logic'
+import { ProjectorPrizeBandLive } from '../components/PrizeCardArea'
+import { normalizePlayerTheme } from '../lib/playerThemes'
 import { scoreTeams, compareTeamScores, formatScore, type TeamScore, type BoardTask } from '../lib/teamScore'
 import type { BingoTask, BingoTeam, BingoScan, BingoSettings, BingoSection, BingoBoardCard, BingoDuel } from '../types/database'
 
@@ -234,6 +237,7 @@ export function BingoDashProjector() {
   // on one board be scored and bingo-line-detected per box instead of once
   // for the whole card — see supabase/scan-completion/20260910_scan_board_card_id.sql.
   const gridTasks = (activeSectionId ? boardCards.filter(bc => bc.section_id === activeSectionId) : boardCards)
+    .filter(bc => isGridSlot(bc.slot))   // prize cards (slot 200+) are never tiles
     .filter(bc => tasks.some(x => x.id === bc.task_id))
     .map(bc => ({ ...tasks.find(x => x.id === bc.task_id)!, sort_order: bc.slot, in_grid: true, placement_id: bc.id }))
     .sort((a, b) => a.sort_order - b.sort_order)
@@ -510,6 +514,15 @@ export function BingoDashProjector() {
           <div className="max-w-[1600px] mx-auto w-full overflow-auto">{board}</div>
         )}
       </main>
+
+      {/* PRD-008: prize claim popup (5 s) then a persistent line. A normal-flow
+          block between the scoreboard and the footer: <main> above is flex-1,
+          so the scoreboard fits into what is left and nothing overlaps. Shows
+          nothing until a prize is claimed. */}
+      {/* Mounted only when this board has a prize card: no channel, poll or timer otherwise. */}
+      {activeSectionId && boardCards.some(bc => bc.section_id === activeSectionId && !isGridSlot(bc.slot)) && (
+        <ProjectorPrizeBandLive sectionId={activeSectionId} theme={normalizePlayerTheme(activeSection?.player_theme)} />
+      )}
 
       {/* Sits under the scoreboard on the projected screen — visible to the
           whole room for the length of the event without competing with the

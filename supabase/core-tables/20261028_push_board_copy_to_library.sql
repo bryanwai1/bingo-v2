@@ -54,6 +54,7 @@ begin
   delete from public.bingo_task_links   where task_id = lib.id;
   delete from public.bingo_task_samples where task_id = lib.id;
   delete from public.bingo_task_secrets where task_id = lib.id;
+  delete from public.bingo_prize_secrets where task_id = lib.id;
   delete from public.bingo_draw_items   where task_id = lib.id;
   delete from public.bingo_draw_slots   where task_id = lib.id;
 
@@ -72,6 +73,9 @@ begin
   insert into public.bingo_task_secrets
     select (jsonb_populate_record(null::public.bingo_task_secrets, to_jsonb(c) || jsonb_build_object('task_id', lib.id, 'updated_at', now()))).*
     from public.bingo_task_secrets c where c.task_id = cp.id;
+  insert into public.bingo_prize_secrets
+    select (jsonb_populate_record(null::public.bingo_prize_secrets, to_jsonb(c) || jsonb_build_object('task_id', lib.id, 'updated_at', now()))).*
+    from public.bingo_prize_secrets c where c.task_id = cp.id;
 
   for s in select * from public.bingo_draw_slots where task_id = cp.id loop
     v_slot := gen_random_uuid();

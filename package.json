@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "node node_modules/typescript/bin/tsc -b && node node_modules/vite/bin/vite.js build",
     "lint": "eslint .",
-    "test": "node --test --experimental-strip-types src/lib/coopGames/*.test.ts",
+    "test": "node --test --experimental-strip-types src/lib/coopGames/*.test.ts src/lib/prizeCard/*.test.ts src/lib/gameClock.test.ts",
     "preview": "vite preview"
   },
   "dependencies": {

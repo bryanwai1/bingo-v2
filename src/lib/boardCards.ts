@@ -1,17 +1,29 @@
 import { supabase } from './supabase'
 import type { BingoBoardCard, BingoTask } from '../types/database'
+import { isGridSlot } from './prizeCard/logic'
 
 // Fetch the cards placed on a board, ordered by slot. Placements live in
 // bingo_board_cards (cards are universal — one task can sit on many boards),
 // so the returned tasks carry sort_order = slot and in_grid = true to stay
 // compatible with the 5x5 layout helpers (buildBingoSlots etc.).
 export async function fetchBoardTasks(sectionId: string): Promise<BingoTask[]> {
-  const { data: placements } = await supabase
+  return fetchPlacedTasks(sectionId, 'grid')
+}
+
+// Prize cards (PRD-008) sit on reserved slots 200..209 and are never grid tiles:
+// fetchBoardTasks returns slots below 200, this returns the rest.
+export async function fetchPrizeTasks(sectionId: string): Promise<BingoTask[]> {
+  return fetchPlacedTasks(sectionId, 'prize')
+}
+
+async function fetchPlacedTasks(sectionId: string, part: 'grid' | 'prize'): Promise<BingoTask[]> {
+  const { data: all } = await supabase
     .from('bingo_board_cards')
     .select('*')
     .eq('section_id', sectionId)
     .order('slot')
-  if (!placements || placements.length === 0) return []
+  const placements = (all ?? []).filter(p => isGridSlot(p.slot) === (part === 'grid'))
+  if (placements.length === 0) return []
   const { data: tasks } = await supabase
     .from('bingo_tasks')
     .select('*')

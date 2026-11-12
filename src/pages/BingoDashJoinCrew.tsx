@@ -66,6 +66,16 @@ function friendlyError(message: string): string {
   return message
 }
 
+// Module level on purpose: a component declared inside BingoDashJoinCrew gets a
+// new identity on every render, so React remounted the whole form (and dropped
+// focus from the PIN box) after each digit typed.
+const Shell = ({ children }: { children: React.ReactNode }) => (
+  <div className="min-h-screen bg-gray-950 flex flex-col items-center justify-center relative overflow-hidden px-4">
+    <ParticleBackground />
+    <div className="relative z-10 w-full max-w-sm">{children}</div>
+  </div>
+)
+
 export function BingoDashJoinCrew() {
   const { code = '' } = useParams()
   const navigate = useNavigate()
@@ -119,13 +129,6 @@ export function BingoDashJoinCrew() {
       setBusy(false)
     }
   }, [session, signInAnonymously, code, pin, name, refreshAccount, navigate])
-
-  const Shell = ({ children }: { children: React.ReactNode }) => (
-    <div className="min-h-screen bg-gray-950 flex flex-col items-center justify-center relative overflow-hidden px-4">
-      <ParticleBackground />
-      <div className="relative z-10 w-full max-w-sm">{children}</div>
-    </div>
-  )
 
   if (loading || authLoading) {
     return (

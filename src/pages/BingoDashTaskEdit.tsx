@@ -9,6 +9,10 @@ import { useBingoTaskPages } from '../hooks/useBingoTaskPages'
 import { useBingoTaskPhotos } from '../hooks/useBingoTaskPhotos'
 import { useTaskLinks } from '../hooks/useTaskLinks'
 import { BingoAdminPhotoUpload } from '../components/BingoAdminPhotoUpload'
+import { prizeFlagLocked } from '../lib/prizeCard/logic'
+import { PrizeCardAdmin } from '../components/PrizeCardAdmin'
+import { CardRail, RailDrawer } from '../components/CardRail'
+import { railKeys, type RailKey } from '../lib/cardRail'
 import { SignSpliceAdminPanel } from '../components/SignSpliceAdminPanel'
 import { BreakoutHuntAdminPanel } from '../components/BreakoutHuntAdminPanel'
 import { TaskSampleEditor } from '../components/TaskSampleEditor'
@@ -96,7 +100,7 @@ export function BingoDashTaskEdit() {
     return () => window.removeEventListener('beforeunload', onBeforeUnload)
   }, [])
 
-  const { reload: reloadDraw } = useCardDrawConfig(taskId)
+  const { config: drawConfig, reload: reloadDraw } = useCardDrawConfig(taskId)
   // Card details row (category / points / type) — the fields the old inline
   // create form collected, now editable here.
   const [categoryRows, setCategoryRows] = useState<{ name: string; sort_order: number }[]>([])
@@ -107,6 +111,9 @@ export function BingoDashTaskEdit() {
   const [previewMode, setPreviewMode] = useState(false)
   const [previewPage, setPreviewPage] = useState(0)
   const [carouselIdx, setCarouselIdx] = useState(0)
+  // Optional components live in a right-edge rail; `drawer` is the one open, `added` the ones picked with "+".
+  const [drawer, setDrawer] = useState<RailKey | null>(null)
+  const [added, setAdded] = useState<RailKey[]>([])
   const [activeTab, setActiveTab] = useState<'instructions' | 'answer' | 'sample'>('instructions')
   // Answer tab state
   const [taskType, setTaskType] = useState<'standard' | 'answer' | 'photo' | 'video' | 'media'>('standard')
@@ -162,6 +169,14 @@ export function BingoDashTaskEdit() {
   const { pages, createPage, updatePage, deletePage, reorderPages } = useBingoTaskPages(taskId)
   const { photos, reload: reloadPhotos } = useBingoTaskPhotos(taskId)
   const { links } = useTaskLinks(taskId, 'bingo_task_links')
+  // A component the card already uses always has its icon; "+" only adds ones it does not.
+  const railInUse: Partial<Record<RailKey, boolean>> = {
+    unlock: !!(prereqId || completionWarning.trim()),
+    maps: !!mapsUrl.trim(),
+    links: links.length > 0,
+    draw: !!drawConfig,
+  }
+  const railList = railKeys(railInUse, added)
 
   useEffect(() => {
     if (!taskId) return
@@ -275,10 +290,12 @@ export function BingoDashTaskEdit() {
 
   // Standard / Sign Splice / Breakout. Leaving a special type goes back to
   // 'standard'; the Answer tab's saveInputs refines it from there.
-  const handleCardTypeChange = async (type: 'standard' | 'sign_splice' | 'breakout_hunt') => {
+  const handleCardTypeChange = async (type: 'standard' | 'sign_splice' | 'breakout_hunt' | 'prize') => {
     if (!task) return
+    if (type === 'prize') { setDrawer(null); stage({ is_prize: true }); return }
+    if (task.is_prize) stage({ is_prize: false })
     const current = task.task_type === 'sign_splice' || task.task_type === 'breakout_hunt' ? task.task_type : 'standard'
-    if (type === current) return
+    if (type === current && !task.is_prize) return
     await saveDetails({ task_type: type })
     if (type === 'standard') setTaskType('standard')
   }
@@ -726,8 +743,8 @@ export function BingoDashTaskEdit() {
           </div>
         )}
 
-        {/* Card details: category / points / type */}
-        <div className="mb-6 bg-white border border-gray-200 rounded-xl p-5">
+        {/* Card details: category / points / type. Right margin keeps the rail clear of the fields. */}
+        <div className={`mb-6 bg-white border border-gray-200 rounded-xl p-5 ${task.is_prize ? '' : 'mr-14'}`}>
           <div className="flex flex-col md:flex-row gap-4">
             <div className="flex-1">
               <label className="block text-sm font-medium text-gray-600 mb-1">Category</label>
@@ -745,7 +762,7 @@ export function BingoDashTaskEdit() {
                 <option value="__new__">+ New category…</option>
               </select>
             </div>
-            <div className="w-full md:w-28">
+            {!task.is_prize && <div className="w-full md:w-28">
               <label className="block text-sm font-medium text-gray-600 mb-1">Points</label>
               <input
                 type="number" step="0.1" min={0}
@@ -756,7 +773,7 @@ export function BingoDashTaskEdit() {
                 onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
                 className="w-full px-3 py-2 rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-violet-500 text-center font-bold"
               />
-            </div>
+            </div>}
             <div className="flex-1">
               <label className="block text-sm font-medium text-gray-600 mb-1">Card Type</label>
               <div className="flex rounded-lg overflow-hidden border border-gray-300">
@@ -764,15 +781,19 @@ export function BingoDashTaskEdit() {
                   ['standard', 'Standard', 'Photo, video, link, text or versus — choose the inputs in the Answer Input tab'],
                   ['sign_splice', 'Sign Splice', 'Teams hunt each letter of their movie title on a different shop sign'],
                   ['breakout_hunt', 'Breakout', 'Teams decode 10 puzzles, then photograph each object in the venue'],
+                  ['prize', 'Prize', 'A "?" strip under the grid. The first group to complete the target number of cards claims it'],
                 ] as const).map(([value, label, tip]) => {
-                  const active = value === 'standard'
+                  const locked = value === 'prize' && !task.is_prize && prizeFlagLocked(placedCount)
+                  const active = value === 'prize' ? !!task.is_prize
+                    : task.is_prize ? false
+                    : value === 'standard'
                     ? task.task_type !== 'sign_splice' && task.task_type !== 'breakout_hunt'
                     : task.task_type === value
                   return (
                     <button
-                      key={value} type="button" title={tip} disabled={false}
+                      key={value} type="button" title={locked ? 'This card is on a board. Remove it from every board to make it a prize card.' : tip} disabled={locked || (!!task.is_prize && prizeFlagLocked(placedCount))}
                       onClick={() => handleCardTypeChange(value)}
-                      className={`flex-1 py-2 text-sm font-bold transition-colors ${active ? 'bg-violet-600 text-white' : 'bg-white text-gray-500 hover:bg-gray-50'}`}
+                      className={`flex-1 py-2 text-sm font-bold transition-colors disabled:opacity-40 ${active ? 'bg-violet-600 text-white' : 'bg-white text-gray-500 hover:bg-gray-50'}`}
                     >
                       {label}
                     </button>
@@ -788,8 +809,12 @@ export function BingoDashTaskEdit() {
           <BingoAdminPhotoUpload taskId={task.id} defaultPhotoUrl={aitbHeroUrlByName(task.title)} />
         </div>
 
-        {/* Tabs */}
-        <div className="flex border-b border-gray-200 mb-6">
+        {/* PRD-008 prize card: flag, threshold, reveal text, winner, Reset claim. */}
+        {task.is_prize && <PrizeCardAdmin task={task} stage={stage} />}
+
+        {/* Tabs: every normal card has these; a prize card has none of them. */}
+        {!task.is_prize && (
+        <div className="flex border-b border-gray-200 mb-6 mr-14">
           <button
             onClick={() => setActiveTab('instructions')}
             className={`px-5 py-3 text-sm font-bold border-b-2 transition-colors ${
@@ -822,9 +847,10 @@ export function BingoDashTaskEdit() {
             🎬 Sample
           </button>
         </div>
+        )}
 
         {/* Instructions tab */}
-        {activeTab === 'instructions' && (
+        {!task.is_prize && activeTab === 'instructions' && (
           <>
             <div className="flex items-center justify-between mb-4">
               <div>
@@ -865,10 +891,10 @@ export function BingoDashTaskEdit() {
         )}
 
         {/* Sample tab */}
-        {activeTab === 'sample' && <TaskSampleEditor taskId={task.id} />}
+        {!task.is_prize && activeTab === 'sample' && <TaskSampleEditor taskId={task.id} />}
 
         {/* Answer tab */}
-        {activeTab === 'answer' && (
+        {!task.is_prize && activeTab === 'answer' && (
           <div className="bg-white rounded-xl border border-gray-200 p-6">
             <h2 className="text-lg font-bold text-gray-900 mb-4">Answer Input Settings</h2>
 
@@ -1001,7 +1027,7 @@ export function BingoDashTaskEdit() {
 
         {/* The Answer Input and Sample tabs show only their own editor; every
             other card setting lives under Instructions. */}
-        {activeTab === 'instructions' && (<>
+        {!task.is_prize && activeTab === 'instructions' && (<>
         {/* Sign Splice cards carry their own game settings. */}
         {task.task_type === 'sign_splice' && (
           <SignSpliceAdminPanel
@@ -1011,7 +1037,10 @@ export function BingoDashTaskEdit() {
         )}
 
         {task.task_type === 'breakout_hunt' && <BreakoutHuntAdminPanel taskId={task.id} />}
+        </>)}
 
+        {drawer === 'unlock' && (
+          <RailDrawer title="Unlocks & warning" onClose={() => setDrawer(null)}>
         {/* Completion Warning / lock message, and the chain it belongs to */}
         <div className="bg-white rounded-xl border border-gray-200 p-6 mt-6">
           <h2 className="text-lg font-bold text-gray-900 mb-1">Unlocks after</h2>
@@ -1049,7 +1078,10 @@ export function BingoDashTaskEdit() {
             Apply warning
           </button>
         </div>
-
+          </RailDrawer>
+        )}
+        {drawer === 'maps' && (
+          <RailDrawer title="Google Maps link" onClose={() => setDrawer(null)}>
         {/* Maps URL */}
         <div className="bg-white rounded-xl border border-gray-200 p-6 mt-6">
           <h2 className="text-lg font-bold text-gray-900 mb-1">Google Maps Link</h2>
@@ -1080,7 +1112,10 @@ export function BingoDashTaskEdit() {
             Apply maps link
           </button>
         </div>
-
+          </RailDrawer>
+        )}
+        {drawer === 'links' && (
+          <RailDrawer title="Helpful links" onClose={() => setDrawer(null)}>
         {/* Helpful links */}
         <div className="mt-6">
           <TaskLinksEditor
@@ -1091,7 +1126,10 @@ export function BingoDashTaskEdit() {
             description='Shown to participants below the instructions as "Use these links to complete your tasks". Each link opens in a new tab.'
           />
         </div>
-
+          </RailDrawer>
+        )}
+        {drawer === 'draw' && (
+          <RailDrawer title="Draw" onClose={() => setDrawer(null)}>
         {/* Draw — style, slots and every option a team can land on. Any card
             can carry one; an AITB card's wheels and cups are the same thing. */}
         <CardDrawEditor
@@ -1107,7 +1145,12 @@ export function BingoDashTaskEdit() {
           }}
           onSlotsChange={() => { void reloadDraw() }}
         />
-        </>)}
+          </RailDrawer>
+        )}
+
+        {!task.is_prize && (
+          <CardRail keys={railList} inUse={railInUse} open={drawer} onOpen={setDrawer} onAdd={k => setAdded(a => (a.includes(k) ? a : [...a, k]))} />
+        )}
       </main>
 
       {/* Leaving with unsaved edits. Three ways out rather than a blunt

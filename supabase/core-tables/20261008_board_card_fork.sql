@@ -72,6 +72,9 @@ begin
   insert into public.bingo_task_secrets
     select (jsonb_populate_record(null::public.bingo_task_secrets, to_jsonb(c) || jsonb_build_object('task_id', v_new, 'updated_at', now()))).*
     from public.bingo_task_secrets c where c.task_id = t.id;
+  insert into public.bingo_prize_secrets
+    select (jsonb_populate_record(null::public.bingo_prize_secrets, to_jsonb(c) || jsonb_build_object('task_id', v_new, 'updated_at', now()))).*
+    from public.bingo_prize_secrets c where c.task_id = t.id;
 
   -- Draws: each slot gets a new id, and its items follow it.
   for s in select * from public.bingo_draw_slots where task_id = t.id loop
