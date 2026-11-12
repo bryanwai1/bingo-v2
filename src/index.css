@@ -979,3 +979,13 @@ input, select, textarea { min-width: 0; max-width: 100%; }
   .prz-confetti-layer { display: none; }
   .prz-halo, .prz-drop, .prz-claim:not(:disabled) { animation: none; }
 }
+
+/* Admin on a phone or any touch screen: shared button styles are at least 44px tall. */
+@media (max-width: 767px), (pointer: coarse) {
+  .a-chip-btn, .a-chip-on, .a-chip-danger, .a-btn { min-height: 44px; }
+  /* Everything tappable inside the admin page; text links in sentences are left alone. */
+  .a-touch button, .a-touch select, .a-touch input:not([type=checkbox]):not([type=radio]):not([type=range]):not([type=color]),
+  .a-touch a[class*="px-"] { min-height: 44px; }
+  .a-touch a[class*="px-"] { display: inline-flex; align-items: center; }
+  .a-touch [data-compact] { min-height: 0; }
+}
