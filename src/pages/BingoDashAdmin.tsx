@@ -23,7 +23,7 @@ import { AdminSection } from '../components/AdminSection'
 import { AdminSidebar, type AdminView } from '../components/AdminSidebar'
 import { activeFaces, faceName, faceColor, slotFor, normaliseFaceCount, TILES_PER_FACE } from '../lib/cubeFaces'
 import { CubeBoard } from '../components/CubeBoard'
-import { RunEventPanel, Step } from '../components/RunEventPanel'
+import { RunEventPanel, Step, LiveGamePanel } from '../components/RunEventPanel'
 import { CONTEST_GAMES, getContestGame } from '../lib/contestGames'
 import { SupportInbox } from '../components/SupportInbox'
 import { aitbHeroUrlByName } from '../lib/aitbActivities'
@@ -180,6 +180,8 @@ function BoardTile({
   onDrop,
   onDragEnd,
   onDragLeave,
+  selected,
+  onSelect,
 }: {
   task: BingoTask
   index: number
@@ -190,6 +192,9 @@ function BoardTile({
   onMoveRight: () => void
   onRemove: () => void
   onEdit: () => void
+  /** Phone: a tap picks this tile; the action bar above the grid then moves, edits or removes it. */
+  selected?: boolean
+  onSelect?: () => void
   onDragStart: (e: React.DragEvent) => void
   onDragOver: (e: React.DragEvent) => void
   onDrop: (e: React.DragEvent) => void
@@ -211,9 +216,10 @@ function BoardTile({
       onDragLeave={onDragLeave}
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
+      onClick={onSelect}
       className={`relative aspect-square rounded-lg overflow-hidden cursor-grab active:cursor-grabbing select-none transition-all duration-150 ${
         isBeingDragged ? 'opacity-40 scale-95' : ''
-      } ${isDragOver ? 'ring-2 ring-white scale-105' : ''}`}
+      } ${isDragOver ? 'ring-2 ring-white scale-105' : ''} ${selected ? 'ring-4 ring-teal-400' : ''}`}
       style={{ backgroundColor: task.hex_code }}
     >
       {/* Drag-over highlight */}
@@ -244,7 +250,7 @@ function BoardTile({
       </div>
 
       {/* Hover controls */}
-      <div className={`absolute inset-0 bg-black/65 transition-opacity duration-150 flex flex-col z-20 ${isHovered ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
+      <div className={`max-lg:hidden absolute inset-0 bg-black/65 transition-opacity duration-150 flex flex-col z-20 ${isHovered ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
         <div className="flex-1 flex items-center justify-center">
           <button
             onClick={e => { e.stopPropagation(); onEdit() }}
@@ -1012,6 +1018,18 @@ export function BingoDashAdmin() {
   const tabParam = searchParams.get('tab') as AdminView | null
   // Phone only: whether the navigation drawer is open.
   const [navOpen, setNavOpen] = useState(false)
+  // Phone: the board tile picked for moving, editing or removing.
+  const [pickedSlot, setPickedSlot] = useState<number | null>(null)
+  // Which boards the trainer has opened the card walkthrough for (step 4 turns green). Per browser.
+  const [checkedBoards, setCheckedBoards] = useState<string[]>(() => {
+    try { return JSON.parse(localStorage.getItem('bingo-cards-checked') ?? '[]') } catch { return [] }
+  })
+  const markChecked = (id: string) => setCheckedBoards(prev => {
+    if (prev.includes(id)) return prev
+    const next = [...prev, id]
+    try { localStorage.setItem('bingo-cards-checked', JSON.stringify(next)) } catch { /* private mode */ }
+    return next
+  })
   const [activeTab, setActiveTabState] = useState<AdminView>(
     // account is not loaded yet on first render, so the pin in setActiveTab
     // cannot help here — an editor landing on ?tab=board would see it flash.
@@ -1854,7 +1872,7 @@ export function BingoDashAdmin() {
     if (myBoards.length <= 1) { alert('Cannot delete the last section.'); return }
     const taskCount = tasks.filter(t => t.section_id === id).length
     const teamCount = teams.filter(t => t.section_id === id).length
-    if (!confirm(`Delete "${section.name}"? This will remove ${taskCount} challenges and ${teamCount} teams.`)) return
+    if (!confirm(`Delete the board "${section.name}"?\n\nThis also deletes its ${taskCount} cards and ${teamCount} teams. You cannot undo this.`)) return
     await supabase.from('bingo_sections').delete().eq('id', id)
     const remaining = sections.filter(s => s.id !== id)
     setSections(remaining)
@@ -1930,7 +1948,7 @@ export function BingoDashAdmin() {
     const cat = categories.find(c => c.id === id)
     if (!cat) return
     const affected = tasks.filter(t => t.section_id === sectionId && t.category === cat.name).length
-    if (!confirm(`Delete category "${cat.name}"? ${affected > 0 ? `${affected} card${affected !== 1 ? 's' : ''} will become uncategorized.` : ''}`)) return
+    if (!confirm(`Delete the category "${cat.name}"?${affected > 0 ? `\n\n${affected} card${affected !== 1 ? 's' : ''} will stay, but will have no category.` : ''}`)) return
     setCategories(prev => prev.filter(c => c.id !== id))
     setTasks(prev => prev.map(t =>
       t.section_id === sectionId && t.category === cat.name ? { ...t, category: '' } : t
@@ -2753,7 +2771,7 @@ export function BingoDashAdmin() {
   }
 
   const deleteTask = async (id: string, title: string) => {
-    if (!confirm(`Delete "${title}"? All scans for this challenge will also be removed.`)) return
+    if (!confirm(`Delete the card "${title}"?\n\nEvery team's progress on this card is deleted too. You cannot undo this.`)) return
     // Bundle membership first. bingo_bundle_items references bingo_tasks from
     // BOTH bundle_id and activity_id, and the live constraint does not cascade
     // (the schema file says it should — the database disagrees), so deleting
@@ -2809,7 +2827,7 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
   }
 
   const resetTeamScore = async (id: string, name: string) => {
-    if (!confirm(`Reset all progress for "${name}"? This clears scans, photo submissions, and bonus points. The team itself, players, and password are kept.`)) return
+    if (!confirm(`Start "${name}" over from zero?\n\nTheir finished cards, photos and bonus points are cleared. The team, its players and password stay. You cannot undo this.`)) return
     const teamSubs = photoSubmissions.filter(s => s.team_id === id)
     const subIds = teamSubs.map(s => s.id)
     const photoPaths = teamSubs.map(s => extractStoragePath(s.photo_url)).filter((p): p is string => !!p)
@@ -2830,7 +2848,7 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
   // Cooperative games (PRD-004, AC-12): clear this team's game sessions and undo the
   // completion they gave, so the team can play again. Server-side admin check.
   const resetTeamGames = async (id: string, name: string) => {
-    if (!confirm(`Reset the cooperative games for "${name}"? Any game they finished is un-completed and can be played again.`)) return
+    if (!confirm(`Let "${name}" play their team games again?\n\nGames they already finished will count as not finished.`)) return
     const { data, error } = await supabase.rpc('coop_reset_team', { p_team: id })
     if (error) { alert('Could not reset the games: ' + error.message); return }
     alert(data ? `Reset ${data} game${data === 1 ? '' : 's'}.` : 'This team has no games to reset.')
@@ -2923,7 +2941,7 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
   }
 
   const removeMember = async (memberId: string, memberName: string, teamName: string) => {
-    if (!confirm(`Remove "${memberName}" from ${teamName}?`)) return
+    if (!confirm(`Take "${memberName}" out of the team "${teamName}"?\n\nTheir scans stay with the team.`)) return
     setMembers(prev => prev.filter(m => m.id !== memberId))
     const { error } = await supabase.from('bingo_members').delete().eq('id', memberId)
     if (error) { alert('Failed to remove player'); await fetchAll() }
@@ -2964,7 +2982,7 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
 
   const bulkDeleteSubmissions = async (subs: BingoPhotoSubmission[]) => {
     if (subs.length === 0) return
-    if (!confirm(`Delete ${subs.length} submission${subs.length === 1 ? '' : 's'}? Photos will be removed and progress on the affected tiles will reset.`)) return
+    if (!confirm(`Delete ${subs.length} submission${subs.length === 1 ? '' : 's'}?\n\nThe photos are deleted and those cards go back to not done for the teams. You cannot undo this.`)) return
     setBulkActioning(true)
     try {
       const ids = subs.map(s => s.id)
@@ -3225,7 +3243,7 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
   }
 
   const removeTeamPhoto = async (teamId: string) => {
-    if (!confirm('Remove this group\u2019s photo?')) return
+    if (!confirm('Delete this team\u2019s photo? You cannot undo this.')) return
     await updateTeam(teamId, { photo_url: null })
   }
 
@@ -3235,7 +3253,7 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
     const newName = sections.find(s => s.id === newSectionId)?.name ?? 'the new section'
     // Team scans reference tasks in the old section, so progress will read as 0
     // in the new section until they scan those tasks. Make that explicit.
-    if (!confirm(`Move "${team.name}" to ${newName}? Their existing scan progress will no longer apply.`)) return
+    if (!confirm(`Move the team "${team.name}" to the board "${newName}"?\n\nTheir finished cards on this board will not carry over.`)) return
     await updateTeam(id, { section_id: newSectionId })
   }
 
@@ -3534,7 +3552,7 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
         </div>
       </header>
 
-      <main className="max-w-6xl mx-auto px-3 sm:px-6 py-5 sm:py-8 flex flex-col gap-8 sm:gap-10">
+      <main className="a-touch max-w-6xl mx-auto px-3 sm:px-6 py-5 sm:py-8 flex flex-col gap-8 sm:gap-10">
 
         {activeTab === 'board' && <>
 
@@ -3739,10 +3757,17 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
             </div>
             <a href={currentSectionId ? `/bingo-dash/admin/board-preview/${currentSectionId}` : playerViewPath}
               target="_blank" rel="noopener noreferrer"
-              className="text-xs text-teal-500 hover:text-violet-700 transition-colors">
+              className="px-2 text-xs text-teal-500 hover:text-violet-700 transition-colors">
               Preview ↗
             </a>
           </div>
+
+          {gridTasks.length === 0 && (
+            <div className="mb-4 rounded-2xl border-2 border-dashed p-6 text-center" style={{ borderColor: 'var(--a-brand)' }}>
+              <p className="text-lg font-black a-text">Your board is empty</p>
+              <p className="text-sm a-text-2 mt-1">Drag a card from the list onto a square, or press "+ Add" on a card in the list.</p>
+            </div>
+          )}
 
           <div className="flex gap-6 flex-col lg:flex-row items-start">
             {/* Interactive 5×5 grid */}
@@ -3832,6 +3857,32 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                   </div>
                 )}
 
+                {/* Phone and tablet: tiles have no hover, so a picked tile gets big buttons here. */}
+                {(() => {
+                  const picked = pickedSlot !== null ? gridSlots[pickedSlot] : null
+                  const bar = 'min-h-11 px-3 rounded-lg text-sm font-bold a-chip-btn disabled:opacity-30'
+                  return (
+                    <div className="lg:hidden mb-3" style={{ width: 'min(380px, calc(100vw - 80px))' }}>
+                      {picked && pickedSlot !== null ? (
+                        <div className="rounded-xl border a-border a-surface p-2">
+                          <p className="text-xs a-text-2 px-1 pb-1.5 [overflow-wrap:anywhere]">Picked: <strong className="a-text">{picked.title}</strong></p>
+                          <div className="grid grid-cols-4 gap-1.5">
+                            <button className={bar} onClick={() => openTileEdit(picked)}>✏️ Edit</button>
+                            <button className={bar} disabled={pickedSlot === 0} aria-label="Move left"
+                              onClick={() => { reorderGrid(pickedSlot, pickedSlot - 1); setPickedSlot(pickedSlot - 1) }}>◀</button>
+                            <button className={bar} disabled={pickedSlot === gridTasks.length - 1} aria-label="Move right"
+                              onClick={() => { reorderGrid(pickedSlot, pickedSlot + 1); setPickedSlot(pickedSlot + 1) }}>▶</button>
+                            <button className={`${bar} text-red-500`} aria-label="Remove from grid"
+                              onClick={() => { removePlacement(picked.placementId); setPickedSlot(null) }}>✕</button>
+                          </div>
+                        </div>
+                      ) : (
+                        <p className="text-xs a-text-3">Tap a card to move, edit or remove it.</p>
+                      )}
+                    </div>
+                  )
+                })()}
+
                 <div
                   hidden={editView === 'cube' && normaliseFaceCount(currentBoard?.face_count) > 1}
                   className="grid grid-cols-5 gap-1.5"
@@ -3854,6 +3905,8 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                         onMoveRight={() => reorderGrid(slotIndex, slotIndex + 1)}
                         onRemove={() => removePlacement(task.placementId)}
                         onEdit={() => openTileEdit(task)}
+                        selected={pickedSlot === slotIndex}
+                        onSelect={() => setPickedSlot(p => p === slotIndex ? null : slotIndex)}
                         onDragStart={e => onGridDragStart(e, slotIndex)}
                         onDragOver={e => onSlotDragOver(e, slotIndex)}
                         onDrop={e => onSlotDrop(e, slotIndex)}
@@ -4663,6 +4716,10 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                                     title="Quick edit — title, category and points">Quick edit</button>
                                   <button hidden={!canChangeShared(task)} onClick={() => deleteTask(task.id, task.title)}
                                     className="px-3 py-1.5 a-chip-danger transition-colors">Delete</button>
+                                  {/* A prize card sits outside the grid, so the grid's remove ✕ never reaches it. */}
+                                  <button hidden={!task.is_prize || !(task as Partial<PlacedCard>).placementId}
+                                    onClick={() => { if (confirm(`Remove "${task.title}" from this board? Its claim on this board goes with it.`)) void removePlacement((task as PlacedCard).placementId) }}
+                                    className="px-3 py-1.5 a-chip-danger transition-colors">Remove from board</button>
                                   {/* No ⋯ menu here: every one of its items is
                                       already a button in this strip. It stays in
                                       Complete Library, where the strip does not. */}
@@ -4691,34 +4748,43 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
           const teamCount = scopedTeams.length
           const live = !!currentBoard?.game_started
           const btn = 'px-4 py-2 rounded-xl text-sm font-black transition-all active:scale-95'
+          const toggleGame = () => updateBoardSettings({ game_started: !live, ...gameLockPauseLog(currentBoard, !live), ...timerPatchForGame(currentBoard ?? {}, !live, Date.now()) })
+          // Done flags for the eight steps. Optional ones never block the "Next" highlight.
+          const sid = currentSectionId ?? ''
+          const seen = (k: string) => checkedBoards.includes(`${k}:${sid}`)
+          const steps = [
+            { done: !!currentBoard },
+            { done: placed > 0 },
+            { done: live || seen('cards') },
+            { done: seen('demo'), optional: true },
+            { done: !!currentBoard?.marshal_password && seen('helpers'), optional: true },
+            { done: teamCount > 0 },
+            { done: live || seen('share') },
+            { done: live },
+          ]
+          const required = steps.filter(x => !x.optional)
+          const focus = steps.findIndex(x => !x.done && !x.optional)
           return (
-            <RunEventPanel>
-              {currentSectionId && <SupportInbox sectionId={currentSectionId} />}
-              <div className="flex flex-wrap items-center justify-between gap-3 mb-6 px-4 py-3 rounded-xl border"
-                   style={{ background: 'var(--a-surface-2)', borderColor: 'var(--a-border)' }}>
-                <div>
-                  <p className="text-sm font-black a-text">🎬 Try a live demo</p>
-                  <p className="text-xs a-text-2 mt-0.5">Preview the board, phone remote and BINGO flow — nothing is saved.</p>
-                </div>
-                <a
-                  href={currentSectionId ? `/bingo-dash/sample?board=${currentSectionId}` : undefined}
-                  target="_blank" rel="noreferrer"
-                  aria-disabled={!currentSectionId}
-                  className={`px-4 py-2 rounded-xl text-sm font-black transition-all active:scale-95 flex-shrink-0 ${currentSectionId ? 'a-text' : ''}`}
-                  style={{
-                    background: currentSectionId ? 'var(--a-brand)' : 'var(--a-surface-3)',
-                    color: currentSectionId ? undefined : 'var(--a-text-2)',
-                    pointerEvents: currentSectionId ? 'auto' : 'none',
-                    opacity: currentSectionId ? 1 : 0.6,
-                  }}
+            <RunEventPanel done={required.filter(x => x.done).length} total={required.length}>
+              {currentSectionId && <div className="mb-8"><SupportInbox sectionId={currentSectionId} /></div>}
+              {live && currentBoard && (
+                <LiveGamePanel
+                  timer={timerDisplay}
+                  running={!(currentBoard.timer_seconds && !currentBoard.timer_end_at)}
+                  waiting={photoSubmissions.filter(x => x.status === 'pending').length}
+                  onReview={() => setActiveTab('submissions')}
                 >
-                  Launch demo
-                </a>
-              </div>
-
-              <Step n={1} done={!!currentBoard}
+                  <a href={`/bingo-dash/projector/${currentBoard.slug}`} target="_blank" rel="noreferrer"
+                     className={`${btn} inline-flex items-center`} style={{ background: 'var(--a-surface-3)', color: 'var(--a-text)' }}>📺 Scoreboard</a>
+                  <button onClick={toggleGame} className={`${btn} a-text`} style={{ background: '#b91c1c' }}>■ Stop game</button>
+                  <a href={`/bingo-dash/slides/awards/${currentBoard.slug}`} target="_blank" rel="noreferrer"
+                     className={`${btn} inline-flex items-center`} style={{ background: 'var(--a-surface-3)', color: 'var(--a-text)' }}>🏆 Awards slides</a>
+                </LiveGamePanel>
+              )}
+              <Step n={1} done={steps[0].done} current={focus === 0}
                 title="Pick the board for this event"
                 blurb="Each board is one event: its own cards, teams and scoreboard."
+                help="Think of a board as one game. Pick the board you want to run today using the board names at the top of the page."
                 action={
                   <span className="px-3 py-1.5 rounded-lg text-sm font-bold"
                         style={{ background: 'var(--a-brand-soft)', color: 'var(--a-brand)' }}>
@@ -4726,21 +4792,10 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                   </span>
                 } />
 
-              <Step n={2} done={teamCount > 0}
-                title="Add your teams"
-                blurb="Participants join a team with its name and password."
-                warn={teamCount === 0 ? 'No teams yet — players cannot join' : undefined}
-                action={
-                  <button onClick={() => setActiveTab('teams')}
-                    className={btn} style={{ background: 'var(--a-surface-2)', color: 'var(--a-text)' }}>
-                    {teamCount > 0 ? `${teamCount} teams` : 'Add teams'}
-                  </button>
-                } />
-
-              <Step n={3} done={placed > 0}
+              <Step n={2} done={steps[1].done} current={focus === 1}
                 title="Place cards on the grid"
                 blurb="Drag challenges from your library onto the 5×5 board."
-                warn={placed === 0 ? 'The board is empty' : undefined}
+                help="A card is one challenge, like 'take a team photo'. The board has 25 squares. Each square shows one card that teams can play."
                 action={
                   <button onClick={() => setActiveTab('board')}
                     className={btn} style={{ background: 'var(--a-surface-2)', color: 'var(--a-text)' }}>
@@ -4748,22 +4803,82 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                   </button>
                 } />
 
-              <Step n={4} done={teamCount > 0 && placed > 0}
+              <Step n={3} done={steps[2].done} current={focus === 2}
+                blocked={placed === 0 ? 'Place at least 1 card first.' : undefined}
+                title="Check your cards"
+                blurb="Flip through every card the way a player sees it: the instructions and how to finish it. Nothing is saved."
+                help="This lets you read every card once, so you know what players will see and how each card is finished (photo, video, answer, or a code from a helper)."
+                action={
+                  <a href={currentSectionId ? `/bingo-dash/admin/board-preview/${currentSectionId}` : undefined}
+                    target="_blank" rel="noreferrer"
+                    onClick={() => currentSectionId && markChecked(`cards:${currentSectionId}`)}
+                    className={`${btn} inline-flex items-center a-text`} style={{ background: 'var(--a-brand)' }}>
+                    👀 Look through the cards
+                  </a>
+                } />
+
+              <Step n={4} optional done={steps[3].done} current={focus === 3}
+                title="Practice with a demo"
+                blurb="Play a pretend round on your own phone first. Nothing is saved."
+                help="The demo is a safe copy of your board. You can tap cards, finish them and see the scoreboard move, without touching your real teams or scores."
+                action={
+                  <a
+                    href={currentSectionId ? `/bingo-dash/sample?board=${currentSectionId}` : undefined}
+                    target="_blank" rel="noreferrer"
+                    onClick={() => currentSectionId && markChecked(`demo:${currentSectionId}`)}
+                    className={`${btn} inline-flex items-center a-text`} style={{ background: 'var(--a-brand)' }}>
+                    🎬 Launch demo
+                  </a>
+                } />
+
+              <Step n={5} optional done={steps[4].done} current={focus === 4}
+                title="Brief your helpers"
+                blurb="Helpers (marshals) check that teams really did a challenge. Give them the marshal password."
+                help="A marshal is a helper at the event. When a team finishes a challenge that needs checking, the marshal types in this password on the team's phone to approve it. You can also invite co-trainers so they can help run the event."
+                action={
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="px-3 py-1.5 rounded-lg text-sm font-mono font-black" style={{ background: 'var(--a-brand-soft)', color: 'var(--a-brand)' }}>
+                      Password: {currentBoard?.marshal_password || 'not set'}
+                    </span>
+                    <button onClick={() => setActiveTab('settings')}
+                      className={btn} style={{ background: 'var(--a-surface-2)', color: 'var(--a-text)' }}>Change</button>
+                    <a href="/bingo-dash/crew" target="_blank" rel="noreferrer"
+                       onClick={() => currentSectionId && markChecked(`helpers:${currentSectionId}`)}
+                       className={`${btn} inline-flex items-center`} style={{ background: 'var(--a-surface-2)', color: 'var(--a-text)' }}>🤝 Invite co-trainers</a>
+                  </div>
+                } />
+
+              <Step n={6} done={steps[5].done} current={focus === 5}
+                title="Add your teams"
+                blurb="Players join a team using its name and password."
+                help="A team is a small group of players who play together and share one score. Give each team a name. The password is what players type to join their team."
+                action={
+                  <button onClick={() => setActiveTab('teams')}
+                    className={btn} style={{ background: 'var(--a-surface-2)', color: 'var(--a-text)' }}>
+                    {teamCount > 0 ? `${teamCount} teams` : 'Add teams'}
+                  </button>
+                } />
+
+              <Step n={7} done={steps[6].done} current={focus === 6}
+                blocked={teamCount === 0 || placed === 0 ? 'Add at least 1 team and 1 card first.' : undefined}
                 title="Share the join link"
-                blurb="Show the QR on the projector, or send the link to the group."
+                blurb="Show the QR code on the big screen, or send the link to the group."
+                help="Players scan the QR code with their phone camera, or open the link, then choose their team and enter its password."
                 action={
                   <button
-                    onClick={() => { setShowJoinLink(true); setJoinLinkCopied(false); setJoinLinkTab('player') }}
+                    onClick={() => { setShowJoinLink(true); setJoinLinkCopied(false); setJoinLinkTab('player'); markChecked(`share:${sid}`) }}
                     className={`${btn} a-text`} style={{ background: 'var(--a-brand)' }}>
                     📱 Show QR
                   </button>
                 } />
 
-              <Step n={5} done={live}
+              <Step n={8} last done={steps[7].done} current={focus === 7}
+                blocked={!live && (teamCount === 0 || placed === 0) ? 'Add at least 1 team and 1 card first.' : undefined}
                 title={live ? 'Your event is running' : 'Start the game'}
                 blurb={live
-                  ? 'Players can open cards and score. Open the scoreboard for the room.'
+                  ? 'Players can open cards and score. Use the box at the top during the game.'
                   : 'Until you start, players see a waiting screen.'}
+                help="Press Start when everyone is ready. The timer starts and players can open cards. Press Stop to pause: players are locked out and the timer waits."
                 action={
                   <div className="flex flex-wrap gap-2">
                     <a href={currentBoard ? `/bingo-dash/projector/${currentBoard.slug}` : '/bingo-dash/projector'}
@@ -4771,8 +4886,7 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                        className={btn} style={{ background: 'var(--a-surface-2)', color: 'var(--a-text)' }}>
                       📺 Scoreboard
                     </a>
-                    <button
-                      onClick={() => updateBoardSettings({ game_started: !live, ...gameLockPauseLog(currentBoard, !live), ...timerPatchForGame(currentBoard ?? {}, !live, Date.now()) })}
+                    <button onClick={toggleGame}
                       className={`${btn} a-text`}
                       style={{ background: live ? '#b91c1c' : 'var(--a-live)' }}>
                       {live ? '■ Stop game' : '▶ Start game'}
@@ -5433,6 +5547,13 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                   )
                 })()}
 
+                {sectionTeams.length === 0 && (
+                  <div className="mb-5 rounded-2xl border-2 border-dashed p-6 text-center" style={{ borderColor: 'var(--a-brand)' }}>
+                    <p className="text-lg font-black a-text">No teams yet</p>
+                    <p className="text-sm a-text-2 mt-1">Players cannot join until you add at least one team. Type a team name in the box below and press the add button.</p>
+                  </div>
+                )}
+
                 {/* Toolbar: one box, sorted into sections — reset · add groups · team size · share and score */}
                 <div className="mb-5 overflow-hidden rounded-2xl border a-border a-surface">
                   {sectionTeams.length > 0 && (
@@ -5879,9 +6000,6 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
               </div>
             )
           })()}
-          {scopedTeams.length === 0 && (
-            <p className="a-text-2 text-sm">No groups yet. Create groups above for participants to join.</p>
-          )}
         </section>
         )}
 
