@@ -138,6 +138,13 @@ export function PrizeCardAdmin({ task, stage }: {
               <p className="text-xs text-gray-400 mt-1">Only completed grid cards count. The default is 20.</p>
             </div>
             <div>
+              <label className={label} htmlFor="prize-hint">Reminder shown on the board</label>
+              <input id="prize-hint" className={input} maxLength={120} placeholder={`Complete ${task.prize_threshold ?? 20} cards to unlock this prize`}
+                value={task.completion_warning ?? ''}
+                onChange={e => stage({ completion_warning: e.target.value || null })} />
+              <p className="text-xs text-gray-400 mt-1">Every team sees this under the progress bar while the prize is locked. Leave empty for the default.</p>
+            </div>
+            <div>
               <label className={label} htmlFor="prize-message">Congratulation text</label>
               <textarea id="prize-message" rows={3} className={input} value={secrets.message} onChange={set('message')} />
             </div>

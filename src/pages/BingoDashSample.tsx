@@ -2,7 +2,9 @@ import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRe
 import { Link } from 'react-router-dom'
 import { QRCodeSVG } from 'qrcode.react'
 import { supabase } from '../lib/supabase'
-import { fetchBoardTasks, tasksForFace } from '../lib/boardCards'
+import { fetchBoardTasks, fetchPrizeTasks, tasksForFace } from '../lib/boardCards'
+import { PrizeStrip } from '../lib/prizeCard/PrizeStrip'
+import { stripState } from '../lib/prizeCard/logic'
 import { effectiveInputs, inputKinds, isCompulsory, fileAccept, fileEmoji, fileHeading, fileNoun } from '../lib/completionInputs'
 import { activeFaces, faceName, faceColor, normaliseFaceCount } from '../lib/cubeFaces'
 import { buildBingoSlots, completedBingoLines, scoreWithBingoLines } from '../lib/bingoLines'
@@ -644,6 +646,16 @@ const BoardScreen = forwardRef<BoardScreenHandle, {
   const boardNoteEvery = section?.board_note_every ?? 0
   const tileDisplay = normalizeTileDisplay(section?.tile_display)
   const theme = normalizePlayerTheme(section?.player_theme)
+  // Prize cards sit under the grid, not in it (slots 200+); the sandbox claims them locally.
+  const [prizeTasks, setPrizeTasks] = useState<BingoTask[]>([])
+  const [sandboxClaims, setSandboxClaims] = useState<string[]>([])
+  const sectionId = section?.id ?? null
+  useEffect(() => {
+    if (!sectionId) return
+    let live = true
+    fetchPrizeTasks(sectionId).then(t => { if (live) setPrizeTasks(t) })
+    return () => { live = false }
+  }, [sectionId])
 
   // Which cube face this player is looking at — matches the real player view
   // (Front/Right/Back/Left/Top/Bottom); a one-face board never shows the tabs.
@@ -894,6 +906,22 @@ const BoardScreen = forwardRef<BoardScreenHandle, {
               )}
             </div>
           )}
+          {/* Prize card preview: a local sandbox claim, nothing is written. */}
+          {visibleTasks.length > 0 && prizeTasks.map(t => (
+            <div key={t.placement_id ?? t.id} className="mt-3">
+              <PrizeStrip
+                state={stripState({
+                  count: completedCount, threshold: t.prize_threshold ?? 20, teamId: 'sample', role: 'player',
+                  claim: sandboxClaims.includes(t.id)
+                    ? { id: t.id, board_card_id: t.placement_id ?? t.id, team_id: 'sample', team_name: teamName, claimed_at: new Date().toISOString() }
+                    : null,
+                })}
+                theme={theme} busy={false} message={null} title={t.title} hint={t.completion_warning}
+                onClaim={() => setSandboxClaims(c => [...c, t.id])}
+                onOpen={() => {}}
+              />
+            </div>
+          ))}
         </div>
       </main>
 
@@ -952,7 +980,7 @@ export type SampleTaskDetailHandle = {
 /** When each card was first opened in this demo session, by task id. */
 const cardClock = new Map<string, number>()
 
-const SampleTaskDetail = forwardRef<SampleTaskDetailHandle, {
+export const SampleTaskDetail = forwardRef<SampleTaskDetailHandle, {
   task: BingoTask
   teamName: string
   marshalPassword: string
@@ -970,15 +998,17 @@ const SampleTaskDetail = forwardRef<SampleTaskDetailHandle, {
   onStep?: (s: DetailStep) => void
   /** Scroll position as a fraction, so a shared screen can follow along. */
   onScrollFrac?: (frac: number) => void
+  /** Admin walkthrough: open straight on the instructions, without the tap-to-start splash. */
+  skipSplash?: boolean
 }>(function SampleTaskDetail({
   task, teamName, marshalPassword, completed, bonusDefaults, chain, onJump, onComplete, onUncomplete, onClose, onStep,
-  onScrollFrac,
+  onScrollFrac, skipSplash,
 }, ref) {
   const { pages } = useBingoTaskPages(task.id)
   const { photos } = useBingoTaskPhotos(task.id)
   const { links } = useTaskLinks(task.id, 'bingo_task_links')
 
-  const [showSplash, setShowSplash] = useState(true)
+  const [showSplash, setShowSplash] = useState(!skipSplash)
   const [currentPage, setCurrentPage] = useState(0)
   const [carouselIdx, setCarouselIdx] = useState(0)
   const [marshalInput, setMarshalInput] = useState('')

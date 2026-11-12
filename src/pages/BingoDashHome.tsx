@@ -3,7 +3,8 @@ import { useEffect, useRef, useState, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useTeamReviews, type ReviewFlag } from '../hooks/useTeamReviews'
-import { fetchBoardTasks } from '../lib/boardCards'
+import { fetchBoardTasks, fetchPrizeTasks } from '../lib/boardCards'
+import { PrizeCardStrips, PrizeRevealScreen } from '../components/PrizeCardArea'
 import { useBingoDashTeam } from '../hooks/useBingoDashTeam'
 import { PlayerBackdrop } from '../components/PlayerBackdrop'
 import { TimeUpAlarm } from '../components/TimeUpAlarm'
@@ -502,11 +503,14 @@ function BoardScreen({
   inviteUrl,
   chatSectionId,
   theme,
+  prizeTasks,
   onLeave,
 }: {
   /** Board id for the support chat anchored under the team name. */
   chatSectionId?: string | null
   theme: PlayerTheme
+  /** Prize cards placed on this board (slots 200+); shown as strips under the grid. */
+  prizeTasks: BingoTask[]
   team: { id: string; name: string }
   /** Link a teammate scans to join this team directly (see BingoDashJoin). */
   inviteUrl?: string | null
@@ -528,6 +532,8 @@ function BoardScreen({
   const [popupLetters, setPopupLetters] = useState<string | null>(null)
   const [popupQueue, setPopupQueue] = useState<string[]>([])
   const celebratedLinesRef = useRef<Set<number> | null>(null)
+  // Which prize card's reveal page is open (the winner and the winner's observers).
+  const [revealTask, setRevealTask] = useState<BingoTask | null>(null)
 
   // Which face this player is looking at. A one-face board never shows the
   // tabs, so nothing changes for the classic game.
@@ -646,6 +652,11 @@ function BoardScreen({
     const t = setTimeout(() => setPopupLetters(null), 4000)
     return () => clearTimeout(t)
   }, [popupLetters])
+
+  if (revealTask) {
+    const eventEnded = !!settings?.timer_end_at && new Date(settings.timer_end_at).getTime() < Date.now()
+    return <PrizeRevealScreen task={revealTask} memberId={localStorage.getItem('bingo-dash-member-id')} theme={theme} eventEnded={eventEnded} onBack={() => setRevealTask(null)} />
+  }
 
   return (
     <div className={`min-h-screen bg-gray-950 relative overflow-x-hidden ${theme === 'grab' ? 'grab-ui' : ''}`}>
@@ -786,6 +797,13 @@ function BoardScreen({
               )}
             </div>
           )}
+          {gridTasks.length > 0 && chatSectionId && (
+            <PrizeCardStrips
+              sectionId={chatSectionId} teamId={team.id} memberId={localStorage.getItem('bingo-dash-member-id')}
+              role={localStorage.getItem('bingo-dash-member-role') === 'observer' ? 'observer' : 'player'} theme={theme}
+              prizeTasks={prizeTasks} gridTasks={gridTasks} scans={scans} onOpen={setRevealTask}
+            />
+          )}
         </div>
       </main>
 
@@ -834,6 +852,7 @@ function BoardScreen({
 export function BingoDashHome() {
   const { team, loading: teamLoading, isRegistered, joinTeamById, leaveTeam } = useBingoDashTeam()
   const [gridTasks, setGridTasks] = useState<BingoTask[]>([])
+  const [prizeTasks, setPrizeTasks] = useState<BingoTask[]>([])
   const [scans, setScans] = useState<BingoScan[]>([])
   const reviews = useTeamReviews(team?.id)
   const [section, setSection] = useState<BingoSection | null>(null)
@@ -847,10 +866,11 @@ export function BingoDashHome() {
     supabase.from('bingo_settings').select('active_section_id').eq('id', 'main').maybeSingle()
       .then(async ({ data: settingsData }) => {
         const sectionId = settingsData?.active_section_id
-        if (!sectionId) { setGridTasks([]); setDataLoading(false); return }
+        if (!sectionId) { setGridTasks([]); setPrizeTasks([]); setDataLoading(false); return }
         setSectionId(sectionId)
         const taskData = await fetchBoardTasks(sectionId)
         setGridTasks(taskData)
+        setPrizeTasks(await fetchPrizeTasks(sectionId))
         const { data: sectionData } = await supabase
           .from('bingo_sections')
           .select('*')
@@ -1029,6 +1049,7 @@ export function BingoDashHome() {
         team={team!}
         chatSectionId={sectionId}
         theme={theme}
+        prizeTasks={prizeTasks}
         inviteUrl={team && section?.slug && team.password && localStorage.getItem('bingo-dash-member-role') !== 'observer'
           ? `${window.location.origin}/bingo-dash/play/${section.slug}?team=${team.id}&pw=${team.password}`
           : null}

@@ -31,6 +31,7 @@ const BingoDashAwardAdmin   = lazy(() => import('./pages/BingoDashAwardAdmin').t
 const BingoDashBriefingSlides = lazy(() => import('./pages/BingoDashBriefingSlides').then(m => ({ default: m.BingoDashBriefingSlides })))
 const BingoDashTeamMembers  = lazy(() => import('./pages/BingoDashTeamMembers').then(m => ({ default: m.BingoDashTeamMembers })))
 const BingoDashAllTeamsMembers = lazy(() => import('./pages/BingoDashAllTeamsMembers').then(m => ({ default: m.BingoDashAllTeamsMembers })))
+const BingoDashBoardPreview = lazy(() => import('./pages/BingoDashBoardPreview').then(m => ({ default: m.BingoDashBoardPreview })))
 const BingoDashAccounts     = lazy(() => import('./pages/BingoDashAccounts').then(m => ({ default: m.BingoDashAccounts })))
 const BingoDashJoinCrew     = lazy(() => import('./pages/BingoDashJoinCrew').then(m => ({ default: m.BingoDashJoinCrew })))
 const BingoDashCrew         = lazy(() => import('./pages/BingoDashCrew').then(m => ({ default: m.BingoDashCrew })))
@@ -57,6 +58,7 @@ export default function App() {
           <Route element={<BingoAuthProvider><Outlet /></BingoAuthProvider>}>
             <Route path="/bingo-dash/admin" element={<RequireBingoAdmin game="bingo"><BingoDashAdmin /></RequireBingoAdmin>} />
             <Route path="/bingo-dash/admin/task/:taskId" element={<RequireBingoAdmin game="bingo"><BingoDashTaskEdit /></RequireBingoAdmin>} />
+            <Route path="/bingo-dash/admin/board-preview/:sectionId" element={<RequireBingoAdmin game="bingo"><BingoDashBoardPreview /></RequireBingoAdmin>} />
             <Route path="/bingo-dash/accounts" element={<RequireBingoAdmin ownerOnly><BingoDashAccounts /></RequireBingoAdmin>} />
             <Route path="/bingo-dash/crew" element={<RequireBingoAdmin><BingoDashCrew /></RequireBingoAdmin>} />
             <Route path="/bingo-dash/account" element={<RequireBingoAdmin><BingoDashAccount /></RequireBingoAdmin>} />

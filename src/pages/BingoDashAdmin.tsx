@@ -1177,9 +1177,11 @@ export function BingoDashAdmin() {
   // slot alone, and a grid drag carries its slot so dragging one instance
   // never moves its twin.
   const taskById = useMemo(() => new Map(tasks.map(t => [t.id, t])), [tasks])
-  const boardTasksForSection = useCallback((sectionId: string): PlacedCard[] =>
+  // includePrize: the Card Library's board tab also lists the board's prize cards
+  // (slot 200+). They are never tiles, so every grid caller leaves it off.
+  const boardTasksForSection = useCallback((sectionId: string, includePrize = false): PlacedCard[] =>
     boardCards
-      .filter(bc => bc.section_id === sectionId && isGridSlot(bc.slot))   // prize cards (slot 200+) are not tiles
+      .filter(bc => bc.section_id === sectionId && (includePrize || isGridSlot(bc.slot)))
       .sort((a, b) => a.slot - b.slot)
       .map(bc => {
         const t = taskById.get(bc.task_id)
@@ -1431,7 +1433,7 @@ export function BingoDashAdmin() {
     const groups = mineSections.map(section => {
       const sectionTasks = libraryCompartmentFilter === 'all'
         ? libraryTasks.filter(t => t.section_id === section.id && isMineRow(t.owner_id))
-        : boardTasksForSection(section.id)
+        : boardTasksForSection(section.id, true)
       return { section: { id: section.id, name: section.name, foreign: false }, categories: byCategory(sectionTasks), totalTasks: sectionTasks.length }
     })
 
@@ -3735,7 +3737,7 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                 Drag tiles to reorder · Drag from list to place · Hover to move ◀▶ or remove ✕
               </p>
             </div>
-            <a href={currentSectionId ? `/bingo-dash/sample?board=${currentSectionId}` : playerViewPath}
+            <a href={currentSectionId ? `/bingo-dash/admin/board-preview/${currentSectionId}` : playerViewPath}
               target="_blank" rel="noopener noreferrer"
               className="text-xs text-teal-500 hover:text-violet-700 transition-colors">
               Preview ↗
@@ -3979,7 +3981,7 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                         </div>
                         <button
                           onClick={() => addCardFromLibrary(task)}
-                          disabled={gridTasks.length >= 25}
+                          disabled={gridTasks.length >= 25 && !task.is_prize}   // a prize card is not one of the 25
                           className="px-3 py-1 bg-teal-100/50 text-teal-500 border border-violet-700 rounded-lg text-xs font-bold hover:bg-teal-300/50 disabled:opacity-40 transition-colors flex-shrink-0"
                         >
                           + Add
@@ -4079,7 +4081,7 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                 onClick={() => setLibraryCompartmentFilter(s.id)}
                 className={`px-3 py-1.5 rounded-full text-xs font-bold transition-colors ${libraryCompartmentFilter === s.id ? 'bg-teal-600 a-text' : 'a-surface-2 a-text-3 hover:a-surface-2'}`}
               >
-                {s.name} ({boardTasksForSection(s.id).length})
+                {s.name} ({boardTasksForSection(s.id, true).length})
                 {activeBoardPointer === s.id && <span className="ml-1 text-green-400">●</span>}
               </button>
             ))}
@@ -4600,11 +4602,11 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                                 {libraryCompartmentFilter === 'all' ? (
                                   <div className="px-3 pb-3 flex items-start gap-1.5">
                                     <button onClick={() => addCardFromLibrary(task)}
-                                      disabled={!currentSectionId || gridTasks.length >= 25}
+                                      disabled={!currentSectionId || (gridTasks.length >= 25 && !task.is_prize)}
                                       className="flex-1 px-3 py-1.5 a-chip-btn rounded-lg text-xs font-bold transition-colors disabled:opacity-40"
                                       title={!currentSectionId
                                         ? 'Pick a board first'
-                                        : gridTasks.length >= 25
+                                        : gridTasks.length >= 25 && !task.is_prize
                                           ? `${currentBoard?.name ?? 'This board'} is full (25/25)`
                                           : isMineRow(task.owner_id)
                                             ? 'Place this card on the current board'

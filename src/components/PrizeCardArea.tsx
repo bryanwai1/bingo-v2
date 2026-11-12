@@ -26,7 +26,9 @@ function OneStrip({ task, count, teamId, memberId, role, theme, claim, onClaim, 
   const state = stripState({ count, threshold: task.prize_threshold ?? 20, claim, teamId, role })
 
   const press = async () => {
-    if (!memberId || !task.placement_id) { setMessage(tooLateText(null)); return }
+    // The old team-password page keeps no member row, so there is nobody to claim as.
+    if (!memberId) { setMessage('To claim this card, open the board from your team link and enter your name.'); return }
+    if (!task.placement_id) { setMessage(tooLateText(null)); return }
     setBusy(true); setMessage(null); setFailed(false)
     try {
       const r = await onClaim(memberId, task.placement_id)
@@ -36,7 +38,7 @@ function OneStrip({ task, count, teamId, memberId, role, theme, claim, onClaim, 
       setMessage('Could not reach the server. Check your connection and try again.')
     } finally { setBusy(false) }
   }
-  return <PrizeStrip state={state} theme={theme} busy={busy} message={state.kind === 'won' || state.kind === 'lost' ? null : message} failed={failed} title={task.title} onClaim={() => void press()} onOpen={onOpen} />
+  return <PrizeStrip state={state} theme={theme} busy={busy} message={state.kind === 'won' || state.kind === 'lost' ? null : message} failed={failed} title={task.title} hint={task.completion_warning} onClaim={() => void press()} onOpen={onOpen} />
 }
 
 /** One strip per prize card under the grid (AC-13). Renders nothing when the board has none. */
