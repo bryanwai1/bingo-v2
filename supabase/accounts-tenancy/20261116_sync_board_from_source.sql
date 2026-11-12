@@ -89,10 +89,10 @@ begin
     ]
     loop
       if to_regclass('public.' || child[1]) is not null then
-        execute format('delete from public.%I where %I = $1', child[1], child[2]) using tcard::text;
+        execute format('delete from public.%I where %I::text = $1', child[1], child[2]) using tcard::text;
         execute format(
-          'insert into public.%1$I select (jsonb_populate_record(null::public.%1$I, to_jsonb(c) || jsonb_build_object(%2$L, gen_random_uuid(), %3$L, $1, %4$L, now()))).* from public.%1$I c where c.%3$I = $2',
-          child[1], 'id', child[2], 'created_at') using tcard::text, r.src_id;
+          'insert into public.%1$I select (jsonb_populate_record(null::public.%1$I, to_jsonb(c) || jsonb_build_object(%2$L, gen_random_uuid(), %3$L, $1, %4$L, now()))).* from public.%1$I c where c.%3$I::text = $2',
+          child[1], 'id', child[2], 'created_at') using tcard::text, r.src_id::text;
       end if;
     end loop;
 

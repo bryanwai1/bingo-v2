@@ -12,29 +12,37 @@ interface Props {
   /** True when `message` is a failure to reach the server (shows TRY AGAIN). */
   failed?: boolean
   title?: string
+  /** Admin's reminder text for the locked state; empty = default. */
+  hint?: string | null
   onClaim: () => void
   onOpen: () => void
 }
 
 const box = 'rounded-2xl border px-3 py-3 grid grid-cols-[3.5rem_minmax(0,1fr)] gap-x-3 gap-y-2 items-center min-h-[104px] text-left w-full'
-const boxStyle = (accent: boolean) => ({
-  background: accent ? 'var(--pz-soft)' : 'var(--pz-surface)',
-  borderColor: accent ? 'var(--pz-accent)' : 'var(--pz-border)',
+const boxStyle = (accent: boolean) => accent ? {
+  background: 'linear-gradient(135deg, var(--pz-soft), rgba(8,10,16,.55))',
+  borderColor: 'var(--pz-accent)',
+  borderWidth: 2,
+  boxShadow: '0 0 18px var(--pz-soft), inset 0 0 12px var(--pz-soft)',
   color: 'var(--pz-text)',
-})
+} : {
+  background: 'var(--pz-surface)',
+  borderColor: 'var(--pz-border)',
+  color: 'var(--pz-text)',
+}
 
 function Medal({ filled, children }: { filled: boolean; children: React.ReactNode }) {
   return (
     <span
       className="w-14 h-14 rounded-full flex items-center justify-center text-2xl font-black"
       style={filled
-        ? { background: 'var(--pz-accent)', color: 'var(--pz-ink)' }
+        ? { background: 'radial-gradient(circle at 30% 25%, #fff3b0, var(--pz-accent) 60%)', color: 'var(--pz-ink)', boxShadow: '0 0 16px var(--pz-accent)' }
         : { border: '2px solid var(--pz-border)', color: 'var(--pz-text2)' }}
     >{children}</span>
   )
 }
 
-export function PrizeStrip({ state, theme, busy, message, failed, title, onClaim, onOpen }: Props) {
+export function PrizeStrip({ state, theme, busy, message, failed, title, hint, onClaim, onOpen }: Props) {
   const name = title?.trim() || 'Prize card'
   const root = { ...prizeVars(theme) }
 
@@ -65,13 +73,16 @@ export function PrizeStrip({ state, theme, busy, message, failed, title, onClaim
   if (state.kind === 'locked') {
     const pct = state.threshold > 0 ? Math.min(100, (state.count / state.threshold) * 100) : 0
     return (
-      <div className={box} style={{ ...root, ...boxStyle(false) }} aria-live="polite">
-        <Medal filled={false}>?</Medal>
+      <div className={box} style={{ ...root, ...boxStyle(true) }} aria-live="polite">
+        <Medal filled>?</Medal>
         <span className="min-w-0">
-          <span className="flex items-center gap-1.5 text-xs font-black uppercase tracking-widest" style={{ color: 'var(--pz-text2)' }}><LockIcon size={14} />{name}</span>
+          <span className="flex items-center gap-1.5 text-xs font-black uppercase tracking-widest" style={{ color: 'var(--pz-accent-text)' }}><LockIcon size={14} />{name}</span>
           <span className="block text-base font-bold">{state.count} / {state.threshold} cards</span>
-          <span className="mt-1.5 block h-1.5 rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,.12)' }} role="progressbar" aria-valuemin={0} aria-valuemax={state.threshold} aria-valuenow={state.count}>
-            <span className="block h-full rounded-full" style={{ width: `${pct}%`, background: 'var(--pz-accent)' }} />
+          <span className="block text-sm font-semibold" style={{ color: 'var(--pz-accent-text)' }}>
+            {hint?.trim() || `Complete ${state.threshold} cards to unlock this prize${state.threshold > state.count ? ` · ${state.threshold - state.count} to go` : ''}`}
+          </span>
+          <span className="mt-1.5 block h-1.5 rounded-full overflow-hidden" style={{ background: 'rgba(0,0,0,.35)' }} role="progressbar" aria-valuemin={0} aria-valuemax={state.threshold} aria-valuenow={state.count}>
+            <span className="block h-full rounded-full" style={{ width: `${pct}%`, background: 'linear-gradient(90deg, var(--pz-accent), #fff3b0)', boxShadow: '0 0 8px var(--pz-accent)' }} />
           </span>
           {message && <span role="status" className="mt-1.5 block text-sm font-bold [overflow-wrap:anywhere]">{message}</span>}
         </span>

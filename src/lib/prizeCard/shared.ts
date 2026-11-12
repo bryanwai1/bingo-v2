@@ -10,7 +10,7 @@ export type PrizeTheme = 'default' | 'grab'
 export function prizeVars(theme: PrizeTheme): CSSProperties {
   const v = theme === 'grab'
     ? { '--pz-accent': '#00B14F', '--pz-ink': '#02150a', '--pz-text': '#ffffff', '--pz-text2': '#f3f4f6', '--pz-soft': 'rgba(0,177,79,.22)', '--pz-accent-text': '#4ade80', '--pz-surface': 'rgba(8,10,16,.58)', '--pz-border': 'rgba(255,255,255,.18)' }
-    : { '--pz-accent': '#fbbf24', '--pz-ink': '#1c1300', '--pz-text': '#f4f6f9', '--pz-text2': 'rgba(244,246,249,.74)', '--pz-soft': 'rgba(251,191,36,.16)', '--pz-accent-text': '#fbbf24', '--pz-surface': 'rgba(255,255,255,.06)', '--pz-border': 'rgba(255,255,255,.16)' }
+    : { '--pz-accent': '#ffc400', '--pz-ink': '#1c1300', '--pz-text': '#f4f6f9', '--pz-text2': 'rgba(244,246,249,.74)', '--pz-soft': 'rgba(255,196,0,.26)', '--pz-accent-text': '#ffd84a', '--pz-surface': 'rgba(255,255,255,.06)', '--pz-border': 'rgba(255,255,255,.16)' }
   return v as CSSProperties
 }
 
