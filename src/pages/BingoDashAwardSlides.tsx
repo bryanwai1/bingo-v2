@@ -1402,17 +1402,12 @@ function SlideCanvas({ children }: { children: React.ReactNode }) {
 }
 
 /**
- * Photo precedence: per-place override -> the team's own photo. With neither,
- * the slide shows the ceremony logo instead (see PlaceSlide); a board whose
- * logo is set to "none" falls through to the artwork's own placeholder panel.
+ * The winning group's photo from the Teams page. Without one the slide shows
+ * the ceremony logo instead (see PlaceSlide); a board whose logo is set to
+ * "none" falls through to the artwork's own placeholder panel.
  */
-function placePhoto(
-  config: BingoAwardConfig | null,
-  slideId: string,
-  team: BingoTeam | null | undefined,
-): string | null {
-  const overrides = config?.slide_photos ?? {}
-  return overrides[slideId] || team?.photo_url || null
+function placePhoto(team: BingoTeam | null | undefined): string | null {
+  return team?.photo_url || null
 }
 
 /** Shrinks to stay on one line: a wrapped numeral in a fixed slot looks
@@ -1464,7 +1459,7 @@ function PlaceSlide({
 }) {
   const kind = descriptor.kind as PlaceKind
   const team = ranked?.team
-  const photo = placePhoto(config, descriptor.id, team)
+  const photo = placePhoto(team)
   const logo = customLogo(readSlideText(config?.slide_text).logo)
   const slogan = config?.award_slogan?.trim() || ''
   const art = placeArt(kind)

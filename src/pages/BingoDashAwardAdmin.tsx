@@ -13,7 +13,6 @@ import {
   countsFromOrder,
   defaultSlideOrder,
   isPrizeKind,
-  isPlaceKind,
   normalizeSlideOrder,
   readSlideText,
   removeSlide,
@@ -92,10 +91,6 @@ export function BingoDashAwardAdmin() {
   const [loaded, setLoaded] = useState(false)
   const [saving, setSaving] = useState(false)
   const [savedAt, setSavedAt] = useState<number | null>(null)
-  const awardFileRef = useRef<HTMLInputElement>(null)
-  /** Which place slide the file dialog was opened for; null = apply-to-all. */
-  const pendingAwardRef = useRef<string | null>(null)
-  const [uploadingAward, setUploadingAward] = useState<string | null>(null)
 
   useEffect(() => {
     if (!sectionSlug) return
@@ -381,48 +376,6 @@ export function BingoDashAwardAdmin() {
     })
   }
 
-  /**
-   * Uploads to the same public `media` bucket as team photos, with the same
-   * 5 MB / image-only guards. Unlike the team flow this writes ONLY to draft
-   * state - an award photo is not a team's photo, and saving is the Save
-   * button's job.
-   *
-   * `slideId` null targets the shared apply-to-all photo.
-   */
-  const uploadAwardPhoto = async (slideId: string | null, file: File) => {
-    if (file.size > 5 * 1024 * 1024) { alert(`${file.name} too large (max 5 MB).`); return }
-    if (!file.type.startsWith('image/')) { alert('Please choose an image file.'); return }
-    setUploadingAward(slideId ?? 'all')
-    try {
-      const ext = file.name.split('.').pop() || 'jpg'
-      const path = `bingo-media/award-photos/${section?.id ?? 'board'}-${Date.now()}.${ext}`
-      const { error } = await supabase.storage.from('media').upload(path, file)
-      if (error) { alert(`Upload failed: ${error.message}`); return }
-      const url = supabase.storage.from('media').getPublicUrl(path).data.publicUrl
-      setDraft(d => slideId
-        ? { ...d, slide_photos: { ...d.slide_photos, [slideId]: url } }
-        : { ...d, image_url: url })
-    } finally {
-      setUploadingAward(null)
-    }
-  }
-
-  const setPlacePhoto = (slideId: string, url: string | null) => {
-    setDraft(d => {
-      if (!url) {
-        const rest = { ...d.slide_photos }
-        delete rest[slideId]
-        return { ...d, slide_photos: rest }
-      }
-      return { ...d, slide_photos: { ...d.slide_photos, [slideId]: url } }
-    })
-  }
-
-  const pickAwardPhoto = (slideId: string | null) => {
-    pendingAwardRef.current = slideId
-    awardFileRef.current?.click()
-  }
-
   const save = async (): Promise<boolean> => {
     if (!section) return false
     setSaving(true)
@@ -636,22 +589,8 @@ export function BingoDashAwardAdmin() {
 
           <section id="editor-place" className="bg-white rounded-2xl border border-gray-200 p-6">
             <h2 className="font-black text-gray-900 mb-1">Place slides (1st – 6th)</h2>
-            <input
-              ref={awardFileRef}
-              type="file"
-              accept="image/*"
-              className="hidden"
-              onChange={e => {
-                const file = e.target.files?.[0]
-                const slideId = pendingAwardRef.current
-                pendingAwardRef.current = null
-                e.target.value = ''
-                if (file) void uploadAwardPhoto(slideId, file)
-              }}
-            />
             <p className="text-sm text-gray-600 mb-4">
-              The slogan below is shared by all five place slides. Any place can
-              have its own photo in the slide list.
+              The slogan below is shared by all five place slides.
             </p>
 
             <label className="block text-sm font-semibold text-gray-700 mb-1">Slogan</label>
@@ -667,8 +606,8 @@ export function BingoDashAwardAdmin() {
             </p>
 
             <p className="text-[11px] text-gray-400 mt-3">
-              Each place shows its own uploaded photo (set in the slide list), else
-              the winning group's team photo, else the logo from the main slide.
+              Each place shows the winning group's photo from the Teams page, else
+              the logo from the main slide.
             </p>
           </section>
 
@@ -934,40 +873,6 @@ export function BingoDashAwardAdmin() {
                       </p>
                       <p className="text-[11px] text-gray-500 truncate">{subtitle}</p>
                     </div>
-
-                    {isPlaceKind(s.kind) && (
-                      <div className="flex items-center gap-2 shrink-0">
-                        <div className="w-10 h-10 rounded-lg overflow-hidden bg-gray-100 border border-gray-200 flex items-center justify-center">
-                          {draft.slide_photos[s.id]
-                            ? <img src={draft.slide_photos[s.id]} alt="" className="w-full h-full object-cover" />
-                            : <span className="text-gray-300 text-sm">👥</span>}
-                        </div>
-                        <div className="flex flex-col gap-0.5">
-                          <div className="flex gap-1">
-                            <button
-                              onClick={() => pickAwardPhoto(s.id)}
-                              disabled={uploadingAward === s.id}
-                              className="px-1.5 py-0.5 rounded border border-gray-200 bg-white text-[10px] font-bold text-gray-600 hover:bg-gray-50 disabled:opacity-50"
-                              title="Upload a photo for this place only"
-                            >
-                              {uploadingAward === s.id ? '…' : 'Upload'}
-                            </button>
-                            {draft.slide_photos[s.id] && (
-                              <button
-                                onClick={() => setPlacePhoto(s.id, null)}
-                                className="px-1.5 py-0.5 rounded border border-gray-200 bg-white text-[10px] font-bold text-gray-600 hover:bg-red-50 hover:text-red-600"
-                                title="Fall back to the team photo, then the logo"
-                              >
-                                Clear
-                              </button>
-                            )}
-                          </div>
-                          <span className="text-[9px] text-gray-400">
-                            {draft.slide_photos[s.id] ? 'own photo' : 'team photo / logo'}
-                          </span>
-                        </div>
-                      </div>
-                    )}
 
                     <span className="text-[10px] font-mono text-gray-400 w-5 text-right">{i + 1}</span>
 
