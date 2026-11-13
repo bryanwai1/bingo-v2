@@ -168,7 +168,7 @@ function GameToggle({ label, on, busy, onToggle }: {
 
 export function BingoDashAccounts() {
   const navigate = useNavigate()
-  const { account: me, supportFor, enterSupport, exitSupport } = useBingoAuth()
+  const { account: me, supportFor, exitSupport } = useBingoAuth()
   // Coming back to this page ends support mode.
   useEffect(() => { if (supportFor) exitSupport() }, [supportFor, exitSupport])
   // The account whose board tools (give / sync / undo) are open
@@ -264,9 +264,10 @@ export function BingoDashAccounts() {
 
   // Support mode: open the normal admin page working as this account — the
   // same page they see, so every setting on it can be changed for them.
+  // It opens in a new tab: support mode is per tab, so this tab stays on the
+  // owner's own account.
   const openTenantAdmin = (a: BingoAccount) => {
-    enterSupport(a)
-    navigate('/bingo-dash/admin')
+    window.open(`/bingo-dash/admin?support=${a.id}`, '_blank', 'noopener')
   }
 
   const saveTemplate = async (sectionId: string) => {

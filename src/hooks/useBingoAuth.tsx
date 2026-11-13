@@ -59,6 +59,27 @@ export function BingoAuthProvider({ children }: { children: ReactNode }) {
     sessionStorage.removeItem(SUPPORT_KEY)
     setSupportTenant(null)
   }, [])
+  // "Manage boards" opens a new tab at ?support=<account id>. Until that
+  // account is loaded the tab stays on "Loading…", so no page ever renders
+  // with the owner's own boards first.
+  const [pendingSupport, setPendingSupport] = useState<string | null>(
+    () => new URLSearchParams(window.location.search).get('support'))
+  useEffect(() => {
+    if (!pendingSupport || loading) return
+    let active = true
+    ;(async () => {
+      if (account?.role === 'owner' && account.status === 'approved') {
+        const { data } = await supabase.from('bingo_accounts').select('*').eq('id', pendingSupport).maybeSingle()
+        if (!active) return
+        if (data && (data as BingoAccount).role !== 'owner') enterSupport(data as BingoAccount)
+      }
+      const url = new URL(window.location.href)
+      url.searchParams.delete('support')
+      window.history.replaceState(null, '', url)
+      setPendingSupport(null)
+    })()
+    return () => { active = false }
+  }, [pendingSupport, loading, account, enterSupport])
 
   const loadAccount = useCallback(async (userId: string | undefined) => {
     if (!userId) { setAccount(null); setHostAccount(null); return }
@@ -176,7 +197,7 @@ export function BingoAuthProvider({ children }: { children: ReactNode }) {
     session,
     account: supportFor,
     hostAccount: null,
-    loading,
+    loading: loading || !!pendingSupport,
     isOwner: false,
     isApproved: true,
     isFacilitator: false,
@@ -188,7 +209,7 @@ export function BingoAuthProvider({ children }: { children: ReactNode }) {
     session,
     account,
     hostAccount,
-    loading,
+    loading: loading || !!pendingSupport,
     isOwner: realIsOwner,
     isApproved: account?.status === 'approved',
     isFacilitator,
@@ -216,7 +237,9 @@ export function BingoAuthProvider({ children }: { children: ReactNode }) {
         <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-[60] flex items-center gap-3 px-4 py-2 rounded-2xl bg-amber-400 text-black shadow-lg max-w-[92vw]">
           <span className="text-xs font-black truncate">Support mode: you are editing {supportFor.email ?? 'a client'}'s boards</span>
           <button
-            onClick={() => { exitSupport(); window.location.assign('/bingo-dash/accounts') }}
+            // Support mode lives in its own tab: close it, or go back to
+            // Accounts when the browser will not close a tab it did not open.
+            onClick={() => { exitSupport(); window.close(); window.location.assign('/bingo-dash/accounts') }}
             className="px-3 py-1 rounded-xl text-xs font-black bg-black text-white hover:bg-black/80 flex-shrink-0">
             Exit
           </button>
