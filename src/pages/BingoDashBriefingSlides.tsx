@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { QRCodeSVG } from 'qrcode.react'
 import { supabase } from '../lib/supabase'
@@ -8,6 +8,8 @@ import { useBoardReset } from '../hooks/useBoardReset'
 import { ParticleBackground } from '../components/ParticleBackground'
 import type { BingoSection } from '../types/database'
 import { bonusCheckpoints, bonusPoints, resolveBonusWindow, type BonusWindow } from '../lib/timeBonus'
+import { fetchBoardTasks } from '../lib/boardCards'
+import { chainInfoFn, prereqResolver, shortenTitle, withCategoryColors } from '../lib/bingoTileDisplay'
 
 /**
  * BINGO DASH — Participant briefing deck.
@@ -109,6 +111,7 @@ type SlideKind =
   | 'roles'
   | 'submissions'
   | 'how-to-submit'
+  | 'unlock-chain'
   | 'preview-clue'
   | 'join-qr'
   | 'qr-wish'
@@ -124,10 +127,36 @@ const SLIDES: SlideKind[] = [
   'roles',
   'submissions',
   'how-to-submit',
+  'unlock-chain',
   'preview-clue',
   'join-qr',
   'qr-wish',
 ]
+
+/** One card of the board's unlock chain, in the order teams open them. */
+type ChainStep = { id: string; title: string; hex: string; points: number }
+
+/**
+ * The board's unlock chain, start card first and the treasure last. Read from
+ * the cards placed on this board (bingo_tasks.prerequisite_task_id), using the
+ * same helpers as the player board so the slide always agrees with it. Empty
+ * when the board has no chain.
+ */
+async function loadUnlockChain(sectionId: string): Promise<ChainStep[]> {
+  const tasks = withCategoryColors(await fetchBoardTasks(sectionId))
+  const infoOf = chainInfoFn(tasks)
+  const end = tasks.find(t => infoOf(t)?.role === 'end')
+  if (!end) return []
+  const prereqOf = prereqResolver(tasks)
+  const byId = new Map(tasks.map(t => [t.id, t]))
+  const steps: ChainStep[] = []
+  for (let cur: typeof end | undefined = end, g = 0; cur && g < 100; g++) {
+    steps.unshift({ id: cur.id, title: cur.title, hex: cur.hex_code, points: cur.points ?? 0 })
+    const p = prereqOf(cur)
+    cur = p ? byId.get(p) : undefined
+  }
+  return steps.length > 1 ? steps : []
+}
 
 function BriefingShow({ sectionSlug }: { sectionSlug: string }) {
   const navigate = useNavigate()
@@ -135,13 +164,17 @@ function BriefingShow({ sectionSlug }: { sectionSlug: string }) {
   const [section, setSection] = useState<BingoSection | null>(null)
   const [loaded, setLoaded] = useState(false)
   const [slideIdx, setSlideIdx] = useState(0)
+  const [unlockChain, setUnlockChain] = useState<ChainStep[]>([])
   const { workingOwnerValue } = useBingoAuth()
 
   useEffect(() => {
     supabase.from('bingo_sections').select('*').eq('slug', sectionSlug).maybeSingle()
-      .then(({ data }) => {
+      .then(async ({ data }) => {
         // Someone else's board is treated as not found.
-        setSection(data && (data.owner_id ?? null) === workingOwnerValue ? data : null)
+        const own = data && (data.owner_id ?? null) === workingOwnerValue ? data : null
+        // Read the chain before the deck shows, so the slide count never shifts mid-briefing.
+        if (own) setUnlockChain(await loadUnlockChain(own.id).catch(() => []))
+        setSection(own)
         setLoaded(true)
       })
     // Live-sync board edits (timer, name, …) made in admin while the deck is open
@@ -157,9 +190,11 @@ function BriefingShow({ sectionSlug }: { sectionSlug: string }) {
   // Reset Game on this board: start the deck over for the next event.
   useBoardReset(section?.id, () => setSlideIdx(0))
 
-  const totalSlides = SLIDES.length
+  // A board with no unlock chain has nothing to explain, so that slide is left out.
+  const slides = unlockChain.length > 1 ? SLIDES : SLIDES.filter(k => k !== 'unlock-chain')
+  const totalSlides = slides.length
   const safeIdx = Math.min(slideIdx, totalSlides - 1)
-  const kind = SLIDES[safeIdx]
+  const kind = slides[safeIdx]
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -207,7 +242,7 @@ function BriefingShow({ sectionSlug }: { sectionSlug: string }) {
       onClick={() => setSlideIdx(i => Math.min(totalSlides - 1, i + 1))}
       style={slideStyle}
     >
-      <SlideRenderer key={safeIdx} kind={kind} slideIdx={safeIdx} sectionSlug={sectionSlug} sectionName={section.name} timerSeconds={section.timer_seconds ?? 0} bonusWindow={resolveBonusWindow(null, section)} />
+      <SlideRenderer key={safeIdx} kind={kind} slideIdx={safeIdx} sectionSlug={sectionSlug} sectionName={section.name} timerSeconds={section.timer_seconds ?? 0} unlockChain={unlockChain} bonusWindow={resolveBonusWindow(null, section)} />
 
       {/* Top nav */}
       <div className="absolute top-5 left-6 right-6 flex items-center justify-between text-[11px] text-white/60 font-semibold uppercase tracking-[0.25em] z-40">
@@ -261,8 +296,8 @@ function BriefingShow({ sectionSlug }: { sectionSlug: string }) {
 }
 
 // ── Slide router ─────────────────────────────────────────────────────────
-function SlideRenderer({ kind, slideIdx, sectionSlug, sectionName, timerSeconds, bonusWindow }: {
-  kind: SlideKind; slideIdx: number; sectionSlug: string; sectionName: string; timerSeconds: number; bonusWindow: BonusWindow
+function SlideRenderer({ kind, slideIdx, sectionSlug, sectionName, timerSeconds, unlockChain, bonusWindow }: {
+  kind: SlideKind; slideIdx: number; sectionSlug: string; sectionName: string; timerSeconds: number; unlockChain: ChainStep[]; bonusWindow: BonusWindow
 }) {
   switch (kind) {
     case 'main':           return <MainSlide slideIdx={slideIdx} sectionName={sectionName} sectionSlug={sectionSlug} />
@@ -275,6 +310,7 @@ function SlideRenderer({ kind, slideIdx, sectionSlug, sectionName, timerSeconds,
     case 'roles':          return <RolesSlide slideIdx={slideIdx} />
     case 'submissions':    return <SubmissionTypesSlide slideIdx={slideIdx} />
     case 'how-to-submit':  return <HowToSubmitSlide slideIdx={slideIdx} />
+    case 'unlock-chain':   return <UnlockChainSlide slideIdx={slideIdx} steps={unlockChain} />
     case 'preview-clue':   return <PreviewClueSlide slideIdx={slideIdx} />
     case 'join-qr':        return <JoinQrSlide slideIdx={slideIdx} sectionSlug={sectionSlug} sectionName={sectionName} />
     case 'qr-wish':        return <QrWishSlide slideIdx={slideIdx} sectionSlug={sectionSlug} sectionName={sectionName} />
@@ -958,6 +994,101 @@ function HowToSubmitSlide({ slideIdx }: { slideIdx: number }) {
   )
 }
 
+// ── 7a. Unlock cards (the chain comes from the board's own cards) ───────
+function UnlockChainSlide({ slideIdx, steps }: { slideIdx: number; steps: ChainStep[] }) {
+  const sans = { fontFamily: 'system-ui, -apple-system, sans-serif' }
+  const total = steps.length
+  const lockedCount = total - 1
+  const treasure = steps[total - 1]
+  const size = total <= 6 ? 104 : total <= 9 ? 84 : 68
+  const period = Math.max(6, total * 1.2) // seconds for the highlight to walk the whole chain
+  const info = [
+    { icon: '✅', title: 'Finish the START card', tint: '#34d399',
+      body: 'Do the task and submit it, just like any other tile.' },
+    { icon: '🎬', title: 'Tap “Next card”', tint: '#fbbf24',
+      body: 'The button appears under the task once you submit. The next card opens on its own when your answer is approved.' },
+    { icon: '🏆', title: 'Reach the treasure', tint: '#f472b6',
+      body: treasure.points > 0
+        ? `Keep going, card by card. The last one is the treasure — worth ${treasure.points} points.`
+        : 'Keep going, card by card. The last one is the treasure.' },
+  ]
+  return (
+    <ContentShell slideIdx={slideIdx} pretitle={`Unlock Cards · ${total} Steps`} title="Chase the Treasure" beam="#fcd34d">
+      <div className="relative z-10 flex flex-col items-center gap-7 max-w-6xl w-full mx-auto">
+        {/* The chain itself: 1 open START card, then the locked ones, treasure last */}
+        <div className="flex flex-wrap items-start justify-center gap-y-4 px-4 py-5 rounded-3xl border-2 border-white/10 bg-black/30"
+             style={{ animation: 'pop-bounce-in 0.7s cubic-bezier(0.34,1.56,0.64,1) 0.4s both' }}>
+          {steps.map((s, i) => {
+            const isStart = i === 0
+            const isEnd = i === total - 1
+            return (
+              <div key={s.id} className="flex items-start">
+                {i > 0 && (
+                  <span className="text-amber-200/70 font-black px-1.5 sm:px-2.5"
+                        style={{ ...sans, lineHeight: `${size}px`, fontSize: size * 0.24,
+                                 animation: `slide-up-fade 0.5s ease-out ${0.6 + i * 0.1}s both` }}>
+                    ➜
+                  </span>
+                )}
+                <div className="flex flex-col items-center gap-2"
+                     style={{ width: size, animation: `slide-up-fade 0.5s ease-out ${0.6 + i * 0.1}s both` }}>
+                  <div style={{ animation: `ladder-pulse ${period}s linear ${0.4 + i * 1.2}s infinite` }}>
+                    <div className="relative rounded-xl border-2 flex items-center justify-center"
+                         style={{
+                           width: size, height: size,
+                           background: s.hex,
+                           borderColor: isStart ? '#6ee7b7' : isEnd ? '#fde68a' : 'rgba(255,255,255,0.25)',
+                           boxShadow: isStart ? '0 0 22px rgba(52,211,153,0.6)' : isEnd ? '0 0 26px rgba(251,191,36,0.6)' : 'none',
+                           filter: isStart || isEnd ? undefined : 'grayscale(0.85) brightness(0.8)',
+                         }}>
+                      <span className={`absolute top-1 left-1 text-[10px] font-black rounded px-1.5 py-0.5 leading-tight shadow ${isStart ? 'bg-emerald-400 text-black' : 'bg-black/60 text-white'}`}
+                            style={sans}>
+                        {isStart ? 'START' : `${i + 1}/${total}`}
+                      </span>
+                      {isEnd
+                        ? <img src="/grab/icons/treasure.png" alt="" draggable={false} className="w-[70%] h-[70%] object-contain" />
+                        : <span style={{ fontSize: size * 0.36, lineHeight: 1 }}>{isStart ? '🔓' : '🔒'}</span>}
+                    </div>
+                  </div>
+                  <p className="text-white/85 text-[11px] sm:text-xs font-bold leading-tight text-center break-words w-full" style={sans}>
+                    {shortenTitle(s.title, 26)}
+                  </p>
+                  {isEnd && treasure.points > 0 && (
+                    <span className="px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-[0.2em] text-amber-100"
+                          style={{ ...sans, background: '#fbbf2433' }}>
+                      {treasure.points} pts
+                    </span>
+                  )}
+                </div>
+              </div>
+            )
+          })}
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 w-full">
+          {info.map((c, i) => (
+            <div key={c.title} className="p-5 rounded-2xl border-2 text-left"
+                 style={{
+                   borderColor: `${c.tint}55`,
+                   background: `linear-gradient(160deg, ${c.tint}22 0%, rgba(0,0,0,0.4) 100%)`,
+                   animation: `pop-bounce-in 0.55s cubic-bezier(0.34,1.56,0.64,1) ${0.95 + i * 0.12}s both`,
+                 }}>
+              <div className="text-4xl leading-none">{c.icon}</div>
+              <p className="text-white font-black text-lg mt-2">{c.title}</p>
+              <p className="text-white/75 text-sm mt-1 leading-snug" style={sans}>{c.body}</p>
+            </div>
+          ))}
+        </div>
+
+        <p className="text-white/70 text-sm sm:text-base px-5 py-3 rounded-2xl border border-white/15 bg-white/5"
+           style={{ ...sans, animation: 'slide-up-fade 0.6s ease-out 1.35s both' }}>
+          🔒 1 START card, then {lockedCount} locked {lockedCount === 1 ? 'card' : 'cards'} — they open one at a time, in order. No skipping ahead.
+        </p>
+      </div>
+    </ContentShell>
+  )
+}
+
 // ── 7b. Preview a Clue · opens the sample board ─────────────────────────
 const SAMPLE_BOARD_PATH = '/bingo-dash/sample'
 
@@ -1079,8 +1210,29 @@ function ContentShell({ slideIdx, pretitle, title, beam, children }: {
   beam: string
   children: React.ReactNode
 }) {
+  // Shrink the slide's content to fit the space between the top bar (nav +
+  // progress dots) and the bottom hint, so a tall slide on a short screen
+  // never runs under them. Never enlarges; a slide that fits is untouched.
+  const shellRef = useRef<HTMLDivElement>(null)
+  const fitRef = useRef<HTMLDivElement>(null)
+  const [scale, setScale] = useState(1)
+  useLayoutEffect(() => {
+    const shell = shellRef.current, fit = fitRef.current
+    if (!shell || !fit) return
+    const measure = () => {
+      const cs = getComputedStyle(shell)
+      const availH = shell.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom)
+      const availW = shell.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight)
+      const next = Math.min(1, availH / fit.offsetHeight, availW / fit.scrollWidth)
+      setScale(Number.isFinite(next) && next > 0 ? next : 1)
+    }
+    measure()
+    const ro = new ResizeObserver(measure)
+    ro.observe(shell); ro.observe(fit)
+    return () => ro.disconnect()
+  }, [])
   return (
-    <div key={slideIdx} className="absolute inset-0 flex flex-col items-center justify-center text-center px-6 sm:px-10 py-20 award-slide-enter overflow-hidden">
+    <div key={slideIdx} ref={shellRef} className="absolute inset-0 flex flex-col items-center justify-center text-center px-6 sm:px-10 py-20 award-slide-enter overflow-hidden">
       <div className="absolute top-1/2 left-1/2 pointer-events-none z-0" style={{
         width: '160vmax', height: '160vmax',
         background: `conic-gradient(from 0deg, transparent 0deg, ${beam}33 18deg, transparent 40deg, transparent 170deg, ${beam}22 200deg, transparent 230deg, transparent 360deg)`,
@@ -1088,6 +1240,8 @@ function ContentShell({ slideIdx, pretitle, title, beam, children }: {
         opacity: 0.6,
       }} />
 
+      <div ref={fitRef} className="relative z-10 w-full flex-shrink-0 flex flex-col items-center"
+           style={{ transform: scale < 1 ? `scale(${scale})` : undefined, transformOrigin: 'center' }}>
       <p className="relative z-10 text-[11px] sm:text-xs font-bold uppercase tracking-[0.5em] text-amber-200/80"
          style={{ animation: 'slide-down-fade 0.55s ease-out 0.1s both' }}>
         {pretitle}
@@ -1102,6 +1256,7 @@ function ContentShell({ slideIdx, pretitle, title, beam, children }: {
       </h1>
 
       {children}
+      </div>
     </div>
   )
 }
