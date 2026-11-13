@@ -20,6 +20,16 @@ interface BingoAuthValue {
    * (null when the host is the owner), sub -> own uid.
    */
   workingOwnerValue: string | null
+  /**
+   * Support mode: the owner is working as this tenant. While set, `account`,
+   * `isOwner` and `workingOwnerValue` describe the TENANT, so every admin page
+   * shows exactly what they see. The database still knows the real owner.
+   */
+  supportFor: BingoAccount | null
+  /** The signed-in login really is the owner, support mode or not. */
+  realIsOwner: boolean
+  enterSupport: (tenant: BingoAccount) => void
+  exitSupport: () => void
   signInWithPassword: (email: string, password: string) => Promise<void>
   signUpWithPassword: (email: string, password: string) => Promise<{ needsConfirmation: boolean }>
   signInWithGoogle: (redirectTo?: string) => Promise<void>
@@ -30,12 +40,25 @@ interface BingoAuthValue {
 }
 
 const BingoAuthContext = createContext<BingoAuthValue | null>(null)
+const SUPPORT_KEY = 'bingo-dash-support-tenant'
 
 export function BingoAuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null)
   const [account, setAccount] = useState<BingoAccount | null>(null)
   const [hostAccount, setHostAccount] = useState<BingoAccount | null>(null)
   const [loading, setLoading] = useState(true)
+  // Per tab, so a second tab stays on the owner's own boards.
+  const [supportTenant, setSupportTenant] = useState<BingoAccount | null>(() => {
+    try { return JSON.parse(sessionStorage.getItem(SUPPORT_KEY) ?? 'null') } catch { return null }
+  })
+  const enterSupport = useCallback((tenant: BingoAccount) => {
+    sessionStorage.setItem(SUPPORT_KEY, JSON.stringify(tenant))
+    setSupportTenant(tenant)
+  }, [])
+  const exitSupport = useCallback(() => {
+    sessionStorage.removeItem(SUPPORT_KEY)
+    setSupportTenant(null)
+  }, [])
 
   const loadAccount = useCallback(async (userId: string | undefined) => {
     if (!userId) { setAccount(null); setHostAccount(null); return }
@@ -146,15 +169,31 @@ export function BingoAuthProvider({ children }: { children: ReactNode }) {
   const refreshAccount = useCallback(() => loadAccount(session?.user.id), [loadAccount, session])
 
   const isFacilitator = !!account?.facilitator_host
-  const value: BingoAuthValue = {
+  const realIsOwner = account?.role === 'owner' && account?.status === 'approved'
+  // Only the real owner can be in support mode; a stale value is ignored.
+  const supportFor = realIsOwner ? supportTenant : null
+  const value: BingoAuthValue = supportFor ? {
+    session,
+    account: supportFor,
+    hostAccount: null,
+    loading,
+    isOwner: false,
+    isApproved: true,
+    isFacilitator: false,
+    isExpired: false,
+    workingOwnerValue: supportFor.id,
+    supportFor, realIsOwner, enterSupport, exitSupport,
+    signInWithPassword, signUpWithPassword, signInWithGoogle, signInAnonymously, signOut, refreshAccount,
+  } : {
     session,
     account,
     hostAccount,
     loading,
-    isOwner: account?.role === 'owner' && account?.status === 'approved',
+    isOwner: realIsOwner,
     isApproved: account?.status === 'approved',
     isFacilitator,
     isExpired: !!account?.access_expires_at && new Date(account.access_expires_at).getTime() <= Date.now(),
+    supportFor: null, realIsOwner, enterSupport, exitSupport,
     workingOwnerValue: !account
       ? null
       : account.role === 'owner'
@@ -170,7 +209,21 @@ export function BingoAuthProvider({ children }: { children: ReactNode }) {
     refreshAccount,
   }
 
-  return <BingoAuthContext.Provider value={value}>{children}</BingoAuthContext.Provider>
+  return (
+    <BingoAuthContext.Provider value={value}>
+      {children}
+      {supportFor && (
+        <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-[60] flex items-center gap-3 px-4 py-2 rounded-2xl bg-amber-400 text-black shadow-lg max-w-[92vw]">
+          <span className="text-xs font-black truncate">Support mode: you are editing {supportFor.email ?? 'a client'}'s boards</span>
+          <button
+            onClick={() => { exitSupport(); window.location.assign('/bingo-dash/accounts') }}
+            className="px-3 py-1 rounded-xl text-xs font-black bg-black text-white hover:bg-black/80 flex-shrink-0">
+            Exit
+          </button>
+        </div>
+      )}
+    </BingoAuthContext.Provider>
+  )
 }
 
 export function useBingoAuth(): BingoAuthValue {

@@ -798,7 +798,7 @@ const emptySlots = new Set<number>()
 
 export function BingoDashAdmin() {
   const navigate = useNavigate()
-  const { account, isOwner, workingOwnerValue, signOut } = useBingoAuth()
+  const { account, isOwner, workingOwnerValue, supportFor, signOut } = useBingoAuth()
   const uid = account?.id ?? null
   // Tenancy convention: owner_id NULL = main-account (house) data. The hook
   // resolves the working tenant: owner -> null, facilitator -> host tenant,
@@ -2006,10 +2006,17 @@ export function BingoDashAdmin() {
   // Per-account active board: the RPC validates ownership server-side and,
   // only for the owner, also moves the global bingo_settings pointer that the
   // anonymous front-door pages read. Subs never touch the global pointer.
+  // set_active_board acts on the signed-in login, which in support mode is the
+  // owner (it would move the owner's own front door). Point the tenant's
+  // account at the board instead.
+  const setLiveBoardRpc = (id: string) => supportFor
+    ? supabase.rpc('owner_set_account_active_board', { p_account: supportFor.id, p_section: id })
+    : supabase.rpc('set_active_board', { p_section: id })
+
   const setActiveSection = async (id: string) => {
     if (isOwner) setSettings(prev => prev ? { ...prev, active_section_id: id } : prev)
     setMyActiveBoard(id)
-    const { error } = await supabase.rpc('set_active_board', { p_section: id })
+    const { error } = await setLiveBoardRpc(id)
     if (error) alert('Failed to set the live board — has the accounts migration been run in Supabase?')
   }
 
@@ -2070,7 +2077,7 @@ export function BingoDashAdmin() {
         otherIds.length > 0
           ? supabase.from('bingo_sections').update({ game_started: false }).in('id', otherIds).select('id')
           : Promise.resolve({ error: null, data: [] as { id: string }[] }),
-        supabase.rpc('set_active_board', { p_section: sectionId }),
+        setLiveBoardRpc(sectionId),
       ])
       // Zero rows updated means RLS refused it — that is the failure to report,
       // not just a thrown error.

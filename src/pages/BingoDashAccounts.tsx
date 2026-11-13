@@ -35,6 +35,122 @@ function ago(iso: string): string {
   return new Date(iso).toLocaleDateString([], { dateStyle: 'medium' })
 }
 
+// Shape returned by owner_preview_account_sync (20261119_sync_preview_and_protect.sql)
+type SyncPreviewBoard = {
+  board: string; name: string; email: string | null
+  changes: {
+    slot: number; title: string
+    edited: boolean   // changed in the app on their side since it was last in step
+    fields: { field: string; from: string | null; to: string | null }[]
+    parts: { part: string; from: number; to: number }[]
+  }[]
+  added: { slot: number; title: string }[]
+}
+// Slots the owner chose to sync, per board id
+type SyncPicks = Record<string, number[]>
+
+const PART_LABELS: Record<string, string> = {
+  bingo_task_pages: 'instruction pages', bingo_task_photos: 'photos', bingo_task_links: 'links',
+  bingo_task_samples: 'samples', bingo_task_secrets: 'secrets', bingo_prize_secrets: 'prize details',
+  bingo_breakout_puzzles: 'puzzles', bingo_draw_slots: 'draw slots', bingo_draw_items: 'draw items',
+}
+const FIELD_LABELS: Record<string, string> = {
+  title: 'title', hex_code: 'colour', hex_custom: 'custom colour', task_type: 'card type',
+  points: 'points', category: 'category', completion_inputs: 'completion settings',
+}
+const fieldLabel = (f: string) => FIELD_LABELS[f] ?? f.replace(/_/g, ' ')
+const shown = (v: string | null) => (v === null || v === '' ? '(empty)' : v)
+
+function SyncPreviewDialog({ account, boards, onCancel, onConfirm }: {
+  account: BingoAccount | null; boards: SyncPreviewBoard[]
+  onCancel: () => void; onConfirm: (picks: SyncPicks, settings: boolean) => void
+}) {
+  const touched = boards.filter(b => b.changes.length > 0 || b.added.length > 0)
+  const key = (board: string, slot: number) => `${board}:${slot}`
+  // Ticked = will be synced. Cards they edited start unticked, so they are kept.
+  const [picked, setPicked] = useState<Set<string>>(() => new Set(touched.flatMap(b => [
+    ...b.changes.filter(c => !c.edited).map(c => key(b.board, c.slot)),
+    ...b.added.map(c => key(b.board, c.slot)),
+  ])))
+  const [settings, setSettings] = useState(false)
+  const toggle = (k: string) => setPicked(p => {
+    const next = new Set(p)
+    if (!next.delete(k)) next.add(k)
+    return next
+  })
+  const confirm = () => onConfirm(
+    // Every previewed board gets an entry, so an unticked board syncs nothing.
+    Object.fromEntries(boards.map(b => [b.board,
+      [...b.changes, ...b.added].filter(c => picked.has(key(b.board, c.slot))).map(c => c.slot)])),
+    settings)
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4" role="dialog" aria-modal="true">
+      <div className="w-full max-w-xl max-h-[85vh] flex flex-col rounded-2xl a-surface-2 border a-border">
+        <div className="px-5 pt-5 pb-3">
+          <h2 className="a-text text-lg font-black">Choose what to sync</h2>
+          <p className="a-text-3 text-xs mt-1">
+            Ticked cards on {account ? `${account.email ?? 'this account'}'s board` : 'each given board'} are overwritten with your version.
+            Cards marked <span className="text-amber-300 font-bold">edited by them</span> start unticked, so their changes are kept.
+            Teams and scores are never touched.
+          </p>
+        </div>
+        <div className="px-5 overflow-y-auto flex flex-col gap-4">
+          {touched.map(b => (
+            <div key={b.board}>
+              <p className="a-text text-sm font-black">{b.name} <span className="a-text-3 font-medium">· {b.email ?? 'no email'}</span></p>
+              <ul className="mt-1 flex flex-col gap-2">
+                {b.changes.map(c => (
+                  <li key={c.slot}>
+                    <label className="flex items-start gap-3 px-3 py-2 rounded-xl bg-black/30 border border-white/10 cursor-pointer">
+                      <input type="checkbox" className="mt-0.5 accent-teal-500"
+                        checked={picked.has(key(b.board, c.slot))} onChange={() => toggle(key(b.board, c.slot))} />
+                      <span className="min-w-0">
+                        <span className="a-text text-xs font-bold">{c.title}</span>
+                        {c.edited && <span className="ml-2 text-[10px] font-black uppercase tracking-wider text-amber-300">edited by them</span>}
+                        {c.fields.map(f => (
+                          <span key={f.field} className="block a-text-3 text-[11px] break-words">
+                            {fieldLabel(f.field)}: theirs <span className="text-amber-300">{shown(f.from)}</span> → yours <span className="text-teal-300">{shown(f.to)}</span>
+                          </span>
+                        ))}
+                        {c.parts.map(p => (
+                          <span key={p.part} className="block a-text-3 text-[11px]">
+                            {PART_LABELS[p.part] ?? p.part} differ{p.from !== p.to ? ` (theirs ${p.from}, yours ${p.to})` : ''}
+                          </span>
+                        ))}
+                      </span>
+                    </label>
+                  </li>
+                ))}
+                {b.added.map(c => (
+                  <li key={`add-${c.slot}`}>
+                    <label className="flex items-start gap-3 px-3 py-2 rounded-xl bg-black/30 border border-white/10 cursor-pointer">
+                      <input type="checkbox" className="mt-0.5 accent-teal-500"
+                        checked={picked.has(key(b.board, c.slot))} onChange={() => toggle(key(b.board, c.slot))} />
+                      <span className="a-text text-xs font-bold">{c.title} <span className="a-text-3 font-medium">· new card, they don't have it yet</span></span>
+                    </label>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
+          <label className="flex items-start gap-3 a-text-3 text-xs cursor-pointer">
+            <input type="checkbox" className="mt-0.5 accent-teal-500" checked={settings} onChange={e => setSettings(e.target.checked)} />
+            Also copy your board's display settings (scoreboard theme, bonus timers, card pauses)
+          </label>
+        </div>
+        <div className="px-5 py-4 flex items-center justify-end gap-2">
+          <button onClick={onCancel}
+            className="px-4 py-2 rounded-xl text-sm font-bold a-text border border-white/20 hover:bg-white/10 transition-colors">Cancel</button>
+          <button onClick={confirm} disabled={picked.size === 0 && !settings}
+            className="px-4 py-2 rounded-xl text-sm font-black bg-teal-600 hover:bg-teal-500 a-text transition-colors disabled:opacity-40">
+            Sync {picked.size} card{picked.size === 1 ? '' : 's'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function GameToggle({ label, on, busy, onToggle }: {
   label: string; on: boolean; busy: boolean; onToggle: () => void
 }) {
@@ -52,7 +168,11 @@ function GameToggle({ label, on, busy, onToggle }: {
 
 export function BingoDashAccounts() {
   const navigate = useNavigate()
-  const { account: me } = useBingoAuth()
+  const { account: me, supportFor, enterSupport, exitSupport } = useBingoAuth()
+  // Coming back to this page ends support mode.
+  useEffect(() => { if (supportFor) exitSupport() }, [supportFor, exitSupport])
+  // The account whose board tools (give / sync / undo) are open
+  const [managing, setManaging] = useState<string | null>(null)
   const [accounts, setAccounts] = useState<BingoAccount[]>([])
   const [boards, setBoards] = useState<BingoSection[]>([])
   const [templateId, setTemplateId] = useState<string | null>(null)
@@ -64,6 +184,8 @@ export function BingoDashAccounts() {
   const [busyId, setBusyId] = useState<string | null>(null)
   const [notice, setNotice] = useState('')
   const [copiedInvite, setCopiedInvite] = useState(false)
+  // What a sync would change, shown for confirmation before anything is written
+  const [syncPreview, setSyncPreview] = useState<{ account: BingoAccount | null; boards: SyncPreviewBoard[] } | null>(null)
   const inviteUrl = `${window.location.origin}/bingo-dash/login`
 
   const load = useCallback(async () => {
@@ -140,6 +262,13 @@ export function BingoDashAccounts() {
     } finally { setBusyId(null) }
   }
 
+  // Support mode: open the normal admin page working as this account — the
+  // same page they see, so every setting on it can be changed for them.
+  const openTenantAdmin = (a: BingoAccount) => {
+    enterSupport(a)
+    navigate('/bingo-dash/admin')
+  }
+
   const saveTemplate = async (sectionId: string) => {
     const value = sectionId || null
     setTemplateId(value)
@@ -166,21 +295,60 @@ export function BingoDashAccounts() {
   // Bring boards that were given to an account back in step with the board they
   // were copied from (cards, unlock chain, colours, pages ...). Teams, scores and
   // progress are kept. One account, or every account when `a` is null.
+  // Step 1: ask the database what the sync would change and show it. Nothing
+  // is written until the owner confirms in the dialog (runSync).
   const syncBoards = async (a: BingoAccount | null) => {
-    if (!confirm(a
-      ? `Update ${a.email ?? 'this account'}'s given board(s) to match the board they were copied from? Their teams and scores are kept.`
-      : 'Update EVERY given board to match the board it was copied from? All teams and scores are kept.')) return
     setBusyId(a?.id ?? 'sync-all')
     setNotice('')
     try {
-      const { data, error } = await supabase.rpc('owner_sync_account_boards', { p_account: a?.id ?? null })
+      const { data, error } = await supabase.rpc('owner_preview_account_sync', { p_account: a?.id ?? null })
       if (error) throw error
-      const n = (data as { boards?: number } | null)?.boards ?? 0
-      setNotice(n === 0
-        ? 'Nothing to sync: no board here remembers its source yet (only boards given after the sync SQL was run do).'
-        : `Synced ${n} board${n === 1 ? '' : 's'}${a ? ` for ${a.email ?? 'the account'}` : ''}. Teams and scores were not touched.`)
+      const list = (data as { boards?: SyncPreviewBoard[] } | null)?.boards ?? []
+      if (list.length === 0) {
+        setNotice('Nothing to sync: no board here remembers its source yet (only boards given after the sync SQL was run do).')
+      } else if (list.every(b => b.changes.length === 0 && b.added.length === 0)) {
+        setNotice(`Nothing to sync: ${a ? `${a.email ?? 'this account'}'s board already matches` : 'every given board already matches'} the board it was copied from.`)
+      } else {
+        setSyncPreview({ account: a, boards: list })
+      }
+    } catch (err) {
+      setNotice(`Could not preview the sync: ${errText(err)}`)
+    } finally { setBusyId(null) }
+  }
+
+  const runSync = async (a: BingoAccount | null, picks: SyncPicks, settings: boolean) => {
+    setSyncPreview(null)
+    setBusyId(a?.id ?? 'sync-all')
+    setNotice('')
+    try {
+      const { data, error } = await supabase.rpc('owner_sync_account_boards',
+        { p_account: a?.id ?? null, p_picks: picks, p_settings: settings })
+      if (error) throw error
+      const detail = (data as { detail?: { updated?: number; added?: number }[] } | null)?.detail ?? []
+      const cards = detail.reduce((n, d) => n + (d.updated ?? 0) + (d.added ?? 0), 0)
+      setNotice(`Synced ${cards} card${cards === 1 ? '' : 's'}${a ? ` for ${a.email ?? 'the account'}` : ''}. Teams and scores were not touched. "Undo sync" puts it back.`)
     } catch (err) {
       setNotice(`Could not sync: ${errText(err)}`)
+    } finally { setBusyId(null) }
+  }
+
+  // Put an account's given board(s) back to the copy saved just before the
+  // last sync. Teams and scores are kept.
+  const undoSync = async (a: BingoAccount) => {
+    if (!confirm(`Undo the last sync for ${a.email ?? 'this account'}? Their board goes back to how it was just before that sync. Any card edits made since the sync are lost. Teams and scores are kept.`)) return
+    setBusyId(a.id)
+    setNotice('')
+    try {
+      const { data, error } = await supabase.rpc('owner_undo_board_sync', { p_account: a.id })
+      if (error) throw error
+      const d = data as { boards?: number; detail?: { backup_at?: string }[] } | null
+      const n = d?.boards ?? 0
+      const at = d?.detail?.[0]?.backup_at
+      setNotice(n === 0
+        ? 'Nothing to undo: no sync backup is saved for this account.'
+        : `Restored ${n} board${n === 1 ? '' : 's'} for ${a.email ?? 'the account'} to the copy saved ${at ? new Date(at).toLocaleString() : 'before the last sync'}.`)
+    } catch (err) {
+      setNotice(`Could not undo: ${errText(err)}`)
     } finally { setBusyId(null) }
   }
 
@@ -302,7 +470,21 @@ export function BingoDashAccounts() {
           <span className="text-[11px] a-text-3 font-bold uppercase tracking-widest mr-1">Games:</span>
           <GameToggle label="Bingo Dash" on={a.can_bingo} busy={busyId === a.id} onToggle={() => toggleGame(a, 'can_bingo')} />
           <GameToggle label="Flag Retrieval" on={a.can_flag} busy={busyId === a.id} onToggle={() => toggleGame(a, 'can_flag')} />
-          <div className="flex gap-2 ml-auto items-center">
+          <button onClick={() => setManaging(m => m === a.id ? null : a.id)} aria-expanded={managing === a.id}
+            title="Give a board, sync or undo a sync"
+            className="ml-auto px-3 py-1.5 rounded-xl text-xs font-bold a-text border border-white/20 hover:bg-white/10 transition-colors">
+            {managing === a.id ? 'Close' : 'Board tools'}
+          </button>
+          <button onClick={() => openTenantAdmin(a)}
+            title="Open their admin page exactly as they see it, to view or change anything for them"
+            className="px-3 py-1.5 rounded-xl text-xs font-black bg-teal-600 hover:bg-teal-500 a-text transition-colors">
+            Manage boards
+          </button>
+        </div>
+      )}
+      {managing === a.id && (
+        <div className="mt-3 pt-3 border-t a-border flex flex-col gap-3">
+          <div className="flex flex-wrap gap-2 items-center">
             <select
               aria-label="Board to give"
               value={pickedBoard[a.id] ?? ''}
@@ -321,6 +503,11 @@ export function BingoDashAccounts() {
               title="Update this account's given board to match the board it was copied from — keeps their teams and scores"
               className="px-3 py-1.5 rounded-xl text-xs font-bold a-text border border-teal-400/40 hover:bg-teal-500/20 transition-colors disabled:opacity-40">
               Sync board
+            </button>
+            <button onClick={() => undoSync(a)} disabled={busyId === a.id}
+              title="Put this account's board back to the copy saved just before the last sync"
+              className="px-3 py-1.5 rounded-xl text-xs font-bold a-text border border-white/20 hover:bg-white/10 transition-colors disabled:opacity-40">
+              Undo sync
             </button>
           </div>
         </div>
@@ -389,6 +576,11 @@ export function BingoDashAccounts() {
 
   return (
     <div className="min-h-screen a-bg px-6 py-10">
+      {syncPreview && (
+        <SyncPreviewDialog account={syncPreview.account} boards={syncPreview.boards}
+          onCancel={() => setSyncPreview(null)}
+          onConfirm={(picks, settings) => runSync(syncPreview.account, picks, settings)} />
+      )}
       <div className="max-w-2xl mx-auto">
         <div className="flex items-center justify-between gap-4 mb-8">
           <div>
@@ -441,7 +633,8 @@ export function BingoDashAccounts() {
               <h2 className="a-text text-sm font-black uppercase tracking-widest mb-2">Sync given boards</h2>
               <p className="a-text-3 text-xs mb-3">
                 Changed a card, the unlock chain or a colour on your board? Push it to every board you already gave out —
-                no need to give a new one. Teams, scores and progress are kept; nothing is deleted.
+                no need to give a new one. You pick which cards to sync before anything is written, and cards they
+                edited are kept unless you tick them. Teams, scores and progress are kept. Each board is backed up first, so "Undo sync" on an account puts it back.
               </p>
               <button onClick={() => syncBoards(null)} disabled={busyId === 'sync-all'}
                 className="px-4 py-2 rounded-xl text-sm font-black bg-teal-600 hover:bg-teal-500 a-text transition-colors disabled:opacity-40">

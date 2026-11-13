@@ -29,7 +29,7 @@ export function RequireBingoAdmin({ children, ownerOnly = false, game }: {
   ownerOnly?: boolean
   game?: 'bingo' | 'flag'
 }) {
-  const { session, account, loading, isOwner, isExpired, signOut } = useBingoAuth()
+  const { session, account, loading, isOwner, realIsOwner, supportFor, isExpired, signOut } = useBingoAuth()
 
   if (loading) {
     return (
@@ -65,7 +65,8 @@ export function RequireBingoAdmin({ children, ownerOnly = false, game }: {
     />
   }
 
-  if (ownerOnly && !isOwner) {
+  // Support mode hides isOwner; owner-only pages still open for the real owner.
+  if (ownerOnly && !realIsOwner) {
     return <Gate
       emoji="🔒" title="Owner only"
       body="This area is limited to the main account holder."
@@ -73,7 +74,7 @@ export function RequireBingoAdmin({ children, ownerOnly = false, game }: {
     />
   }
 
-  if (game && !isOwner && !(game === 'bingo' ? account.can_bingo : account.can_flag)) {
+  if (game && !isOwner && !supportFor && !(game === 'bingo' ? account.can_bingo : account.can_flag)) {
     return <Gate
       emoji="🎟️" title="No access to this game"
       body={`Your account isn't enabled for ${game === 'bingo' ? 'Bingo Dash' : 'Flag Retrieval'}. Contact the main account holder to switch it on.`}
