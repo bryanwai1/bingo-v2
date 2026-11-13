@@ -288,7 +288,7 @@ export interface BingoAwardConfig {
   id: string
   section_id: string
   total_points: number
-  /** Place slides: the photo applied to all of 1st-5th unless overridden. */
+  /** Place slides: the photo applied to all places unless overridden. */
   image_url: string | null
   /** Shared slogan shown on every place slide. Null until an admin sets one. */
   award_slogan?: string | null

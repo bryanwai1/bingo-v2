@@ -11,7 +11,7 @@
 //
 // Team assignment is canonical:
 //   · `first` slides (in display order) take ranks 1..first_count
-//   · `second` slides take the next block, then `third`, then `consolation`
+//   · `second` through `sixth` slides take the next blocks, then `consolation`
 //   · `consolation_group` slides come after all single consolation slides.
 //     Each takes 3 ranks. They are assigned in REVERSE display order so the
 //     first-displayed group reveals the WORST ranks (ceremonial worst→best).
@@ -22,6 +22,7 @@
 export type PrizeKind =
   | 'consolation'
   | 'consolation_group'
+  | 'sixth'
   | 'fifth'
   | 'fourth'
   | 'third'
@@ -60,8 +61,8 @@ export interface AwardSlideDescriptor {
 export interface PrizeCounts {
   consolation_count: number
   consolation_group_count: number
-  /** Optional: saved orders predating 4th/5th place have no such slides, so
-   *  countsFromOrder reports 0 and existing team ranks are unchanged. */
+  /** Later places are derived from slide_order instead of database columns. */
+  sixth_count?: number
   fifth_count?: number
   fourth_count?: number
   third_count: number
@@ -70,7 +71,7 @@ export interface PrizeCounts {
 }
 
 /**
- * The prize line-up a board gets when it has no saved award config: five
+ * The prize line-up a board gets when it has no saved award config: six
  * places, no consolation groups.
  *
  * The admin and the ceremony used to hard-code their own copy of this, and
@@ -81,6 +82,7 @@ export interface PrizeCounts {
 export const DEFAULT_PRIZE_COUNTS: PrizeCounts = {
   consolation_count: 0,
   consolation_group_count: 0,
+  sixth_count: 1,
   fifth_count: 1,
   fourth_count: 1,
   third_count: 1,
@@ -88,10 +90,9 @@ export const DEFAULT_PRIZE_COUNTS: PrizeCounts = {
   first_count: 1,
 }
 
-// This array assigns team ranks, so 'fourth'/'fifth' must sit between 'third'
-// and 'consolation': adding a 4th place pushes every consolation rank down one.
+// Assign place slides in rank order before assigning consolation slides.
 const CANONICAL_KINDS: PrizeKind[] = [
-  'first', 'second', 'third', 'fourth', 'fifth', 'consolation', 'consolation_group',
+  'first', 'second', 'third', 'fourth', 'fifth', 'sixth', 'consolation', 'consolation_group',
 ]
 
 export const SLIDE_LABELS: Record<AwardSlideKind, { label: string; emoji: string; accent: string }> = {
@@ -107,30 +108,27 @@ export const SLIDE_LABELS: Record<AwardSlideKind, { label: string; emoji: string
   third:             { label: 'Second Runner-Up',   emoji: '🥉', accent: '#f59e0b' },
   fourth:            { label: 'Fourth Place',        emoji: '🎗', accent: '#93c5fd' },
   fifth:             { label: 'Fifth Place',         emoji: '🎗', accent: '#c7d2fe' },
+  sixth:             { label: 'Sixth Place',         emoji: '🎗', accent: '#c7d2fe' },
   consolation:       { label: 'Honorable Mention',  emoji: '🎖', accent: '#c4b5fd' },
   consolation_group: { label: 'Honorable Trio',     emoji: '🎖', accent: '#c4b5fd' },
 }
 
-/** The five kinds rendered by the place-slide design (photo + group number +
+/** The six kinds rendered by the place-slide design (photo + group number +
  *  total + slogan). `consolation` is a prize kind but NOT a place. */
 export function isPlaceKind(kind: string): kind is PlaceKind {
   return (
     kind === 'first' || kind === 'second' || kind === 'third' ||
-    kind === 'fourth' || kind === 'fifth'
+    kind === 'fourth' || kind === 'fifth' || kind === 'sixth'
   )
 }
 
-export type PlaceKind = 'first' | 'second' | 'third' | 'fourth' | 'fifth'
+export type PlaceKind = 'first' | 'second' | 'third' | 'fourth' | 'fifth' | 'sixth'
 
 export function isPrizeKind(kind: string): kind is PrizeKind {
   return (
     kind === 'consolation' ||
     kind === 'consolation_group' ||
-    kind === 'fifth' ||
-    kind === 'fourth' ||
-    kind === 'third' ||
-    kind === 'second' ||
-    kind === 'first'
+    isPlaceKind(kind)
   )
 }
 
@@ -139,6 +137,7 @@ export function countsFromOrder(order: AwardSlideId[]): PrizeCounts {
   const c: PrizeCounts = {
     consolation_count: 0,
     consolation_group_count: 0,
+    sixth_count: 0,
     fifth_count: 0,
     fourth_count: 0,
     third_count: 0,
@@ -152,6 +151,7 @@ export function countsFromOrder(order: AwardSlideId[]): PrizeCounts {
     const kind = id.slice(0, idx)
     if (kind === 'consolation') c.consolation_count++
     else if (kind === 'consolation_group') c.consolation_group_count++
+    else if (kind === 'sixth') c.sixth_count = (c.sixth_count ?? 0) + 1
     else if (kind === 'fifth') c.fifth_count = (c.fifth_count ?? 0) + 1
     else if (kind === 'fourth') c.fourth_count = (c.fourth_count ?? 0) + 1
     else if (kind === 'third') c.third_count++
@@ -161,11 +161,12 @@ export function countsFromOrder(order: AwardSlideId[]): PrizeCounts {
   return c
 }
 
-/** Default factory sequence: main, holding, …consolations…, 3rd→2nd→1st, scoreboard, closing. */
+/** Default factory sequence: main, holding, consolations, places from lowest to highest, scoreboard, closing. */
 export function defaultSlideOrder(counts: PrizeCounts): AwardSlideId[] {
   const out: AwardSlideId[] = ['main', 'holding']
   for (let i = 0; i < counts.consolation_count; i++) out.push(`consolation:${i}`)
   for (let i = 0; i < counts.consolation_group_count; i++) out.push(`consolation_group:${i}`)
+  for (let i = 0; i < (counts.sixth_count ?? 0); i++) out.push(`sixth:${i}`)
   for (let i = 0; i < (counts.fifth_count ?? 0); i++) out.push(`fifth:${i}`)
   for (let i = 0; i < (counts.fourth_count ?? 0); i++) out.push(`fourth:${i}`)
   for (let i = 0; i < counts.third_count; i++) out.push(`third:${i}`)
@@ -290,7 +291,7 @@ export function removeSlide(order: AwardSlideId[], id: AwardSlideId): AwardSlide
  */
 export function buildAwardSlides(order: AwardSlideId[]): AwardSlideDescriptor[] {
   const byKind: Record<PrizeKind, AwardSlideId[]> = {
-    first: [], second: [], third: [], fourth: [], fifth: [],
+    first: [], second: [], third: [], fourth: [], fifth: [], sixth: [],
     consolation: [], consolation_group: [],
   }
   for (const id of order) {

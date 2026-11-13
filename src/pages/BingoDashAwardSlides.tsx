@@ -604,7 +604,7 @@ function AwardSlideRenderer({
       />
     )
   }
-  // The five places use the new PlaceSlide design; `consolation` keeps the
+  // The six places use the PlaceSlide design; `consolation` keeps the
   // medal-ring PrizeSlide, which still suits honorable mentions.
   if (descriptor.kind !== 'consolation') {
     return (
@@ -1309,15 +1309,15 @@ function PrizeSlide({
   )
 }
 
-// ── Place slides: 1st - 5th ──────────────────────────────────
+// ── Place slides: 1st - 6th ──────────────────────────────────
 //
-// The five place slides ARE the artwork in public/award/<n>-place.jpg: a
+// The place slides use the artwork in public/award/<n>-place.jpg: a
 // finished 1672x941 composition with four empty slots. So this renders the
 // image and drops four values into it - no headline, laurels, stat boxes,
 // spotlight or confetti are drawn in code, because the PNG already has them.
 //
 // The slots are measured from the artwork's own pixels and are identical in
-// all five files, so one table serves every place. Everything is authored in
+// all six files, so one table serves every place. Everything is authored in
 // those same artwork pixels and the whole canvas is scaled to fit, so a
 // laptop and the ballroom projector show the same composition at different
 // sizes rather than a reflowed one.
@@ -1356,7 +1356,7 @@ const INK = '#05132c'
 const NUM_FONT = `system-ui, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif`
 
 const PLACE_FILE: Record<PlaceKind, string> = {
-  first: '1', second: '2', third: '3', fourth: '4', fifth: '5',
+  first: '1', second: '2', third: '3', fourth: '4', fifth: '5', sixth: '6',
 }
 const placeArt = (kind: PlaceKind) => `/award/${PLACE_FILE[kind]}-place.jpg`
 

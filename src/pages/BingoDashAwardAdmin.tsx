@@ -50,10 +50,7 @@ type DraftConfig = {
   slide_text: SlideText
 }
 
-// New shows default to five places and no consolation groups. Existing saved
-// orders are untouched - they simply contain no fourth:/fifth: ids. The counts
-// are shared with the ceremony so an unconfigured board cannot show one
-// sequence here and another on the projector.
+// Share the default sequence between the editor and the ceremony.
 const INITIAL_ORDER: AwardSlideId[] = defaultSlideOrder(DEFAULT_PRIZE_COUNTS)
 
 const EMPTY_DRAFT: DraftConfig = {
@@ -638,7 +635,7 @@ export function BingoDashAwardAdmin() {
           </section>
 
           <section id="editor-place" className="bg-white rounded-2xl border border-gray-200 p-6">
-            <h2 className="font-black text-gray-900 mb-1">Place slides (1st – 5th)</h2>
+            <h2 className="font-black text-gray-900 mb-1">Place slides (1st – 6th)</h2>
             <input
               ref={awardFileRef}
               type="file"
@@ -1079,7 +1076,7 @@ export function BingoDashAwardAdmin() {
                 onEdit={() => toggleEditor('evaluation')}
                 editing={openEditors.has('evaluation')}
               />
-              {(['first', 'second', 'third', 'fourth', 'fifth', 'consolation_group', 'consolation'] as PrizeKind[]).map(kind => {
+              {(['first', 'second', 'third', 'fourth', 'fifth', 'sixth', 'consolation_group', 'consolation'] as PrizeKind[]).map(kind => {
                 const sublabel = kind === 'consolation_group'
                   ? `${slides.filter(s => s.kind === kind).length} group${slides.filter(s => s.kind === kind).length === 1 ? '' : 's'} · 3 teams each`
                   : `Currently ${slides.filter(s => s.kind === kind).length}`
