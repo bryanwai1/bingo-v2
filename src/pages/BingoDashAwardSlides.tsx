@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useState } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
+import { captureShowSlide } from '../lib/awardPptExport'
 import { supabase } from '../lib/supabase'
 import { fetchBoardTasks } from '../lib/boardCards'
 import { useFullscreen } from '../hooks/useFullscreen'
@@ -134,6 +135,10 @@ function AwardShow({ sectionSlug }: { sectionSlug: string }) {
   const [loaded, setLoaded] = useState(false)
   const [slideIdx, setSlideIdx] = useState(0)
   const [showJudgePanel, setShowJudgePanel] = useState(false)
+  // ?export=1: the PowerPoint exporter drives this page in a hidden iframe.
+  const [searchParams] = useSearchParams()
+  const exportMode = searchParams.get('export') === '1'
+  const rootRef = useRef<HTMLDivElement>(null)
 
   // bonus_points is the sum of bonus_breakdown, so a change made here is
   // booked as one "Award ceremony" line rather than leaving the two to drift.
@@ -244,6 +249,16 @@ function AwardShow({ sectionSlug }: { sectionSlug: string }) {
   const current = slides[safeSlideIdx]
 
   useEffect(() => {
+    if (!exportMode || !loaded || !section) return
+    window.__awardExport = {
+      total: totalSlides,
+      capture: index => captureShowSlide(() => rootRef.current, setSlideIdx, index),
+    }
+    return () => { delete window.__awardExport }
+  }, [exportMode, loaded, section, totalSlides])
+
+  useEffect(() => {
+    if (exportMode) return
     const onKey = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null
       const typing = target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)
@@ -266,7 +281,7 @@ function AwardShow({ sectionSlug }: { sectionSlug: string }) {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [navigate, showJudgePanel, totalSlides])
+  }, [navigate, showJudgePanel, totalSlides, exportMode])
 
   useEffect(preloadPlaceArt, [])
 
@@ -314,8 +329,9 @@ function AwardShow({ sectionSlug }: { sectionSlug: string }) {
 
   return (
     <div
+      ref={rootRef}
       className="h-screen w-screen overflow-hidden relative cursor-pointer select-none"
-      onClick={() => setSlideIdx(i => Math.min(totalSlides - 1, i + 1))}
+      onClick={() => { if (!exportMode) setSlideIdx(i => Math.min(totalSlides - 1, i + 1)) }}
       style={slideStyle}
     >
       <AwardSlideRenderer
@@ -329,6 +345,7 @@ function AwardShow({ sectionSlug }: { sectionSlug: string }) {
         text={text}
       />
 
+      {!exportMode && <>
       {/* Top nav */}
       <div className="absolute top-5 left-6 right-6 flex items-center justify-between text-[11px] text-white/50 font-semibold uppercase tracking-[0.25em] z-40">
         <a
@@ -459,6 +476,7 @@ function AwardShow({ sectionSlug }: { sectionSlug: string }) {
           ✎ Bonus (B)
         </button>
       )}
+      </>}
     </div>
   )
 }

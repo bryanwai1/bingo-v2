@@ -239,6 +239,24 @@ export function BingoDashAwardAdmin() {
     }
     navigate(`/bingo-dash/slides/awards/${section.slug}`)
   }
+  const [exporting, setExporting] = useState<string | null>(null)
+  const exportPpt = async () => {
+    if (!section || exporting) return
+    if (dirty) {
+      if (!window.confirm('Save your changes first? The PowerPoint is made from the saved slides.')) return
+      if (!(await save())) return
+    }
+    setExporting('Starting…')
+    try {
+      const { exportAwardShowToPpt } = await import('../lib/awardPptExport')
+      await exportAwardShowToPpt(section.slug, `${section.name} - Award Slides`, (done, total) =>
+        setExporting(`Slide ${done} / ${total}`))
+    } catch (e) {
+      alert(`Export failed: ${e instanceof Error ? e.message : String(e)}`)
+    } finally {
+      setExporting(null)
+    }
+  }
   const hasMain = draft.slide_order.includes('main')
   const hasIntro = draft.slide_order.includes('intro')
   const hasHolding = draft.slide_order.includes('holding')
@@ -459,6 +477,14 @@ export function BingoDashAwardAdmin() {
           className="ml-auto sm:ml-0 whitespace-nowrap px-3 py-2 rounded-lg text-xs font-bold uppercase tracking-widest bg-gray-100 hover:bg-gray-200 text-gray-700"
         >
           ▶ Run show
+        </button>
+        <button
+          onClick={() => { void exportPpt() }}
+          disabled={!!exporting}
+          title="Download every slide as a 16:9 PowerPoint"
+          className="whitespace-nowrap px-3 py-2 rounded-lg text-xs font-bold uppercase tracking-widest bg-gray-100 hover:bg-gray-200 text-gray-700 disabled:opacity-60"
+        >
+          {exporting ? `⏳ ${exporting}` : '⬇ Export PPT'}
         </button>
         <button
           onClick={() => { void save() }}
