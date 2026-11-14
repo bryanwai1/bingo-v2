@@ -432,7 +432,6 @@ export function BingoDashParticipant() {
     })
     return () => { live = false }
   }, [answerOkNow, scanIdNow, inputs.answer])
-  const answerPassed = useRef(false)
   /** True when every answer is right. */
   const checkBlocks = async (): Promise<boolean> => {
     if (!scanRecord || blocksBusy) return false
@@ -445,7 +444,6 @@ export function BingoDashParticipant() {
       const res = data as { passed?: boolean; results?: boolean[] } | null
       if (res?.passed) {
         setBlockResults(null)
-        answerPassed.current = true
         setScanRecord(prev => (prev ? { ...prev, answerOk: true } : prev))
         return true
       }
@@ -468,7 +466,6 @@ export function BingoDashParticipant() {
       if (error) { alert('Could not check your number: ' + error.message); return false }
       if (data === true) {
         setNumberRejected(null)
-        answerPassed.current = true
         setScanRecord(prev => (prev ? { ...prev, answerOk: true } : prev))
         return true
       }
@@ -591,17 +588,14 @@ export function BingoDashParticipant() {
   /** An 'auto' input is approved the moment it is sent; the rest wait for a marshal. */
   const statusFor = (kind: InputKind) => (inputs[kind] === 'auto' ? 'approved' : 'pending')
 
-  /** Auto-approved inputs never reach the admin, so nobody else finishes the
-   *  card for the team: do it here once every compulsory input is in. */
+  /** An auto-approved input is ticked by the database in the same write that
+   *  saved it (trigger bingo_complete_on_approval, media-photos/047). The
+   *  phone no longer sends a second "mark done" request that could get lost;
+   *  it just reads back whether the card is now done. */
   const finishIfDone = async (justSent: InputKind[]) => {
-    const auto = justSent.filter(k => inputs[k] === 'auto')
-    if (auto.length === 0 || !scanRecord || scanRecord.completed) return
-    // answerPassed: a number/answers check that passed a moment ago, which
-    // `progress` has not caught up with yet.
-    const done = { ...progress, answer: progress.answer || answerPassed.current, ...Object.fromEntries(auto.map(k => [k, true])) }
-    if (!isComplete(inputs, done)) return
-    await toggleComplete(scanRecord.id, true)
-    setScanRecord(prev => (prev ? { ...prev, completed: true } : prev))
+    if (!justSent.some(k => inputs[k] === 'auto') || !scanRecord || scanRecord.completed) return
+    const { data } = await supabase.from('bingo_scans').select('completed').eq('id', scanRecord.id).single()
+    if (data?.completed) setScanRecord(prev => (prev ? { ...prev, completed: true } : prev))
   }
 
   /** The battle claim: who we fought and whether we won. One row for the
@@ -1394,7 +1388,9 @@ export function BingoDashParticipant() {
                   ← Back to Board
                 </button>
               </div>
-              <button
+              {/* Not on cards finished by approved inputs: undoing one leaves the
+                  approval in place, so nothing would ever tick it again. */}
+              {!usesInputs(inputs) && <button
                 onClick={async () => {
                   if (!scanRecord) return
                   setCompleting(true)
@@ -1410,7 +1406,7 @@ export function BingoDashParticipant() {
                 className="mt-3 px-4 py-2 text-sm text-white/40 hover:text-red-400 transition-colors"
               >
                 Undo completion
-              </button>
+              </button>}
             </div>
           ) : (
             /* ── Per-type completion card ──────────────────────── */
