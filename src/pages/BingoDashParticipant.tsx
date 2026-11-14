@@ -102,7 +102,8 @@ export function BingoDashParticipant() {
   // this through is what lets a card placed in several boxes on one board
   // be completed independently instead of one completion ticking all of them.
   const boardCardId = searchParams.get('box')
-  const [backPath, setBackPath] = useState(isSnakeLadder ? '/snake-ladder' : '/bingo-dash')
+  // null until the team's own board is known — see resolveBackPath below.
+  const [backPath, setBackPath] = useState<string | null>(isSnakeLadder ? '/snake-ladder' : null)
   const { team, loading: teamLoading, isRegistered, leaveTeam } = useBingoDashTeam()
   const isObserver = !isSnakeLadder && localStorage.getItem('bingo-dash-member-role') === 'observer'
   const { pages, loading: pagesLoading } = useBingoTaskPages(taskId)
@@ -194,21 +195,43 @@ export function BingoDashParticipant() {
   // so a sub account's player finishing a tile would otherwise land in someone
   // else's game. Only diverge when the team's board isn't the global one, so
   // the owner's players keep the exact route they have today.
+  //
+  // The answer needs two lookups, so it is not known the moment the page opens.
+  // The button used to point at /bingo-dash until they came back, so a quick
+  // tap (or lookups lost to a weak signal) dropped a sub-account player onto
+  // the house board. Now the path stays unknown until resolved, and a tap
+  // before then resolves it on the spot (see goBack).
+  const resolveBackPath = useCallback(async (): Promise<string | null> => {
+    if (isSnakeLadder) return '/snake-ladder'
+    if (!team?.section_id) return null
+    const [settingsRes, sectionRes] = await Promise.all([
+      supabase.from('bingo_settings').select('active_section_id').eq('id', 'main').maybeSingle(),
+      supabase.from('bingo_sections').select('slug').eq('id', team.section_id).maybeSingle(),
+    ])
+    if (settingsRes.error || sectionRes.error || !sectionRes.data?.slug) return null
+    if (settingsRes.data?.active_section_id === team.section_id) return '/bingo-dash'
+    // Keep ?mode=observer for observers: without it the join page reads the
+    // visit as a player's, wipes the observer session and sends them to the
+    // player join, where every team shows FULL.
+    return `/bingo-dash/play/${sectionRes.data.slug}${isObserver ? '?mode=observer' : ''}`
+  }, [isSnakeLadder, team?.section_id, isObserver])
+
   useEffect(() => {
-    if (isSnakeLadder || !team?.section_id) return
     let cancelled = false
-    ;(async () => {
-      const [{ data: settings }, { data: section }] = await Promise.all([
-        supabase.from('bingo_settings').select('active_section_id').eq('id', 'main').maybeSingle(),
-        supabase.from('bingo_sections').select('slug').eq('id', team.section_id).maybeSingle(),
-      ])
-      if (cancelled || !section?.slug) return
-      if (settings?.active_section_id !== team.section_id) {
-        setBackPath(`/bingo-dash/play/${section.slug}`)
-      }
-    })()
+    resolveBackPath()
+      .then(path => { if (!cancelled && path) setBackPath(path) })
+      .catch(() => { /* offline: goBack retries on tap */ })
     return () => { cancelled = true }
-  }, [isSnakeLadder, team?.section_id])
+  }, [resolveBackPath])
+
+  const goBack = useCallback(async () => {
+    const path = backPath ?? await resolveBackPath().catch(() => null)
+    if (path) { setBackPath(path); navigate(path); return }
+    // Still unknown (no team on this phone, or no signal): the previous page
+    // in this tab is the board they came from; only a fresh tab has none.
+    if ((window.history.state?.idx ?? 0) > 0) navigate(-1)
+    else navigate('/bingo-dash')
+  }, [backPath, resolveBackPath, navigate])
 
   const focusLetter = useCallback((rowIdx: number, charIdx: number) => {
     letterRefs.current[rowIdx]?.[charIdx]?.focus()
@@ -904,7 +927,7 @@ export function BingoDashParticipant() {
               You need to pick your group before you can complete this task.
             </p>
             <button
-              onClick={() => navigate(backPath)}
+              onClick={() => void goBack()}
               className="px-6 py-3 rounded-2xl text-white font-black text-base"
               style={{ backgroundColor: '#a855f7', boxShadow: '0 8px 24px #a855f744' }}
             >
@@ -943,7 +966,7 @@ export function BingoDashParticipant() {
         {/* Way out before committing — the tile was tapped by mistake more
             often than not. Stops the splash's own tap-to-start. */}
         <button
-          onClick={(e) => { e.stopPropagation(); navigate(backPath) }}
+          onClick={(e) => { e.stopPropagation(); void goBack() }}
           className="absolute top-5 left-5 z-20 flex items-center gap-1.5 px-3 py-2 rounded-xl bg-black/25 hover:bg-black/35 text-white/90 text-sm font-bold backdrop-blur-sm transition-colors"
         >
           ← Back to Board
@@ -1009,7 +1032,7 @@ export function BingoDashParticipant() {
         <div className={`${containerMaxW} mx-auto relative z-10 flex flex-wrap items-start justify-between gap-x-4 gap-y-3`}>
           <div className="flex items-start gap-3">
             <button
-              onClick={() => navigate(backPath)}
+              onClick={() => void goBack()}
               className="mt-1 flex-shrink-0 flex items-center gap-1 px-2.5 py-1.5 bg-white/15 hover:bg-white/25 rounded-lg text-white/80 hover:text-white text-xs font-bold transition-colors"
             >
               ← Board
@@ -1337,7 +1360,7 @@ export function BingoDashParticipant() {
                     icon: '🔒', sub: 'Complete this card first' }]} />
               </div>
               <button
-                onClick={() => navigate(backPath)}
+                onClick={() => void goBack()}
                 className="mt-3 w-full py-3 rounded-2xl text-white/70 font-bold border border-white/15 hover:bg-white/5 transition-colors"
               >
                 ← Back to Board
@@ -1347,7 +1370,7 @@ export function BingoDashParticipant() {
             <>
               <BundleCard task={task} teamId={team.id} marshalPassword={marshalPassword} />
               <button
-                onClick={() => navigate(backPath)}
+                onClick={() => void goBack()}
                 className="mt-4 w-full py-3 rounded-2xl text-white/70 font-bold border border-white/15 hover:bg-white/5 transition-colors"
               >
                 ← Back to Board
@@ -1365,7 +1388,7 @@ export function BingoDashParticipant() {
                 sectionId={sectionId}
               />
               <button
-                onClick={() => navigate(backPath)}
+                onClick={() => void goBack()}
                 className="mt-4 w-full py-3 rounded-2xl text-white/70 font-bold border border-white/15 hover:bg-white/5 transition-colors"
               >
                 ← Back to Board
@@ -1381,7 +1404,7 @@ export function BingoDashParticipant() {
                 <p className="text-2xl font-black mb-1 text-white">Challenge Complete!</p>
                 <p className="text-white/60 text-sm font-medium">Great job, {team?.name}!</p>
                 <button
-                  onClick={() => navigate(backPath)}
+                  onClick={() => void goBack()}
                   className="mt-5 w-full py-3 rounded-2xl text-white font-black uppercase tracking-wider transition-all active:scale-95"
                   style={{ backgroundColor: task.hex_code, boxShadow: `0 4px 0 ${task.hex_code}88` }}
                 >
@@ -2062,7 +2085,7 @@ export function BingoDashParticipant() {
 
               {/* Back to board — shown in every card type */}
               <button
-                onClick={() => navigate(backPath)}
+                onClick={() => void goBack()}
                 className="mt-5 w-full py-3 rounded-2xl text-white/70 font-bold text-sm uppercase tracking-wider border border-white/20 hover:bg-white/10 hover:text-white transition-all active:scale-95"
               >
                 ← Back to Board
