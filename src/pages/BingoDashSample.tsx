@@ -95,6 +95,23 @@ function buildSlots(gridTasks: BingoTask[]): (BingoTask | null)[] {
   return out
 }
 
+// ── Board owner labels ───────────────────────────────────────────────────────
+// Which account each board belongs to, for the board pickers. bingo_accounts
+// is RLS-protected: a signed-in owner sees every account, anyone else sees
+// only their own, so emails never leak to a public viewer.
+function useOwnerLabel(): (s: BingoSection) => string {
+  const [names, setNames] = useState<Map<string, string>>(new Map())
+  useEffect(() => {
+    supabase.from('bingo_accounts').select('id, email, display_name').then(({ data }) => {
+      setNames(new Map((data ?? []).map(a => [a.id as string, (a.email || a.display_name || '') as string])))
+    })
+  }, [])
+  return useCallback((s: BingoSection) => {
+    if (!s.owner_id) return 'BRYAN'
+    return names.get(s.owner_id) || `Account ${s.owner_id.slice(0, 6)}`
+  }, [names])
+}
+
 // ── Demo top bar (board switcher + cheat sheet + reset) ──────────────────────
 
 function DemoBar({
@@ -115,9 +132,13 @@ function DemoBar({
   showViewToggle,
   backHref,
   backLabel,
+  locked,
+  ownerLabel,
 }: {
   sections: BingoSection[]
   selectedId: string | null
+  locked: boolean
+  ownerLabel: (s: BingoSection) => string
   onSelect: (id: string) => void
   marshalPassword: string
   onReset: () => void
@@ -142,17 +163,24 @@ function DemoBar({
           <span className="flex-shrink-0 px-2 py-1 rounded-lg bg-purple-500 text-black text-[11px] font-black tracking-wider whitespace-nowrap">
             🎬 SAMPLE
           </span>
-          <select
-            value={selectedId ?? ''}
-            onChange={e => onSelect(e.target.value)}
-            aria-label="Choose board"
-            className="flex-1 min-w-0 sm:flex-none sm:max-w-[12rem] bg-white/10 text-white text-xs font-bold rounded-lg px-2.5 py-2 border border-white/15 focus:outline-none focus:border-purple-400"
-          >
-            {sections.length === 0 && <option value="">No boards found</option>}
-            {sections.map(s => (
-              <option key={s.id} value={s.id} className="bg-gray-900">{s.name}</option>
-            ))}
-          </select>
+          {locked ? (
+            // Shared demo link: one board, no switching.
+            <span className="flex-1 min-w-0 sm:flex-none sm:max-w-[16rem] truncate text-white text-xs font-bold px-2.5 py-2">
+              {sections.find(s => s.id === selectedId)?.name ?? 'Board not found'}
+            </span>
+          ) : (
+            <select
+              value={selectedId ?? ''}
+              onChange={e => onSelect(e.target.value)}
+              aria-label="Choose board"
+              className="flex-1 min-w-0 sm:flex-none sm:max-w-[16rem] bg-white/10 text-white text-xs font-bold rounded-lg px-2.5 py-2 border border-white/15 focus:outline-none focus:border-purple-400"
+            >
+              {sections.length === 0 && <option value="">No boards found</option>}
+              {sections.map(s => (
+                <option key={s.id} value={s.id} className="bg-gray-900">{s.name} — {ownerLabel(s)}</option>
+              ))}
+            </select>
+          )}
         </div>
 
         {/* Row 2: password cheat-sheet pills + actions (icon-only on phones) */}
@@ -218,13 +246,13 @@ function DemoBar({
             >
               ↺<span className="hidden sm:inline"> Reset</span>
             </button>
-            <Link
+            {!locked && <Link
               to={backHref}
               title={backLabel}
               className="flex-shrink-0 px-2.5 py-2 rounded-lg bg-white/10 text-gray-200 border border-white/15 text-xs font-bold hover:bg-white/20 transition-colors whitespace-nowrap"
             >
               ←<span className="hidden sm:inline"> {backLabel}</span>
-            </Link>
+            </Link>}
           </div>
         </div>
       </div>
@@ -2104,6 +2132,10 @@ function SampleProjector() {
   // specific event's board (from the Run Event panel); when present it also
   // swaps the "← Hub" link for a way back to that event's admin page.
   const boardParam = new URLSearchParams(window.location.search).get('board')
+  // A ?board= link is a shared demo of that one board: only it is loaded and
+  // the picker is replaced by its name, so the viewer cannot switch boards.
+  const locked = !!boardParam
+  const ownerLabel = useOwnerLabel()
   // Read once at mount (not in the load effect, which StrictMode runs twice).
   const [resetBoard] = useState(() => {
     try { return sessionStorage.getItem(RESET_BOARD_KEY) } catch { return null }
@@ -2216,7 +2248,9 @@ function SampleProjector() {
   useEffect(() => {
     (async () => {
       const [{ data: secs }, { data: settings }] = await Promise.all([
-        supabase.from('bingo_sections').select('*').order('sort_order'),
+        locked
+          ? supabase.from('bingo_sections').select('*').eq('id', boardParam!)
+          : supabase.from('bingo_sections').select('*').order('sort_order'),
         supabase.from('bingo_settings').select('active_section_id').eq('id', 'main').maybeSingle(),
       ])
       const list = (secs ?? []) as BingoSection[]
@@ -2312,6 +2346,7 @@ function SampleProjector() {
   // ── Remote control wiring ──────────────────────────────────────────────────
   const snapshot = (): RemoteState => ({
     selectedId,
+    locked,
     teamName,
     pendingGroup,
     scanState,
@@ -2328,7 +2363,7 @@ function SampleProjector() {
 
   const applyCommand = (c: RemoteCommand) => {
     switch (c.action) {
-      case 'selectBoard': handleSelectBoard(c.id); break
+      case 'selectBoard': if (!locked) handleSelectBoard(c.id); break
       case 'join': setPendingGroup(c.teamName); break // → "Enter Password" step
       case 'cancelJoin': setPendingGroup(null); break
       case 'confirmJoin':
@@ -2371,7 +2406,7 @@ function SampleProjector() {
   useEffect(() => {
     if (!remoteCode && !watchCode) return
     const snap = {
-      selectedId, teamName, pendingGroup, scanState,
+      selectedId, locked, teamName, pendingGroup, scanState,
       openTaskId: openTask?.id ?? null,
       view,
       detail: openTask ? detailStep : null,
@@ -2454,8 +2489,10 @@ function SampleProjector() {
         view={view}
         onToggleView={() => setView(v => v === 'board' ? 'scoreboard' : 'board')}
         showViewToggle={sections.length > 0}
-        backHref={boardParam ? '/bingo-dash/admin' : '/'}
-        backLabel={boardParam ? 'Back to event' : 'Hub'}
+        backHref="/"
+        backLabel="Hub"
+        locked={locked}
+        ownerLabel={ownerLabel}
       />
 
       {sections.length === 0 ? (
@@ -2909,6 +2946,7 @@ function SampleController({ code, readOnly = false }: { code: string; readOnly?:
   }, [sendCommand, readOnly])
 
   const selectedId = state?.selectedId ?? null
+  const ownerLabel = useOwnerLabel()
 
   // Mirror the projector's board so tile taps map to the right tasks.
   useEffect(() => {
@@ -3168,14 +3206,20 @@ function SampleController({ code, readOnly = false }: { code: string; readOnly?:
           {/* Board picker */}
           <div>
             <label className="text-[11px] text-gray-500 font-bold uppercase tracking-wide">Board</label>
-            <select
-              value={selectedId ?? ''}
-              onChange={e => sendCommand({ action: 'selectBoard', id: e.target.value })}
-              className="w-full mt-1 bg-white/10 text-white text-sm font-bold rounded-lg px-3 py-2.5 border border-white/15 focus:outline-none focus:border-emerald-400"
-            >
-              {sections.length === 0 && <option value="">No boards</option>}
-              {sections.map(s => <option key={s.id} value={s.id} className="bg-gray-900">{s.name}</option>)}
-            </select>
+            {state?.locked ? (
+              <p className="mt-1 text-white text-sm font-bold px-3 py-2.5">
+                {sections.find(s => s.id === selectedId)?.name ?? 'This board'}
+              </p>
+            ) : (
+              <select
+                value={selectedId ?? ''}
+                onChange={e => sendCommand({ action: 'selectBoard', id: e.target.value })}
+                className="w-full mt-1 bg-white/10 text-white text-sm font-bold rounded-lg px-3 py-2.5 border border-white/15 focus:outline-none focus:border-emerald-400"
+              >
+                {sections.length === 0 && <option value="">No boards</option>}
+                {sections.map(s => <option key={s.id} value={s.id} className="bg-gray-900">{s.name} — {ownerLabel(s)}</option>)}
+              </select>
+            )}
           </div>
 
           {/* Join / team */}

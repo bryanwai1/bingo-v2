@@ -55,6 +55,8 @@ export type DetailStep = {
 
 export type RemoteState = {
   selectedId: string | null
+  /** Projector opened with ?board= — one board only, so the remote hides its picker. */
+  locked?: boolean
   teamName: string | null
   /** Group picked but still on the projector's "Enter Password" step. */
   pendingGroup: string | null
