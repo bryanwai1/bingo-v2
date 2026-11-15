@@ -10,7 +10,7 @@
 --
 -- Restores exactly the policies already defined in core-tables/*.sql.
 --
--- KNOWN SIDE EFFECT: the public demo page (/bingo-dash/sample) writes a cosmetic
+-- NOTE: the demo page's signed-out glow write goes through set_section_glow()
 -- "glow_slots" highlight on a section while signed out. Signed out, that one
 -- write is now refused (the owner signed in still works). Skip this file if the
 -- demo page's remote-highlight must keep working signed out.

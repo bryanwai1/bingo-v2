@@ -2187,8 +2187,7 @@ function SampleProjector() {
     setSections(prev => prev.map(s => (s.id === selectedId ? { ...s, glow_slots: slots } : s)))
     // Awaited, not fired and forgotten: a Supabase query builder is lazy and
     // never sends the request unless something subscribes to it.
-    const { error } = await supabase.from('bingo_sections')
-      .update({ glow_slots: slots }).eq('id', selectedId)
+    const { error } = await supabase.rpc('set_section_glow', { p_section: selectedId, p_slots: slots })
     if (error) console.error('Could not save the lit tiles', error)
   }
 
