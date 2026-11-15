@@ -199,8 +199,7 @@ export function FacilitatorSessions() {
     setBusyId(a.id)
     setNotice('')
     try {
-      const { error } = await supabase.from('bingo_accounts')
-        .update({ access_expires_at: new Date().toISOString() }).eq('id', a.id)
+      const { error } = await supabase.rpc('remove_crew_member', { p_account: a.id })
       if (error) { setNotice(`Could not remove ${who}: ${errText(error)}`); return }
       await load()
     } finally { setBusyId(null) }

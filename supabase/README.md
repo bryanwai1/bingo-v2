@@ -100,3 +100,14 @@ cross-checked in two ways where the files alone weren't reliable:
   nothing here to reconstruct from; this README just flags that they exist
   elsewhere in the database, in case their absence here looks like an
   oversight.
+
+## Checklist: adding an admin feature (owner + tenants)
+
+- UI: one shared admin component serves owner and tenants. A new button shows for both
+  unless you gate it with `isOwner` / `ownerOnly`. Owner-only things: account management, shared-library edits.
+- Database: the UI is not a security boundary. Every new table needs RLS with
+  `bingo_can_write(owner_id)` for writes, never a `USING true` policy; inserts must set `owner_id`.
+- Owner-only actions go through a SECURITY DEFINER function that checks `is_bingo_owner()`,
+  with `revoke ... from public, anon` and `grant ... to authenticated`.
+- Test as owner AND as a tenant. Support mode hides tenant RLS bugs because the DB still sees the owner.
+- Run `sql-fixes/audit-tenancy.sql` after migrating.

@@ -30,15 +30,20 @@ function SectionPicker() {
   const [sections, setSections] = useState<BingoSection[]>([])
   const [activeId, setActiveId] = useState<string | null>(null)
   const navigate = useNavigate()
-  const { workingOwnerValue } = useBingoAuth()
+  const { workingOwnerValue, isOwner, account } = useBingoAuth()
 
   useEffect(() => {
     // Every board is readable, so keep only this account's own.
     supabase.from('bingo_sections').select('*').order('sort_order').then(({ data }) => {
       if (data) setSections(data.filter(s => (s.owner_id ?? null) === workingOwnerValue))
     })
-    supabase.from('bingo_settings').select('active_section_id').limit(1).maybeSingle()
-      .then(({ data }) => { if (data) setActiveId(data.active_section_id) })
+    // Owner's live board = global pointer; a tenant's lives on their account row.
+    if (isOwner) {
+      supabase.from('bingo_settings').select('active_section_id').limit(1).maybeSingle()
+        .then(({ data }) => { if (data) setActiveId(data.active_section_id) })
+    } else {
+      setActiveId(account?.active_section_id ?? null)
+    }
   }, [])
 
   return (
