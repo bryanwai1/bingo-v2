@@ -5,15 +5,12 @@ import type { CoopPuzzle } from './types.ts'
 const NOTE_MS = 3500 // design note-ms
 
 // The player never sees an icon (AC-5): icons are drawn only when !isPlayer.
-const View: CoopPuzzle<IconState, IconAction>['View'] = ({ state, canAct, isPlayer = true, mySlot, dispatch }) => {
+const View: CoopPuzzle<IconState, IconAction>['View'] = ({ state, canAct, isPlayer = true, dispatch }) => {
   const send = useRef(dispatch)
   send.current = dispatch // a new function each parent render must not restart the timer
   const [note, setNote] = useState(false)
-  const [refused, setRefused] = useState('')
-  const slot = mySlot === 1 ? 1 : 0
   const picks = state.picks ?? {}
-  const mine = picks[String(slot)]
-  const theirs = picks[String(1 - slot)]
+  const mine = picks['0'] ?? picks['1']
   const missed = state.flipped.length === 2
 
   // The player's screen ends the viewing period; the new state reaches everyone through the session.
@@ -29,28 +26,19 @@ const View: CoopPuzzle<IconState, IconAction>['View'] = ({ state, canAct, isPlay
     return () => clearTimeout(t)
   }, [note])
 
-  useEffect(() => {
-    if (!refused) return
-    const t = setTimeout(() => setRefused(''), NOTE_MS)
-    return () => clearTimeout(t)
-  }, [refused])
-
   const tap = (i: number) => {
     if (!isPlayer) { setNote(true); return }
     if (!canAct || missed || state.flipped.includes(i) || state.matched.includes(i)) return
-    if (mine !== undefined) { setRefused('You already picked. Wait for the other player.'); return }
-    if (theirs === i) { setRefused('The other player already picked that card. Choose another.'); return }
-    dispatch({ type: 'pick', index: i, slot })
+    if (mine === i) return
+    dispatch({ type: 'pick', index: i, slot: 0 })
   }
 
   const msg = !isPlayer
     ? (state.last === 'match' ? 'The player found a match.' : missed ? 'No match. The player is looking at your answer.' : 'Tell the player what you see.')
     : state.last === 'match' ? 'It is a match!'
     : missed ? 'No match... ask your observers what they saw.'
-    : mine !== undefined && theirs !== undefined ? 'Both picked.'
-    : mine !== undefined ? `You picked ${cardLabel(mine, state.cols)}. Waiting for the other player.`
-    : theirs !== undefined ? `The other player picked ${cardLabel(theirs, state.cols)}. Pick your card.`
-    : 'Pick one card.'
+    : mine !== undefined ? `You picked ${cardLabel(mine, state.cols)}. Pick a second card.`
+    : 'Pick two different cards, one at a time.'
 
   return (
     <div>
@@ -61,7 +49,7 @@ const View: CoopPuzzle<IconState, IconAction>['View'] = ({ state, canAct, isPlay
           const matched = state.matched.includes(i)
           const up = state.flipped.includes(i)
           const label = cardLabel(i, state.cols)
-          const pickTag = !isPlayer ? '' : mine === i ? ', your pick' : theirs === i ? ", other player's pick" : ''
+          const pickTag = isPlayer && mine === i ? ', your pick' : ''
           const picked = pickTag !== ''
           const face = !isPlayer && (up || matched)
           return (
@@ -75,13 +63,12 @@ const View: CoopPuzzle<IconState, IconAction>['View'] = ({ state, canAct, isPlay
               }}>
               {!isPlayer && (up || matched) && <img src={iconSrc(id)} alt="" className="w-[70%] h-[70%] object-contain" />}
               <span className={face ? 'absolute left-1.5 top-0.5 text-xs font-black text-gray-700' : 'text-lg font-black text-white'}>{label}</span>
-              {picked && <span className="absolute right-1 bottom-1 text-[10px] font-black text-white/90">{mine === i ? 'You' : 'Other'}</span>}
+              {picked && <span className="absolute right-1 bottom-1 text-[10px] font-black text-white/90">Your pick</span>}
               {matched && <span className="absolute right-1 bottom-1 w-5 h-5 rounded-full bg-emerald-400 text-emerald-950 text-xs font-black grid place-items-center">✓</span>}
             </button>
           )
         })}
       </div>
-      {isPlayer && refused && <p className="mt-3 text-center text-sm text-gray-200" role="status">{refused}</p>}
       {!isPlayer && note && <p className="mt-3 text-center text-sm text-gray-200" role="status">Only the player can move. Nothing changed. You are watching.</p>}
     </div>
   )

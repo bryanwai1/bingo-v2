@@ -54,7 +54,7 @@ export function CoopPlay({ memberId, scanId, gameKey, role: storedRole, color, o
   }, [snap, onSolved])
 
   const play = async () => { if (await c.open(gameKey)) setOpen(true) }
-  const refusal = c.error === 'PLAYER_TAKEN' ? (gameKey === 'icon-matching' ? 'Your team already has 2 players.' : 'Your team already has a player.')
+  const refusal = c.error === 'PLAYER_TAKEN' ? 'Your team already has a player.'
     : c.error === 'OBSERVERS_FULL' ? 'The lobby is full.'
     : c.error === 'NOT_IN_SESSION' ? 'Another player took your seat. You can join again.'
     : c.error === 'NOT_ON_TEAM' ? 'This game belongs to another team.' : null
@@ -68,6 +68,7 @@ export function CoopPlay({ memberId, scanId, gameKey, role: storedRole, color, o
       <div className="rounded-2xl p-4 mb-6" style={PANEL}>
         <p className="text-gray-400 text-xs font-black uppercase tracking-widest mb-1">Play in the app</p>
         <p className="text-gray-300 text-sm mb-3">Play this challenge together with your team. The player acts, observers watch.</p>
+        {gameKey === 'icon-matching' && <p className="text-gray-300 text-sm mb-3">Use 1 player and at least 1 observer (up to 9). The player taps two different cards, one at a time. Only observers see both icons after the second tap. Observers call out the positions and help the player remember pairs. Matches stay revealed; non-matches hide after 2.5 seconds. Match all 8 pairs to complete the card.</p>}
         <div className="mb-3"><RoleChip role={storedRole} /></div>
         {c.peekState === 'error' && (
           <Banner tone="err">Could not check for a game.
@@ -99,7 +100,7 @@ export function CoopPlay({ memberId, scanId, gameKey, role: storedRole, color, o
         </span>
       </div>
       {!c.live && <Banner tone="err">Connection lost. Your game is saved and will catch up.</Banner>}
-      {(c.error === 'PICK_LOCKED' || c.error === 'PICK_TAKEN') && <Banner tone="info">{c.error === 'PICK_TAKEN' ? 'The other player already picked that card.' : 'That pick was not accepted. Nothing changed.'}</Banner>}
+      {(c.error === 'PICK_LOCKED' || c.error === 'PICK_TAKEN') && <Banner tone="info">{c.error === 'PICK_TAKEN' ? 'You already picked that card.' : 'That pick was not accepted. Nothing changed.'}</Banner>}
       {c.error === 'NOT_PLAYER' && <Banner tone="info">Only the player can move. Nothing changed.</Banner>}
 
       {snap.status === 'lobby' ? (
@@ -113,9 +114,6 @@ export function CoopPlay({ memberId, scanId, gameKey, role: storedRole, color, o
             <li>{needs.players === needs.need ? '✓' : '○'} Player{needs.need > 1 ? 's' : ''} {needs.players} of {needs.need} needed</li>
             <li>{needs.observers >= 1 && needs.observers <= MAX_OBSERVERS ? '✓' : '○'} Observers {needs.observers} (at least 1, up to {MAX_OBSERVERS})</li>
           </ul>
-          {needs.need > 1 && needs.players < needs.need && (
-            <p className="text-xs text-gray-400 mb-3">Both players must be on the same team. If the second player cannot join the team, ask the organiser to allow 2 players per team in this section.</p>
-          )}
           <ul className="space-y-2 mb-4" aria-label="Who is in the lobby">
             {snap.members.map(m => (
               <li key={m.member_id} className="flex items-center justify-between gap-2 rounded-xl px-3 py-2 min-h-[44px] bg-white/5">

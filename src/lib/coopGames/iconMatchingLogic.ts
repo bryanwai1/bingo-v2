@@ -16,7 +16,7 @@ export interface IconState {
   flipped: number[]    // 0 to 2 positions turned over and not matched
   matched: number[]
   last: 'match' | 'miss' | null
-  /** PRD-007: each player's pick of the current turn, by player slot (0 or 1). Absent in older sessions. */
+  /** First and second selections in the current turn. Absent in older sessions. */
   picks?: Record<string, number>
 }
 export type IconAction = { type: 'flip'; index: number } | { type: 'pick'; index: number; slot: number } | { type: 'hide' }
@@ -42,13 +42,14 @@ export function createIconMatching(
     reduce: (s, a) => {
       if (a.type === 'hide') return s.flipped.length === 2 ? { ...s, flipped: [], last: null, picks: {} } : s
       if (a.type === 'pick') {
-        // Mirror of coop_pick on the server: one locked pick per player, never the other player's card.
-        const i = a.index, mine = String(a.slot), other = String(1 - a.slot)
+        // Mirror coop_pick: the same player chooses the first and second card.
+        const i = a.index
         const picks = s.picks ?? {}
         if (!Number.isInteger(i) || i < 0 || i >= s.cards.length || (a.slot !== 0 && a.slot !== 1)) return s
-        if (s.flipped.length >= 2 || s.matched.includes(i) || mine in picks || picks[other] === i) return s
-        const both = { ...picks, [mine]: i }
-        if (!(other in picks)) return { ...s, picks: both, last: null }
+        if (s.flipped.length >= 2 || s.matched.includes(i) || Object.values(picks).includes(i)) return s
+        const first = picks['0'] ?? picks['1']
+        if (first === undefined) return { ...s, picks: { '0': i }, last: null }
+        const both = { '0': first, '1': i }
         const x = both['0'], y = both['1']
         return s.cards[x] === s.cards[y]
           ? { ...s, flipped: [], matched: [...s.matched, x, y], last: 'match', picks: {} }

@@ -25,13 +25,13 @@ export interface CoopPuzzleLogic<S, A> {
   initState(): S
   reduce(s: S, a: A): S
   isSolved(s: S): boolean
-  /** Games where both players act in the same turn (PRD-007): an action that the server
+  /** Games with actions that the server
    *  merges itself (coop_pick / coop_hide) instead of a whole-state coop_move. */
   remote?(a: A): { kind: 'pick'; index: number } | { kind: 'hide' } | null
 }
 
-/** Players a game needs (PRD-007): Icon Matching 2, everything else 1. The server enforces the same. */
-export const playersNeeded = (gameKey?: string) => (gameKey === 'icon-matching' ? 2 : 1)
+/** Every cooperative game needs one player. The server enforces the same. */
+export const playersNeeded = (gameKey?: string) => { void gameKey; return 1 }
 
 export function lobbyNeeds(members: CoopMember[], gameKey?: string) {
   const need = playersNeeded(gameKey)
@@ -80,13 +80,13 @@ export function createCoopApi(rpc: Rpc) {
     start: async (member: string, session: string) =>
       (await rpc('coop_start', { p_member: member, p_session: session })) as CoopSnapshot,
     leave: async (member: string, session: string) => { await rpc('coop_leave', { p_member: member, p_session: session }) },
-    /** PRD-007: each player's own pick. The server decides the slot; `init` is used only if no state exists yet. */
+    /** Record a selection; `init` is used only if no state exists yet. */
     pick: async (member: string, session: string, index: number, init: unknown): Promise<MoveResult> => {
       const r = (await rpc('coop_pick', { p_member: member, p_session: session, p_index: index, p_init: init })) as
         { snapshot: CoopSnapshot; first_completion: boolean }
       return { snapshot: r.snapshot, firstCompletion: r.first_completion }
     },
-    /** End of the viewing period; safe to call from both players (no-op when nothing is shown). */
+    /** End of the viewing period; safe to repeat (no-op when nothing is shown). */
     hide: async (member: string, session: string): Promise<MoveResult> => {
       const r = (await rpc('coop_hide', { p_member: member, p_session: session })) as
         { snapshot: CoopSnapshot; first_completion: boolean }
