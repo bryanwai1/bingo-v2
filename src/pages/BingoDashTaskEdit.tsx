@@ -23,7 +23,7 @@ import { TaskLinkButtons } from '../components/TaskLinkButtons'
 import { ParticleBackground } from '../components/ParticleBackground'
 import { CardDrawEditor } from '../components/CardDrawEditor'
 import {
-  INPUT_KINDS, INPUT_LABELS, fileNoun, inputKinds, effectiveInputs, usesInputs,
+  INPUT_KINDS, INPUT_LABELS, fileNoun, inputKinds, effectiveInputs, usesInputs, hasOwnMechanism,
   type CompletionInputs,
 } from '../lib/completionInputs'
 import { AitbMissionModule } from '../components/AitbMissionModule'
@@ -123,20 +123,21 @@ export function BingoDashTaskEdit() {
    * Save the card's completion setup. task_type stays in step with the set so
    * older code paths (and the card library's badges) still read sensibly: a
    * card collecting files is 'photo'/'video'/'media', one collecting only a
-   * typed answer is 'answer', and no inputs at all means marshal.
+   * typed answer is 'answer'. None explicitly opts out of generic completion.
    */
-  const saveInputs = async (_hint: string, next: CompletionInputs) => {
+  const saveInputs = async (hint: string, next: CompletionInputs) => {
     if (!task) return
     const kinds = inputKinds(next)
-    const type = kinds.length === 0
-      ? 'standard'
+    const type = hint === 'none' && ['sign_splice', 'breakout_hunt'].includes(task.task_type)
+      ? task.task_type
+      : kinds.length === 0 ? 'standard'
       : next.photo && next.video ? 'media'
       : next.video ? 'video'
       : next.photo ? 'photo'
       : 'answer'
     setInputs(next)
     setTaskType(type as typeof taskType)
-    const patch: Partial<BingoTask> = { task_type: type as BingoTask['task_type'], completion_inputs: next }
+    const patch: Partial<BingoTask> = { task_type: type as BingoTask['task_type'], completion_inputs: hint === 'none' ? { none: 'required' } : next, require_marshal: hint === 'standard' && kinds.length === 0 }
     // Dropping the typed answer clears the question with it.
     if (!next.answer) { patch.answer_question = null; patch.answer_text = null; patch.answer_min = null; patch.answer_blocks = null }
     stage(patch)
@@ -907,7 +908,7 @@ export function BingoDashTaskEdit() {
               <button
                 onClick={() => saveInputs('standard', {})}
                 className={`w-full py-2.5 rounded-lg text-sm font-bold border transition-colors ${
-                  taskType === 'standard'
+                  taskType === 'standard' && !hasOwnMechanism(task.completion_inputs) && task.require_marshal
                     ? 'bg-violet-600 text-white border-violet-600'
                     : 'bg-white text-gray-500 border-gray-200 hover:bg-gray-50'
                 }`}
@@ -915,6 +916,12 @@ export function BingoDashTaskEdit() {
                 👮 Marshal password only
               </button>
 
+              <button type="button"
+                onClick={() => saveInputs('none', {})}
+                aria-pressed={hasOwnMechanism(task.completion_inputs)}
+                className={`mt-2 w-full py-2.5 rounded-lg text-sm font-bold border transition-colors ${hasOwnMechanism(task.completion_inputs) ? 'bg-violet-600 text-white border-violet-600' : 'bg-white text-gray-500 border-gray-200 hover:bg-gray-50'}`}>
+                None — uses its own mechanism
+              </button>
               <p className="text-[11px] font-bold uppercase tracking-wider text-gray-400 mt-4 mb-2">
                 …or collect any combination of these
               </p>
@@ -934,7 +941,7 @@ export function BingoDashTaskEdit() {
                             const next = { ...inputs }
                             if (e.target.checked) next[kind] = 'required'
                             else delete next[kind]
-                            saveInputs(Object.keys(next).length ? 'answer' : 'standard', next)
+                            saveInputs(Object.keys(next).length ? 'answer' : 'none', next)
                           }}
                         />
                         <span className="text-sm font-bold text-gray-700">
@@ -963,13 +970,15 @@ export function BingoDashTaskEdit() {
               </div>
 
               <p className="text-xs text-gray-400 mt-2">
-                {taskType === 'standard' && !usesInputs(inputs)
+                {hasOwnMechanism(task.completion_inputs)
+                  ? 'No answer input or marshal password. The card’s own mechanism controls completion.'
+                  : taskType === 'standard' && !usesInputs(inputs)
                   ? 'Participants complete via marshal password.'
                   : (() => {
                       const kinds = inputKinds(inputs)
                       const must = kinds.filter(k => inputs[k] === 'required').map(k => INPUT_LABELS[k].label)
                       const auto = kinds.filter(k => inputs[k] === 'auto').map(k => INPUT_LABELS[k].label)
-                      if (kinds.length === 0) return 'Pick at least one input, or leave the card on marshal.'
+                      if (kinds.length === 0) return 'Select None for a card with its own mechanism, or choose an input.'
                       if (auto.length > 0) {
                         const all = [...must, ...auto]
                         return `The tile turns green once ${all.join(' and ')} ${all.length > 1 ? 'are' : 'is'} in. ${auto.join(' and ')} ${auto.length > 1 ? 'count' : 'counts'} as soon as ${auto.length > 1 ? 'they are' : 'it is'} sent${must.length > 0 ? `; a marshal approves ${must.join(' and ')} in admin` : ''}.`

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useCoopSession } from '../hooks/useCoopSession'
 import { getPuzzle } from '../lib/coopGames/registry'
+import { savedPlayerName } from '../lib/coopGames/registerMember'
 import { lobbyNeeds, lobbyMessage, playLabel, justCompleted, currentState, MAX_OBSERVERS, type CoopRole, type CoopStatus } from '../lib/coopGames/session'
 
 // Play panel (card page) and, once opened, the lobby and the game in place of
@@ -25,6 +26,8 @@ const Banner = ({ tone, children }: { tone: 'err' | 'info' | 'ok'; children: Rea
 
 interface Props {
   memberId: string | null
+  memberLoading?: boolean
+  memberError?: boolean
   scanId: string
   gameKey: string
   /** Role from localStorage; the server re-reads it from the member row. */
@@ -32,10 +35,12 @@ interface Props {
   color: string
   /** The server has just completed the card: refresh the page's copy of the scan. */
   onSolved: () => void
+  /** Register this browser's person on the team; resolves to an error message, or null on success. */
+  onJoinPlayer: (name: string) => Promise<string | null>
   onOpenChange: (open: boolean) => void
 }
 
-export function CoopPlay({ memberId, scanId, gameKey, role: storedRole, color, onSolved, onOpenChange }: Props) {
+export function CoopPlay({ memberId, memberLoading = false, memberError = false, scanId, gameKey, role: storedRole, color, onSolved, onJoinPlayer, onOpenChange }: Props) {
   const c = useCoopSession(memberId, scanId)
   const [open, setOpen] = useState(false)
   const prevStatus = useRef<CoopStatus | undefined>(undefined)
@@ -45,6 +50,22 @@ export function CoopPlay({ memberId, scanId, gameKey, role: storedRole, color, o
   const role: CoopRole = me?.role ?? storedRole
 
   useEffect(() => { onOpenChange(open && !!snap) }, [open, snap, onOpenChange])
+
+  // Join straight from the card: register (name only), then go into the lobby without leaving the page.
+  const [name, setName] = useState(savedPlayerName)
+  const [registering, setRegistering] = useState(false)
+  const [regError, setRegError] = useState<string | null>(null)
+  const [wantOpen, setWantOpen] = useState(false)
+  const register = async (n: string) => {
+    if (!n.trim()) { setRegError('Enter your name.'); return }
+    setRegistering(true); setRegError(null)
+    const err = await onJoinPlayer(n)
+    setRegistering(false)
+    if (err) setRegError(err); else setWantOpen(true)
+  }
+  useEffect(() => {
+    if (wantOpen && memberId && !open) { setWantOpen(false); void c.open(gameKey).then(r => { if (r) setOpen(true) }) }
+  }, [wantOpen, memberId, open, c, gameKey])
 
   // coop_move already credited the card on the server; just refresh the page's copy,
   // once, on the change playing -> completed (never heal: Undo completion must stick).
@@ -57,11 +78,29 @@ export function CoopPlay({ memberId, scanId, gameKey, role: storedRole, color, o
   const refusal = c.error === 'PLAYER_TAKEN' ? 'Your team already has a player.'
     : c.error === 'OBSERVERS_FULL' ? 'The lobby is full.'
     : c.error === 'NOT_IN_SESSION' ? 'Another player took your seat. You can join again.'
-    : c.error === 'NOT_ON_TEAM' ? 'This game belongs to another team.' : null
+    : c.error === 'NOT_ON_TEAM' ? 'Your saved player registration does not match this team. Join this board again.' : null
 
   const btn = 'w-full min-h-[60px] rounded-2xl font-black uppercase tracking-wide text-white active:scale-95 transition-transform shadow-[0_4px_0_rgba(0,0,0,0.35)]'
 
-  if (!memberId) return null
+  if (memberLoading || memberError) return (
+    <div className="rounded-2xl p-4 mb-6" style={PANEL}>
+      <p className="text-gray-300 text-sm">{memberLoading ? 'Checking your player registration…' : 'Could not check your registration. Reload to try again.'}</p>
+    </div>
+  )
+
+  if (!memberId) return (
+    <div className="rounded-2xl p-4 mb-6" style={PANEL}>
+      <p className="text-gray-400 text-xs font-black uppercase tracking-widest mb-1">Play in the app</p>
+      <p className="text-gray-300 text-sm mb-3">Enter your name to join your team's lobby. You stay on this card.</p>
+      <input value={name} onChange={e => setName(e.target.value)} placeholder="Your name" maxLength={40} aria-label="Your name"
+        className="w-full min-h-[48px] rounded-xl px-3 mb-3 bg-white/10 border-2 border-white/20 text-white font-bold placeholder:text-white/40" />
+      {regError && <Banner tone="err">{regError}</Banner>}
+      <button type="button" className={btn} style={{ background: color }} disabled={registering}
+        onClick={() => { void register(name) }}>
+        {registering ? 'Joining...' : storedRole === 'observer' ? 'Join as observer' : 'Join as player'}
+      </button>
+    </div>
+  )
 
   if (!open || !snap) {
     return (
@@ -76,9 +115,10 @@ export function CoopPlay({ memberId, scanId, gameKey, role: storedRole, color, o
           </Banner>
         )}
         {refusal && <Banner tone="err">{c.error === 'NOT_IN_SESSION' ? '' : 'You have not been added to the lobby. '}{refusal}</Banner>}
-        <button type="button" onClick={() => void play()} disabled={c.busy || c.peekState === 'loading'}
+        {regError && <Banner tone="err">{regError}</Banner>}
+        <button type="button" onClick={() => { if (c.error === 'NOT_ON_TEAM') void register(savedPlayerName()); else void play() }} disabled={c.busy || c.peekState === 'loading'}
           className={btn} style={{ background: color }}>
-          {c.peekState === 'loading' ? 'Checking...' : playLabel(c.peeked)}
+          {c.peekState === 'loading' ? 'Checking...' : c.error === 'NOT_ON_TEAM' ? 'Join this board again' : playLabel(c.peeked)}
         </button>
       </div>
     )
@@ -136,7 +176,7 @@ export function CoopPlay({ memberId, scanId, gameKey, role: storedRole, color, o
             <Banner tone="ok">Solved. Locked: this game is completed. Your team was credited once.</Banner>
           )}
           <div className={c.live ? '' : 'opacity-50'}>
-            <puzzle.View state={currentState(snap, puzzle)} canAct={canAct && c.live && !c.busy} isPlayer={role === 'player'} mySlot={me?.slot}
+            <puzzle.View state={currentState(snap, puzzle)} canAct={canAct && c.live && (snap.game_key === 'icon-matching' || !c.busy)} isPlayer={role === 'player'} mySlot={me?.slot}
               dispatch={a => { void c.move(puzzle, a, role) }} />
           </div>
           <button type="button" onClick={close} className="w-full min-h-[44px] mt-4 text-sm font-bold text-gray-300 underline">

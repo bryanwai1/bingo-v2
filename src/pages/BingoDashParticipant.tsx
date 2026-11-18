@@ -8,7 +8,7 @@ import { useBingoDashTeam } from '../hooks/useBingoDashTeam'
 import { useBingoTaskPages } from '../hooks/useBingoTaskPages'
 import {
   fileAccept, fileEmoji, fileHeading, fileNoun, inputKinds, isComplete, missingLabels,
-  effectiveInputs, usesInputs, isCompulsory, type InputKind,
+  effectiveInputs, usesInputs, hasOwnMechanism, isCompulsory, type InputKind,
 } from '../lib/completionInputs'
 import { useBingoTaskPhotos } from '../hooks/useBingoTaskPhotos'
 import { useBingoScans } from '../hooks/useBingoScans'
@@ -32,8 +32,10 @@ import { RetroGamesSample } from '../components/RetroGamesSample'
 import { BundleCard } from '../components/BundleCard'
 import { AitbMissionModule } from '../components/AitbMissionModule'
 import { CardBonusTimer } from '../components/CardBonusTimer'
+import { useCoopMember } from '../hooks/useCoopMember'
 import { CoopPlay } from '../components/CoopPlay'
 import { gameKeyForTitle } from '../lib/coopGames/gameCards'
+import { registerCoopMember } from '../lib/coopGames/registerMember'
 import { resolveBonusWindow, activeElapsedMs, type BonusDefaults } from '../lib/timeBonus'
 import { aitbByName, aitbToolUrl, aitbToolCaption, AITB_POINTS } from '../lib/aitbActivities'
 import { normalizeUrl } from '../lib/normalizeUrl'
@@ -167,6 +169,9 @@ export function BingoDashParticipant() {
   const [now, setNow] = useState(Date.now())
   const [scanRecorded, setScanRecorded] = useState(false)
   const [coopOpen, setCoopOpen] = useState(false)
+  // Game RPCs own completion, even if a copied card still has marshal/input settings.
+  const coopGameKey = gameKeyForTitle(task?.title)
+  const coopMember = useCoopMember(coopGameKey ? team?.id : undefined, team?.section_id)
   const [currentPage, setCurrentPage] = useState(0)
   const [completing, setCompleting] = useState(false)
   const [showLeaveConfirm, setShowLeaveConfirm] = useState(false)
@@ -1161,14 +1166,25 @@ export function BingoDashParticipant() {
 
         {/* Cooperative game (PRD-004): Play button on game cards only; opens the lobby and
             game in place of the instruction cards. Everything else on the card is unchanged. */}
-        {scanRecord && !chainLocked && gameKeyForTitle(task.title) && (
+        {scanRecord && !chainLocked && coopGameKey && (
           <CoopPlay
-            memberId={localStorage.getItem('bingo-dash-member-id')}
+            memberId={coopMember.id}
+            memberLoading={coopMember.loading}
+            memberError={coopMember.error}
             scanId={scanRecord.id}
-            gameKey={gameKeyForTitle(task.title)!}
-            role={isObserver ? 'observer' : 'player'}
+            gameKey={coopGameKey}
+            role={coopMember.role}
             color={task.hex_code}
             onSolved={() => setScanRecord(prev => (prev ? { ...prev, completed: true } : prev))}
+            onJoinPlayer={async name => {
+              // Register on the spot (this browser already has the team) and stay on the card.
+              if (!team?.id) return 'Your team is not loaded yet. Try again.'
+              try {
+                await registerCoopMember(team.id, name, isObserver ? 'observer' : 'player')
+                coopMember.reload()
+                return null
+              } catch (e) { return e instanceof Error ? e.message : 'Could not register you.' }
+            }}
             onOpenChange={setCoopOpen}
           />
         )}
@@ -1366,6 +1382,21 @@ export function BingoDashParticipant() {
                 ← Back to Board
               </button>
             </>
+          ) : coopGameKey ? (
+            <div className="p-5 rounded-3xl border-2 border-emerald-400/40 bg-emerald-400/10 text-center">
+              <p className="text-white font-black text-lg">
+                {scanRecord?.completed ? 'Challenge Complete!' : 'Complete this challenge in the game above'}
+              </p>
+              <p className="text-white/60 text-sm mt-2">
+                {scanRecord?.completed ? 'Your team has been credited.'
+                  : coopGameKey === 'icon-matching' ? 'Match all 8 pairs to complete this card automatically. No marshal password is needed.'
+                  : 'Solve the game to complete this card automatically. No marshal password is needed.'}
+              </p>
+              <button onClick={() => void goBack()}
+                className="mt-4 w-full py-3 rounded-2xl text-white/70 font-bold border border-white/15 hover:bg-white/5 transition-colors">
+                Back to Board
+              </button>
+            </div>
           ) : task.is_bundle && team ? (
             <>
               <BundleCard task={task} teamId={team.id} marshalPassword={marshalPassword} />
@@ -1394,6 +1425,11 @@ export function BingoDashParticipant() {
                 ← Back to Board
               </button>
             </>
+          ) : hasOwnMechanism(task.completion_inputs) && task.task_type === 'standard' ? (
+            <div className="text-center p-5 rounded-2xl border border-white/20 text-white/70">
+              <p>{scanRecord?.completed ? 'Challenge Complete!' : 'This card is completed through its own activity. No answer input is needed.'}</p>
+              <button onClick={() => void goBack()} className="mt-3 underline font-bold">Back to Board</button>
+            </div>
           ) : scanRecord?.completed ? (
             <div className="text-center">
               <div

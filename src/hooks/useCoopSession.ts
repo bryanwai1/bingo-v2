@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import {
-  createCoopApi, coopErrorCode, submitMove, readSession, type CoopPuzzleLogic, type CoopSnapshot, type CoopErrorCode, type CoopRole, type CoopStatus, type MoveResult,
+  createCoopApi, coopErrorCode, submitMove, readSession, newerSnap, type CoopPuzzleLogic, type CoopSnapshot, type CoopErrorCode, type CoopRole, type CoopStatus, type MoveResult,
 } from '../lib/coopGames/session'
 
 // Single seam the UI uses for a coop session (ADR-004). State reaches clients
@@ -35,7 +35,7 @@ export function useCoopSession(memberId: string | null, scanId: string | null) {
   const refetch = useCallback(async () => {
     if (!memberId || !sessionId) return
     const r = await readSession(api, memberId, sessionId)
-    if (r.kind === 'snap') { setSnap(r.snap); setLive(true) }
+    if (r.kind === 'snap') { setSnap(prev => newerSnap(prev, r.snap)); setLive(true) }
     else if (r.kind === 'offline') setLive(false)
     else {
       // reset by an admin, replaced as player, or wrong team: leave the session
@@ -68,7 +68,8 @@ export function useCoopSession(memberId: string | null, scanId: string | null) {
     setBusy(true); setError(null)
     try {
       const r = await f()
-      setSnap('snapshot' in r ? r.snapshot : r)
+      const next: CoopSnapshot = 'snapshot' in r ? r.snapshot : r
+      setSnap(prev => newerSnap(prev, next))
       nudge()
       return r
     } catch (e) {

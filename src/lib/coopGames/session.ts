@@ -102,6 +102,11 @@ export function createCoopApi(rpc: Rpc) {
 }
 export type CoopApi = ReturnType<typeof createCoopApi>
 
+/** Keep the newer snapshot of the same session: a slow poll must never roll back a pick we already have. */
+export function newerSnap(prev: CoopSnapshot | null, next: CoopSnapshot): CoopSnapshot {
+  return prev && prev.session_id === next.session_id && next.version < prev.version ? prev : next
+}
+
 /** A session starts with state {}: the puzzle's own initial state stands in until the first move. */
 export function currentState<S, A>(snap: CoopSnapshot, puzzle: CoopPuzzleLogic<S, A>): S {
   const st = snap.state as object | null

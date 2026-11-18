@@ -10,15 +10,26 @@ const View: CoopPuzzle<IconState, IconAction>['View'] = ({ state, canAct, isPlay
   send.current = dispatch // a new function each parent render must not restart the timer
   const [note, setNote] = useState(false)
   const picks = state.picks ?? {}
-  const mine = picks['0'] ?? picks['1']
+  const serverMine = picks['0'] ?? picks['1']
   const missed = state.flipped.length === 2
+  // Show a tap at once; the server answer replaces it. Cleared when the board changes,
+  // or after a few seconds if the server never accepted it.
+  const [pending, setPending] = useState<number | null>(null)
+  const boardKey = `${picks['0'] ?? ''}|${picks['1'] ?? ''}|${state.flipped.join()}|${state.matched.length}`
+  useEffect(() => { setPending(null) }, [boardKey])
+  useEffect(() => {
+    if (pending === null) return
+    const t = setTimeout(() => setPending(null), 3000)
+    return () => clearTimeout(t)
+  }, [pending])
+  const mine = serverMine ?? (missed ? undefined : pending ?? undefined)
 
   // The player's screen ends the viewing period; the new state reaches everyone through the session.
   useEffect(() => {
     if (!isPlayer || !canAct || !missed) return
     const t = setTimeout(() => send.current({ type: 'hide' }), VIEW_MS)
     return () => clearTimeout(t)
-  }, [isPlayer, canAct, missed, state])
+  }, [isPlayer, canAct, missed, boardKey])
 
   useEffect(() => {
     if (!note) return
@@ -30,6 +41,8 @@ const View: CoopPuzzle<IconState, IconAction>['View'] = ({ state, canAct, isPlay
     if (!isPlayer) { setNote(true); return }
     if (!canAct || missed || state.flipped.includes(i) || state.matched.includes(i)) return
     if (mine === i) return
+    // a second tap sent while the first is still in flight is ordered by the server
+    if (mine === undefined) setPending(i)
     dispatch({ type: 'pick', index: i, slot: 0 })
   }
 

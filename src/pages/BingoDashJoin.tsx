@@ -977,6 +977,7 @@ export function BingoDashJoin() {
             setTeam(parsed)
             setMemberRole(cachedRole)
             setPageState('board')
+            localStorage.setItem(GLOBAL_MEMBER_ID_KEY, cachedMemberId)
             localStorage.setItem(GLOBAL_TEAM_ID_KEY, cachedTeamId)
             localStorage.setItem(GLOBAL_TEAM_DATA_KEY, cachedTeamData)
             localStorage.setItem(GLOBAL_MEMBER_ROLE_KEY, cachedRole)
@@ -1221,6 +1222,7 @@ export function BingoDashJoin() {
   }
 
   const leaveTeam = () => {
+    localStorage.removeItem(GLOBAL_MEMBER_ID_KEY)
     if (sectionSlug) {
       localStorage.removeItem(MEMBER_ID_KEY(sectionSlug))
       localStorage.removeItem(MEMBER_DATA_KEY(sectionSlug))

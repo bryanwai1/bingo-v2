@@ -12,6 +12,11 @@ export type InputKind = (typeof INPUT_KINDS)[number]
 export type InputRule = 'required' | 'optional' | 'auto'
 export type CompletionInputs = Partial<Record<InputKind, InputRule>>
 
+/** Explicitly opts out of generic answers; empty legacy maps still use task_type. */
+export function hasOwnMechanism(raw: unknown): boolean {
+  return !!raw && typeof raw === 'object' && (raw as Record<string, unknown>).none === 'required'
+}
+
 /** The team has to send this input before the card can finish. */
 export const isCompulsory = (rule: InputRule | undefined) => rule === 'required' || rule === 'auto'
 
@@ -44,6 +49,7 @@ export function parseInputs(raw: unknown): CompletionInputs {
  * old exclusive type did.
  */
 export function effectiveInputs(taskType: string | null | undefined, raw: unknown): CompletionInputs {
+  if (hasOwnMechanism(raw)) return {}
   const parsed = parseInputs(raw)
   if (inputKinds(parsed).length > 0) return parsed
   switch (taskType) {

@@ -5,7 +5,7 @@ import { supabase } from '../lib/supabase'
 import { fetchBoardTasks, fetchPrizeTasks, tasksForFace } from '../lib/boardCards'
 import { PrizeStrip } from '../lib/prizeCard/PrizeStrip'
 import { stripState } from '../lib/prizeCard/logic'
-import { effectiveInputs, inputKinds, isCompulsory, fileAccept, fileEmoji, fileHeading, fileNoun } from '../lib/completionInputs'
+import { hasOwnMechanism, effectiveInputs, inputKinds, isCompulsory, fileAccept, fileEmoji, fileHeading, fileNoun } from '../lib/completionInputs'
 import { activeFaces, faceName, faceColor, normaliseFaceCount } from '../lib/cubeFaces'
 import { buildBingoSlots, completedBingoLines, scoreWithBingoLines } from '../lib/bingoLines'
 import { useSampleRemote, makeRemoteCode, HEARTBEAT_MS, HEARTBEAT_TIMEOUT_MS, type RemoteCommand, type RemoteState, type SampleView, type DetailStep } from '../hooks/useSampleRemote'
@@ -1201,6 +1201,7 @@ export const SampleTaskDetail = forwardRef<SampleTaskDetailHandle, {
   const isMarshalTask = task.task_type === 'standard' && !!task.require_marshal
   const marshalFilled = marshalInput.trim() === marshalPassword
   const doComplete = () => {
+    if (hasOwnMechanism(task.completion_inputs)) return
     if (isMarshalTask && !marshalFilled) { setMarshalError('Wrong marshal password.'); return }
     onComplete()
   }
@@ -1595,7 +1596,7 @@ export const SampleTaskDetail = forwardRef<SampleTaskDetailHandle, {
                 )}
 
                 {/* Standard: Marshal password + Complete */}
-                {task.task_type === 'standard' && (
+                {task.task_type === 'standard' && !hasOwnMechanism(task.completion_inputs) && (
                   <>
                     {task.require_marshal && (
                       <>
@@ -2058,7 +2059,7 @@ export const SampleTaskDetail = forwardRef<SampleTaskDetailHandle, {
               </div>
 
               {/* Optional evidence photo for tasks that don't already collect media */}
-              {!inputs.photo && !inputs.video && !inputs.link && !inputs.versus && (
+              {!hasOwnMechanism(task.completion_inputs) && !inputs.photo && !inputs.video && !inputs.link && !inputs.versus && (
                 <div className="mt-4 rounded-3xl p-5 border-2 border-white/15 bg-black/30">
                   <p className="text-white font-black text-base text-center mb-1">📸 Optional Photo</p>
                   <p className="text-white/50 text-xs text-center mb-4">Attach an image as evidence — your marshal will review it.</p>

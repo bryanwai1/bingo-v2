@@ -62,6 +62,10 @@ export function useBingoDashTeam() {
     if (!found.password) throw new Error('This group has not been set up yet. Ask your facilitator.')
     if (found.password !== trimmedPwd) throw new Error('Wrong password for this group.')
 
+    if (localStorage.getItem(TEAM_ID_KEY) !== found.id) {
+      localStorage.removeItem('bingo-dash-member-id')
+      localStorage.removeItem('bingo-dash-member-role')
+    }
     localStorage.setItem(TEAM_ID_KEY, found.id)
     localStorage.setItem(TEAM_DATA_KEY, JSON.stringify(found))
     setTeam(found)
@@ -69,6 +73,8 @@ export function useBingoDashTeam() {
   }
 
   const leaveTeam = () => {
+    localStorage.removeItem('bingo-dash-member-id')
+    localStorage.removeItem('bingo-dash-member-role')
     localStorage.removeItem(TEAM_ID_KEY)
     localStorage.removeItem(TEAM_DATA_KEY)
     setTeam(null)

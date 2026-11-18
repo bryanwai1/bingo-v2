@@ -114,3 +114,13 @@ test('migration enforces one player and selection order under the session lock',
   assert.match(sql, /mine := case when picks/)
   assert.ok(!sql.includes('if picks ? mine then'))
 })
+
+test('a slow poll never rolls back a newer snapshot of the same session', async () => {
+  const { newerSnap } = await import('./session.ts')
+  const snap = (version: number, session_id = 's1') => ({ session_id, version } as CoopSnapshot)
+  assert.equal(newerSnap(snap(5), snap(4)).version, 5)
+  assert.equal(newerSnap(snap(5), snap(5)).version, 5)
+  assert.equal(newerSnap(snap(5), snap(6)).version, 6)
+  assert.equal(newerSnap(snap(5), snap(1, 's2')).session_id, 's2')
+  assert.equal(newerSnap(null, snap(1)).version, 1)
+})
