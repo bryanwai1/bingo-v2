@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useState, useLayoutEffect, useRef } from 'react'
-import { useParams, useSearchParams } from 'react-router-dom'
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { ParticleBackground } from '../components/ParticleBackground'
+import { PlayerBackdrop } from '../components/PlayerBackdrop'
 import { FitBoard } from '../components/FitBoard'
+import { JoinLinkButton } from '../components/JoinLinkButton'
 import { useFullscreen } from '../hooks/useFullscreen'
 import { getScoreboardTheme } from '../lib/scoreboardThemes'
 import { isGridSlot } from '../lib/prizeCard/logic'
@@ -102,6 +104,9 @@ export function BingoDashProjector() {
   // live scoreboard only, without the facilitator's "Total after Bonus" switch.
   const [searchParams] = useSearchParams()
   const playerView = searchParams.get('view') === 'player'
+  const navigate = useNavigate()
+  // A player has no browser chrome to fall back on in a home-screen app: always offer the way back.
+  const backToBoard = () => (window.history.state?.idx ?? 0) > 0 ? navigate(-1) : navigate(sectionSlug ? `/bingo-dash/play/${sectionSlug}` : '/bingo-dash')
   const [tasks, setTasks] = useState<BingoTask[]>([])
   const [boardCards, setBoardCards] = useState<BingoBoardCard[]>([])
   const [teams, setTeams] = useState<BingoTeam[]>([])
@@ -260,6 +265,7 @@ export function BingoDashProjector() {
   // Per-board skin. A hotel room with windows needs 'daylight' or the
   // projected scoreboard is unreadable; a dim AV suite wants 'midnight'.
   const theme = getScoreboardTheme(activeSection?.scoreboard_theme)
+  const grabLook = normalizePlayerTheme(activeSection?.player_theme) === 'grab'
 
 
   // Rank-change motion.
@@ -418,44 +424,65 @@ export function BingoDashProjector() {
   )
 
   return (
-    <div className={`h-screen flex flex-col relative overflow-hidden ${theme.bg}`}>
-      {theme.ambient && <ParticleBackground />}
+    <div className={`h-screen flex flex-col relative overflow-hidden ${grabLook ? 'bg-[#0b3d22]' : theme.bg}`}>
+      {/* A Grab Game Day board shows its own stadium art here too (phone and laptop versions). */}
+      {grabLook ? <PlayerBackdrop theme="grab" /> : theme.ambient && <ParticleBackground />}
 
       {/* Header */}
       {/* Deliberately compact: every pixel here is one the scoreboard does not
           get, and on a projector the board is the point - the title is read
           once. */}
-      <header className="relative z-10 px-3 pt-3 pb-2 sm:px-6 sm:pt-4 lg:px-10 lg:pt-4 lg:pb-3">
-        <div className="max-w-[1600px] mx-auto flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-6">
-          <div className="min-w-0">
-            <p className={`text-[10px] sm:text-sm font-black uppercase tracking-[0.3em] ${theme.accent}`}>Bingo Dash</p>
-            <h1 className={`text-2xl sm:text-3xl lg:text-4xl font-black tracking-tight ${theme.heading}`}>Scoreboard</h1>
-            {activeSection && (
-              <p className={`text-sm sm:text-base font-bold truncate ${theme.muted}`}>{activeSection.name}</p>
-            )}
-          </div>
-          <div className="flex flex-col items-start gap-1 sm:items-end sm:gap-1.5 flex-shrink-0">
-            {activeSection && (activeSection.timer_end_at || activeSection.timer_seconds > 0) && (
-              <div
-                className={`px-3 py-1.5 sm:px-4 sm:py-2 rounded-xl font-black text-xl sm:text-3xl tabular-nums transition-colors ${
-                  timerRunning ? `bg-white/10 ${theme.heading}` : `bg-white/5 ${theme.muted}`
-                }`}
-              >
-                <span className={`mr-2 sm:mr-3 text-base sm:text-2xl ${timerRunning ? theme.positive : theme.muted}`}>
-                  {timerRunning ? '●' : '■'}
-                </span>
-                {timerDisplay}
-              </div>
-            )}
-            <p className={`${theme.muted} text-xs sm:text-sm font-bold`}>{sectionTeams.length} teams competing</p>
-            <p className={`${theme.muted} text-[11px] sm:text-xs font-bold flex items-center gap-1.5`} title="Realtime connection and last data refresh">
-              <span className={`w-2 h-2 rounded-full flex-shrink-0 ${liveState === 'live' ? 'bg-green-400 animate-pulse' : liveState === 'offline' ? 'bg-red-400' : 'bg-amber-400'}`} />
-              {liveState === 'live' ? 'Live' : liveState === 'offline' ? 'Reconnecting' : 'Connecting'}
-              {lastSync > 0 && <span className="opacity-60">· synced {Math.max(0, Math.round((nowTick - lastSync) / 1000))}s ago</span>}
+      <header className="relative z-10 px-3 pt-2 pb-1 sm:px-6 sm:pt-3 lg:px-10">
+        <div className="max-w-[1600px] mx-auto flex flex-wrap items-center gap-x-4 gap-y-2 lg:flex-nowrap lg:gap-x-6">
+          {/* Title cluster: caption + title (+ back button for players) */}
+          <div className="min-w-0 flex-1 basis-40 order-2 lg:order-1 lg:basis-0">
+            <p className={`text-[10px] sm:text-xs font-black uppercase tracking-[0.25em] truncate ${theme.accent}`}>
+              Bingo Dash{activeSection ? <span className={theme.muted}> · {activeSection.name}</span> : null}
             </p>
+            <div className="flex items-center gap-2">
+              {playerView && (<button type="button" onClick={backToBoard} className={`min-h-[44px] px-3 rounded-xl text-sm font-black bg-white/10 border border-white/10 hover:bg-white/20 flex-shrink-0 ${theme.heading}`}>← Board</button>)}
+              <h1 className={`text-xl sm:text-2xl lg:text-3xl font-black tracking-tight ${theme.heading}`}>Scoreboard</h1>
+            </div>
+            {(() => {
+              const age = lastSync > 0 ? Math.max(0, Math.round((nowTick - lastSync) / 1000)) : 0
+              const stale = liveState !== 'live' || age > 5
+              return (
+                <p className={`${theme.muted} mt-1 min-h-[2rem] px-3 rounded-full bg-white/[0.06] border border-white/10 text-xs font-bold flex items-center gap-1.5 flex-wrap w-fit max-w-full py-1`}
+                   title={`Realtime connection and last data refresh${lastSync > 0 ? ` · synced ${age}s ago` : ''}`}>
+                  <span className={`w-2 h-2 rounded-full flex-shrink-0 ${liveState === 'live' ? 'bg-green-400 animate-pulse' : liveState === 'offline' ? 'bg-red-400' : 'bg-amber-400'}`} />
+                  {liveState === 'live' ? 'Live' : liveState === 'offline' ? 'Reconnecting' : 'Connecting'} · {sectionTeams.length} teams
+                  {stale && lastSync > 0 && <span className="opacity-60">· synced {age}s ago</span>}
+                </p>
+              )
+            })()}
+          </div>
+
+          {/* Timer: two ticket tiles (MIN / SEC), big enough to read across a room */}
+          {activeSection && (activeSection.timer_end_at || activeSection.timer_seconds > 0) && (() => {
+            const [mm, ss] = timerDisplay.split(':')
+            const tile = `relative flex flex-col items-center rounded-xl border border-white/10 px-2 sm:px-5 pt-1 pb-1 transition-colors ${timerRunning ? `bg-white/10 ${theme.heading}` : `bg-white/5 ${theme.muted}`}`
+            const notch = 'absolute top-1/2 -translate-y-1/2 w-2.5 h-2.5 rounded-full bg-black/60'
+            return (
+              <div className="order-1 lg:order-2 w-full lg:w-auto justify-center flex items-center gap-2 sm:gap-3 flex-shrink-0" aria-label={`Time left ${timerDisplay}`}>
+                {[['MIN', mm], ['SEC', ss]].map(([label, v]) => (
+                  <div key={label} className={tile}>
+                    <span className={`${notch} -left-1.5`} /><span className={`${notch} -right-1.5`} />
+                    <span className="text-3xl min-[360px]:text-4xl sm:text-5xl lg:text-6xl 2xl:text-7xl font-black tabular-nums leading-none">{v}</span>
+                    <span className={`text-[9px] sm:text-[10px] font-bold tracking-[0.3em] mt-0.5 ${timerRunning ? theme.positive : theme.muted}`}>
+                      {label === 'SEC' ? (timerRunning ? '● ' : '■ ') : ''}{label}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )
+          })()}
+
+          {/* Status chip + actions */}
+          <div className="order-3 w-full lg:w-auto lg:flex-1 lg:basis-0 lg:justify-end flex flex-wrap items-center gap-2 lg:flex-nowrap">
+            {!playerView && <JoinLinkButton slug={activeSection?.slug} boardName={activeSection?.name} className="flex items-center gap-1.5 min-h-[44px] lg:min-h-0 lg:h-9 px-3 rounded-xl bg-white/10 border border-white/20 text-white text-xs font-black whitespace-nowrap hover:bg-white/15 active:scale-95 transition-all" />}
             {!playerView && <button
               onClick={() => setShowBonus(v => !v)}
-              className={`px-3 py-2 sm:px-5 sm:py-2.5 rounded-xl text-xs sm:text-sm font-black uppercase tracking-wider transition-all ${
+              className={`min-h-[44px] lg:min-h-0 lg:h-9 px-3 lg:px-4 rounded-xl text-xs font-black uppercase tracking-wider whitespace-nowrap transition-all ${
                 showBonus
                   ? 'bg-amber-400 text-gray-950 shadow-lg shadow-amber-500/30'
                   : 'bg-white/10 text-amber-300 border border-amber-700/50 hover:bg-white/15'
@@ -467,7 +494,7 @@ export function BingoDashProjector() {
             {/* In-page zoom: scales the board only, never the browser UI.
                 Hidden where the board is not scaled at all (narrow screens
                 keep the phone layout), so the buttons are never inert. */}
-            <div className="flex items-center gap-1.5">
+            <div className="flex items-center gap-1 lg:ml-1">
               {fitEnabled && <>
               <button
                 onClick={() => setZoomPersisted(zoom - ZOOM_STEP)}
@@ -477,7 +504,7 @@ export function BingoDashProjector() {
               >−</button>
               <button
                 onClick={() => setZoomPersisted(1)}
-                className={`px-2 min-w-[4rem] h-9 rounded-xl text-xs font-black tabular-nums bg-white/10 ${theme.heading} border border-white/10 hover:bg-white/20`}
+                className={`px-2 min-w-[3.5rem] h-9 rounded-xl text-xs font-black tabular-nums bg-white/10 ${theme.heading} border border-white/10 hover:bg-white/20`}
                 title="Back to the largest size that fits every group"
               >{Math.round(zoom * 100)}%</button>
               <button
@@ -489,7 +516,7 @@ export function BingoDashProjector() {
               </>}
               <button
                 onClick={toggleFullscreen}
-                className={`w-9 h-9 rounded-xl text-base bg-white/10 ${theme.heading} border border-white/10 hover:bg-white/20`}
+                className={`hidden sm:block w-9 h-9 rounded-xl text-base bg-white/10 ${theme.heading} border border-white/10 hover:bg-white/20`}
                 title={isFullscreen ? 'Exit fullscreen' : 'Fullscreen'}
               >⛶</button>
             </div>

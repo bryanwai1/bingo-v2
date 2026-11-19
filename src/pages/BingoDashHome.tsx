@@ -11,6 +11,7 @@ import { TimeUpAlarm } from '../components/TimeUpAlarm'
 import { TileFace } from '../components/BingoTileFace'
 import { IncomingDuelBanner } from '../components/ContestCard'
 import { MyQrButton } from '../components/MyQrButton'
+import { BoardBottomBar, BoardBarSpacer } from '../components/BoardBottomBar'
 import { SupportChat } from '../components/SupportChat'
 import { LanguageToggle } from '../components/LanguageToggle'
 import { ForestWaitingScreen } from '../components/ForestWaitingScreen'
@@ -694,16 +695,19 @@ function BoardScreen({
                 no way to ask for it — the switch only existed in the admin. */}
             <LanguageToggle />
             {inviteUrl && (
-              <MyQrButton
-                label="Invite teammate"
-                teamName={team.name}
-                hint="Teammate scans this, types their name, and joins your team"
-                value={inviteUrl}
-              />
+              <div className="hidden md:block">
+                <MyQrButton
+                  badge="Observer"
+                  label="Invite teammate"
+                  teamName={team.name}
+                  hint="Teammate scans this, types their name, and joins your team as an observer"
+                  value={inviteUrl}
+                />
+              </div>
             )}
             <button
               onClick={() => navigate('/bingo-dash/projector?view=player')}
-              className="text-xs font-bold text-teal-300 hover:text-teal-200 transition-colors"
+              className="hidden md:block text-xs font-bold text-teal-300 hover:text-teal-200 transition-colors"
             >
               🏆 Scoreboard
             </button>
@@ -843,6 +847,11 @@ function BoardScreen({
           </div>
         </div>
       )}
+
+      {/* Phone bottom bar (DESIGN-009): Invite | Board | Scores. Phone only. */}
+      <BoardBarSpacer />
+      <BoardBottomBar theme={theme} teamName={team.name} inviteUrl={inviteUrl ?? null}
+        scoreboardPath="/bingo-dash/projector?view=player" />
     </div>
   )
 }
@@ -1051,7 +1060,7 @@ export function BingoDashHome() {
         theme={theme}
         prizeTasks={prizeTasks}
         inviteUrl={team && section?.slug && team.password && localStorage.getItem('bingo-dash-member-role') !== 'observer'
-          ? `${window.location.origin}/bingo-dash/play/${section.slug}?team=${team.id}&pw=${team.password}`
+          ? `${window.location.origin}/bingo-dash/play/${section.slug}?mode=observer&team=${team.id}`
           : null}
         gridTasks={gridTasks}
         scans={scans}

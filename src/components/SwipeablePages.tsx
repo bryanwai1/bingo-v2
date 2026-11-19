@@ -5,12 +5,14 @@ interface SwipeablePagesProps {
   total: number
   onChange: (next: number) => void
   children: ReactNode
+  /** Called when the player touches the content, so auto-play can stop. */
+  onInteract?: () => void
 }
 
 const SWIPE_THRESHOLD_PX = 50
 const VERTICAL_TOLERANCE_PX = 60
 
-export function SwipeablePages({ currentPage, total, onChange, children }: SwipeablePagesProps) {
+export function SwipeablePages({ currentPage, total, onChange, children, onInteract }: SwipeablePagesProps) {
   const startX = useRef<number | null>(null)
   const startY = useRef<number | null>(null)
 
@@ -34,7 +36,7 @@ export function SwipeablePages({ currentPage, total, onChange, children }: Swipe
   }
 
   return (
-    <div onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}>
+    <div onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd} onPointerDownCapture={onInteract}>
       {children}
     </div>
   )

@@ -225,6 +225,11 @@ export interface BingoTask {
   contest_bonus: number
   maps_url: string | null
   maps_label: string | null
+  /** Optional "People & place" component. Null/false/empty = not used. */
+  players_min?: number | null
+  players_max?: number | null
+  players_whole_team?: boolean
+  play_location?: string | null
   /** PRD-008: a prize card ("?") sits in a strip under the grid, never as a tile. */
   is_prize?: boolean
   /** Completed grid cards a team needs before it can claim the prize. */

@@ -11,6 +11,7 @@ import { normalizePlayerTheme, GRAB_GREEN, type PlayerTheme } from '../lib/playe
 import { TimeUpAlarm } from '../components/TimeUpAlarm'
 import { TileFace } from '../components/BingoTileFace'
 import { MyQrButton } from '../components/MyQrButton'
+import { BoardBottomBar, BoardBarSpacer } from '../components/BoardBottomBar'
 import { SupportChat } from '../components/SupportChat'
 import { LanguageToggle } from '../components/LanguageToggle'
 import { IncomingDuelBanner } from '../components/ContestCard'
@@ -90,11 +91,11 @@ function JoinScreen({
     if (!trimmedName) return
     localStorage.setItem(PLAYER_NAME_KEY, trimmedName)
     setError('')
-    if (invite && !isObserver) {
-      // Scanned a teammate's QR: straight onto their team.
+    if (invite) {
+      // Scanned a teammate's QR: straight onto their team (as an observer when the link says so).
       setSubmitting(true)
       try {
-        await onJoinGroup(trimmedName, invite.password, invite.team.id, 'player')
+        await onJoinGroup(trimmedName, isObserver ? '' : invite.password, invite.team.id, isObserver ? 'observer' : 'player')
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to join group')
         setSubmitting(false)
@@ -627,6 +628,7 @@ function BoardScreen({
   // Which prize card's reveal page is open (winner and the winner's observers only).
   const [revealTask, setRevealTask] = useState<BingoTask | null>(null)
   const memberId = localStorage.getItem(MEMBER_ID_KEY(sectionSlug))
+  const observerInviteUrl = `${window.location.origin}/bingo-dash/play/${sectionSlug}?mode=observer&team=${team.id}`
   const eventEnded = !!settings?.timer_end_at && new Date(settings.timer_end_at).getTime() < Date.now()
 
   // A card can sit in several boxes on one board, so status is looked up by
@@ -775,17 +777,19 @@ function BoardScreen({
                 password across a noisy room. Players only: an observer has
                 no password to hand out. */}
             {memberRole === 'player' && teamPassword && (
-              <MyQrButton
-                label="Invite teammate"
-                teamName={team.name}
-                hint="Teammate scans this, types their name, and joins your team"
-
-                value={`${window.location.origin}/bingo-dash/play/${sectionSlug}?team=${team.id}&pw=${teamPassword}`}
-              />
+              <div className="hidden md:block">
+                <MyQrButton
+                  badge="Observer"
+                  label="Invite teammate"
+                  teamName={team.name}
+                  hint="Teammate scans this, types their name, and joins your team as an observer"
+                  value={observerInviteUrl}
+                />
+              </div>
             )}
             <button
               onClick={() => navigate(`/bingo-dash/projector/${sectionSlug}?view=player`)}
-              className="text-xs font-bold text-teal-300 hover:text-teal-200 transition-colors"
+              className="hidden md:block text-xs font-bold text-teal-300 hover:text-teal-200 transition-colors"
             >
               🏆 Scoreboard
             </button>
@@ -893,6 +897,12 @@ function BoardScreen({
           </div>
         </div>
       )}
+
+      {/* Phone bottom bar (DESIGN-009): Invite | Board | Scores. Phone only. */}
+      <BoardBarSpacer />
+      <BoardBottomBar theme={theme} teamName={team.name}
+        inviteUrl={memberRole === 'player' && teamPassword ? observerInviteUrl : null}
+        scoreboardPath={`/bingo-dash/projector/${sectionSlug}?view=player`} />
     </div>
   )
 }
@@ -1114,6 +1124,14 @@ export function BingoDashJoin() {
   }, [team?.id, section?.game_started])
 
   // Join a group: create or find the member record, then enter the board
+  // The database refuses a join that would put a team over its limit (TEAM_FULL), e.g. when two phones
+  // join at the same moment: show the same wording as the count check below.
+  const fullMessage = (err: { message?: string }, role: 'player' | 'observer') => {
+    if (!err.message?.includes('TEAM_FULL')) return err.message || 'Failed to join group'
+    const cap = role === 'observer' ? section?.max_team_observers ?? 9 : section?.max_team_players ?? 1
+    return `This team is full (${cap} ${role === 'observer' ? 'observer' : 'player'}${cap === 1 ? '' : 's'}).`
+  }
+
   const joinGroup = async (memberName: string, password: string, teamId: string, role: 'player' | 'observer') => {
     if (!section || !sectionSlug) throw new Error('Section not found')
 
@@ -1168,7 +1186,8 @@ export function BingoDashJoin() {
     if (existing) {
       const needsUpdate = existing.team_id !== teamId || existing.password !== password || existing.role !== role
       if (needsUpdate) {
-        await supabase.from('bingo_members').update({ team_id: teamId, password, role }).eq('id', existing.id)
+        const { error: upErr } = await supabase.from('bingo_members').update({ team_id: teamId, password, role }).eq('id', existing.id)
+        if (upErr) throw new Error(fullMessage(upErr, role))
       }
       member = { ...existing, team_id: teamId, password, role }
     } else {
@@ -1195,7 +1214,7 @@ export function BingoDashJoin() {
             .update({ team_id: teamId, password, role }).eq('id', existingRaced.id)
           member = { ...existingRaced, team_id: teamId, password, role }
         } else {
-          throw error
+          throw new Error(fullMessage(error, role))
         }
       } else {
         member = created
@@ -1277,7 +1296,7 @@ export function BingoDashJoin() {
           theme={theme} sectionName={section.name} groups={groups} memberCounts={memberCounts} cap={(isObserver ? section.max_team_observers ?? 9 : section.max_team_players ?? 1)} onJoinGroup={joinGroup} isObserver={isObserver}
           invite={(() => {
             const t = inviteTeamId ? groups.find(g => g.id === inviteTeamId) : null
-            return t && /^\d{4}$/.test(invitePw) ? { team: t, password: invitePw } : null
+            return t && (isObserver || /^\d{4}$/.test(invitePw)) ? { team: t, password: invitePw } : null
           })()}
         />
         {timeUpOverlay}

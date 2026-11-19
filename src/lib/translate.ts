@@ -17,7 +17,7 @@ function load() {
     const raw = localStorage.getItem(CACHE_KEY)
     if (raw) {
       const obj = JSON.parse(raw) as Record<string, string>
-      for (const k in obj) { cache.set(k, obj[k]); outputs.add(obj[k]) }
+      for (const k in obj) { const v = obj[k].trim(); cache.set(k, v); outputs.add(v) }
     }
   } catch { /* ignore */ }
 }
@@ -55,7 +55,9 @@ async function fetchMs(text: string): Promise<string> {
   const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=en|ms`
   const resp = await fetch(url)
   const data = await resp.json()
-  const out = data?.responseData?.translatedText as string | undefined
+  // The public memory sometimes pads a word with trailing spaces ("Grab" -> "Grab      ").
+  // Untrimmed, the page translator sees that as new English and re-translates it forever.
+  const out = (data?.responseData?.translatedText as string | undefined)?.trim()
   // MyMemory reports quota / errors as a 4xx status inside the JSON body with
   // the message in translatedText — never show that to the user.
   if (!out || (typeof data?.responseStatus === 'number' && data.responseStatus >= 400)) return text
@@ -97,8 +99,9 @@ export function translateToMs(text: string): Promise<string> {
       const translated = pieces.length === 1
         ? await fetchMs(text)
         : (await Promise.all(pieces.map(p => p.trim() ? fetchMs(p) : Promise.resolve(p)))).join('')
-      remember(text, translated)
-      return translated
+      const clean = translated.trim() || text
+      remember(text, clean)
+      return clean
     } catch {
       return text
     } finally {

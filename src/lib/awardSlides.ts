@@ -348,8 +348,10 @@ export function buildAwardSlides(order: AwardSlideId[]): AwardSlideDescriptor[] 
  * renders it as text — a blank box mid-ceremony would be worse.
  */
 export function groupLabel(name: string): string {
-  const m = name.match(/\d+/)
-  return m ? m[0] : name.trim()
+  // "Group 2" / "Team 12" / "2" -> just the number, the slide says "Group number".
+  // Anything the host has renamed ("Keysight", "Team 2 - Tigers") shows as typed.
+  const plain = name.trim().match(/^(?:group|team|grp|g)?\s*#?\s*(\d+)$/i)
+  return plain ? plain[1] : name.trim()
 }
 
 /** The ceremony slides' background (holding, lineup, scoreboard…). */

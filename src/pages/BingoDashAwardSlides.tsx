@@ -336,7 +336,13 @@ function AwardShow({ sectionSlug }: { sectionSlug: string }) {
     <div
       ref={rootRef}
       className="h-screen w-screen overflow-hidden relative cursor-pointer select-none"
-      onClick={() => { if (!exportMode) setSlideIdx(i => Math.min(totalSlides - 1, i + 1)) }}
+      // Like a Canva full-screen deck: the left half steps back, the right half steps forward.
+      onClick={e => {
+        if (exportMode) return
+        const r = e.currentTarget.getBoundingClientRect()
+        const back = e.clientX - r.left < r.width / 2
+        setSlideIdx(i => back ? Math.max(0, i - 1) : Math.min(totalSlides - 1, i + 1))
+      }}
       style={slideStyle}
     >
       <AwardSlideRenderer
@@ -1472,6 +1478,52 @@ function SlotText({
   )
 }
 
+/**
+ * The artwork prints "GROUP NUMBER" above the first value box, which is wrong
+ * once that box shows a team's name. So the printed words are painted over and
+ * "TEAM" is written in their place.
+ *
+ * The patch is cut from the artwork itself, not a flat colour: five rows of
+ * clean blue just above the words, stretched down over them. That keeps the
+ * panel's left-to-right shading and matches whichever place's file is showing
+ * (their blues differ slightly).
+ */
+const LABEL = {
+  patch: { left: 912, top: 512, width: 216, height: 30, radius: 6 },
+  strip: { y: 507, height: 5 },   // clean band of the same blue, above the words
+  centerX: 1020, centerY: 527,    // where the printed words sit
+  text: 'TEAM',
+}
+
+function PanelLabel({ art }: { art: string }) {
+  const { patch, strip } = LABEL
+  const k = patch.height / strip.height
+  return (
+    <>
+      <div
+        style={{
+          position: 'absolute', left: patch.left, top: patch.top, width: patch.width, height: patch.height,
+          borderRadius: patch.radius,
+          backgroundImage: `url(${art})`,
+          backgroundSize: `${CANVAS_W}px ${CANVAS_H * k}px`,
+          backgroundPosition: `${-patch.left}px ${-strip.y * k}px`,
+          backgroundRepeat: 'no-repeat',
+        }}
+      />
+      <div
+        style={{
+          position: 'absolute', left: LABEL.centerX - 110, top: LABEL.centerY - 16, width: 220, height: 32,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          fontFamily: NUM_FONT, fontWeight: 900, fontSize: 26, letterSpacing: '0.02em',
+          color: '#fff', lineHeight: 1, textShadow: '0 1px 2px rgba(0,30,90,0.55)',
+        }}
+      >
+        {LABEL.text}
+      </div>
+    </>
+  )
+}
+
 function PlaceSlide({
   slideIdx, descriptor, ranked, config,
 }: {
@@ -1520,6 +1572,7 @@ function PlaceSlide({
           </div>
         )}
 
+        {team && <PanelLabel art={art} />}
         {team && <SlotText slot={SLOTS.group} value={groupLabel(team.name)} max={88} />}
         {team && (
           <SlotText

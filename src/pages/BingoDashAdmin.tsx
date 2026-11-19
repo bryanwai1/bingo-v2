@@ -2328,6 +2328,8 @@ export function BingoDashAdmin() {
       answer_min: task.answer_min ?? null, answer_blocks: task.answer_blocks ?? null, tile_icon: task.tile_icon ?? null,
       completion_warning: task.completion_warning, require_marshal: task.require_marshal,
       maps_url: task.maps_url, maps_label: task.maps_label,
+      players_min: task.players_min ?? null, players_max: task.players_max ?? null,
+      players_whole_team: task.players_whole_team ?? false, play_location: task.play_location ?? null,
       // Contending settings travel with the card — a copied contest card that
       // silently reverted to a solo task would be a nasty surprise mid-event.
       is_contest: task.is_contest, contest_game: task.contest_game,
@@ -2956,7 +2958,8 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
 
   const moveMember = async (memberId: string, newTeamId: string) => {
     setMembers(prev => prev.map(m => m.id === memberId ? { ...m, team_id: newTeamId } : m))
-    await supabase.from('bingo_members').update({ team_id: newTeamId }).eq('id', memberId)
+    const { error } = await supabase.from('bingo_members').update({ team_id: newTeamId }).eq('id', memberId)
+    if (error) { alert(error.message?.includes('TEAM_FULL') ? 'That team is full for this role.' : 'Failed to move player'); await fetchAll() }
   }
 
 
@@ -4756,17 +4759,16 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
           const live = !!currentBoard?.game_started
           const btn = 'px-4 py-2 rounded-xl text-sm font-black transition-all active:scale-95'
           const toggleGame = () => updateBoardSettings({ game_started: !live, ...gameLockPauseLog(currentBoard, !live), ...timerPatchForGame(currentBoard ?? {}, !live, Date.now()) })
-          // Done flags for the eight steps. Optional ones never block the "Next" highlight.
+          // Done flags for the seven steps. Optional ones never block the "Next" highlight.
           const sid = currentSectionId ?? ''
           const seen = (k: string) => checkedBoards.includes(`${k}:${sid}`)
           const steps = [
             { done: !!currentBoard },
             { done: placed > 0 },
             { done: live || seen('cards') },
-            { done: seen('demo'), optional: true },
             { done: !!currentBoard?.marshal_password && seen('helpers'), optional: true },
             { done: teamCount > 0 },
-            { done: live || seen('share') },
+            { done: seen('demo'), optional: true },
             { done: live },
           ]
           const required = steps.filter(x => !x.optional)
@@ -4825,20 +4827,6 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                 } />
 
               <Step n={4} optional done={steps[3].done} current={focus === 3}
-                title="Practice with a demo"
-                blurb="Play a pretend round on your own phone first. Nothing is saved."
-                help="The demo is a safe copy of your board. You can tap cards, finish them and see the scoreboard move, without touching your real teams or scores."
-                action={
-                  <a
-                    href={currentSectionId ? `/bingo-dash/sample?board=${currentSectionId}` : undefined}
-                    target="_blank" rel="noreferrer"
-                    onClick={() => currentSectionId && markChecked(`demo:${currentSectionId}`)}
-                    className={`${btn} inline-flex items-center a-text`} style={{ background: 'var(--a-brand)' }}>
-                    🎬 Launch demo
-                  </a>
-                } />
-
-              <Step n={5} optional done={steps[4].done} current={focus === 4}
                 title="Brief your helpers"
                 blurb="Helpers (marshals) check that teams really did a challenge. Give them the marshal password."
                 help="A marshal is a helper at the event. When a team finishes a challenge that needs checking, the marshal types in this password on the team's phone to approve it. You can also invite co-trainers so they can help run the event."
@@ -4855,7 +4843,7 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                   </div>
                 } />
 
-              <Step n={6} done={steps[5].done} current={focus === 5}
+              <Step n={5} done={steps[4].done} current={focus === 4}
                 title="Add your teams"
                 blurb="Players join a team using its name and password."
                 help="A team is a small group of players who play together and share one score. Give each team a name. The password is what players type to join their team."
@@ -4866,20 +4854,21 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                   </button>
                 } />
 
-              <Step n={7} done={steps[6].done} current={focus === 6}
-                blocked={teamCount === 0 || placed === 0 ? 'Add at least 1 team and 1 card first.' : undefined}
-                title="Share the join link"
-                blurb="Show the QR code on the big screen, or send the link to the group."
-                help="Players scan the QR code with their phone camera, or open the link, then choose their team and enter its password."
+              <Step n={6} optional done={steps[5].done} current={focus === 5}
+                title="Practice with a demo"
+                blurb="Play a pretend round on your own phone first. Nothing is saved."
+                help="The demo is a safe copy of your board. You can tap cards, finish them and see the scoreboard move, without touching your real teams or scores."
                 action={
-                  <button
-                    onClick={() => { setShowJoinLink(true); setJoinLinkCopied(false); setJoinLinkTab('player'); markChecked(`share:${sid}`) }}
-                    className={`${btn} a-text`} style={{ background: 'var(--a-brand)' }}>
-                    📱 Show QR
-                  </button>
+                  <a
+                    href={currentSectionId ? `/bingo-dash/sample?board=${currentSectionId}` : undefined}
+                    target="_blank" rel="noreferrer"
+                    onClick={() => currentSectionId && markChecked(`demo:${currentSectionId}`)}
+                    className={`${btn} inline-flex items-center a-text`} style={{ background: 'var(--a-brand)' }}>
+                    🎬 Launch demo
+                  </a>
                 } />
 
-              <Step n={8} last done={steps[7].done} current={focus === 7}
+              <Step n={7} last done={steps[6].done} current={focus === 6}
                 blocked={!live && (teamCount === 0 || placed === 0) ? 'Add at least 1 team and 1 card first.' : undefined}
                 title={live ? 'Your event is running' : 'Start the game'}
                 blurb={live

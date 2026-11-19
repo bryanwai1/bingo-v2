@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useCoopSession } from '../hooks/useCoopSession'
 import { getPuzzle } from '../lib/coopGames/registry'
 import { savedPlayerName } from '../lib/coopGames/registerMember'
@@ -51,6 +51,13 @@ export function CoopPlay({ memberId, memberLoading = false, memberError = false,
 
   useEffect(() => { onOpenChange(open && !!snap) }, [open, snap, onOpenChange])
 
+  // A member who was already inside this game (page reload, back from the board) goes straight back in:
+  // no second "Join lobby" tap. Remembered per member and card; "Back to the card" forgets it.
+  const inKey = memberId && scanId ? `coop-in-${scanId}-${memberId}` : null
+  const remember = useCallback((on: boolean) => {
+    if (!inKey) return
+    try { if (on) localStorage.setItem(inKey, '1'); else localStorage.removeItem(inKey) } catch { /* storage blocked: only the auto-return is lost */ }
+  }, [inKey])
   // Join straight from the card: register (name only), then go into the lobby without leaving the page.
   const [name, setName] = useState(savedPlayerName)
   const [registering, setRegistering] = useState(false)
@@ -64,8 +71,8 @@ export function CoopPlay({ memberId, memberLoading = false, memberError = false,
     if (err) setRegError(err); else setWantOpen(true)
   }
   useEffect(() => {
-    if (wantOpen && memberId && !open) { setWantOpen(false); void c.open(gameKey).then(r => { if (r) setOpen(true) }) }
-  }, [wantOpen, memberId, open, c, gameKey])
+    if (wantOpen && memberId && !open) { setWantOpen(false); void c.open(gameKey).then(r => { if (r) { remember(true); setOpen(true) } }) }
+  }, [wantOpen, memberId, open, c, gameKey, remember])
 
   // coop_move already credited the card on the server; just refresh the page's copy,
   // once, on the change playing -> completed (never heal: Undo completion must stick).
@@ -74,7 +81,17 @@ export function CoopPlay({ memberId, memberLoading = false, memberError = false,
     prevStatus.current = snap?.status
   }, [snap, onSolved])
 
-  const play = async () => { if (await c.open(gameKey)) setOpen(true) }
+  const returned = useRef(false)
+  useEffect(() => {
+    if (returned.current || open || !inKey || c.busy || (c.peeked !== 'lobby' && c.peeked !== 'playing')) return
+    let was = false
+    try { was = localStorage.getItem(inKey) === '1' } catch { /* ignore */ }
+    if (!was) return
+    returned.current = true
+    void c.open(gameKey).then(r => { if (r) setOpen(true) })
+  }, [open, inKey, c, gameKey])
+
+  const play = async () => { if (await c.open(gameKey)) { remember(true); setOpen(true) } }
   const refusal = c.error === 'PLAYER_TAKEN' ? 'Your team already has a player.'
     : c.error === 'OBSERVERS_FULL' ? 'The lobby is full.'
     : c.error === 'NOT_IN_SESSION' ? 'Another player took your seat. You can join again.'
@@ -124,7 +141,7 @@ export function CoopPlay({ memberId, memberLoading = false, memberError = false,
     )
   }
 
-  const close = () => { setOpen(false); void c.retryPeek() }
+  const close = () => { remember(false); setOpen(false); void c.retryPeek() }
   const needs = lobbyNeeds(snap.members, snap.game_key)
   const canAct = role === 'player' && snap.status === 'playing'
 
@@ -167,7 +184,7 @@ export function CoopPlay({ memberId, memberLoading = false, memberError = false,
             style={{ background: needs.canStart ? color : 'transparent' }}>
             {c.busy ? 'Starting...' : needs.canStart ? 'Start game' : '🔒 Start game'}
           </button>
-          <button type="button" onClick={() => { void c.leave(); setOpen(false) }}
+          <button type="button" onClick={() => { remember(false); void c.leave(); setOpen(false) }}
             className="w-full min-h-[44px] mt-2 text-sm font-bold text-gray-300 underline">Leave lobby</button>
         </>
       ) : (

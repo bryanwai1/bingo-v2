@@ -1,5 +1,6 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
+import { createPortal } from 'react-dom'
 import { QRCodeSVG } from 'qrcode.react'
 import { supabase } from '../lib/supabase'
 import { fetchBoardTasks, fetchPrizeTasks, tasksForFace } from '../lib/boardCards'
@@ -8,13 +9,17 @@ import { stripState } from '../lib/prizeCard/logic'
 import { hasOwnMechanism, effectiveInputs, inputKinds, isCompulsory, fileAccept, fileEmoji, fileHeading, fileNoun } from '../lib/completionInputs'
 import { activeFaces, faceName, faceColor, normaliseFaceCount } from '../lib/cubeFaces'
 import { buildBingoSlots, completedBingoLines, scoreWithBingoLines } from '../lib/bingoLines'
-import { useSampleRemote, makeRemoteCode, HEARTBEAT_MS, HEARTBEAT_TIMEOUT_MS, type RemoteCommand, type RemoteState, type SampleView, type DetailStep } from '../hooks/useSampleRemote'
+import { useSampleRemote, makeRemoteCode, HEARTBEAT_MS, HEARTBEAT_TIMEOUT_MS, type RemoteCommand, type RemoteState, type SampleView, type DetailStep, type JoinQrMode } from '../hooks/useSampleRemote'
 import { useBingoTaskPages } from '../hooks/useBingoTaskPages'
 import { useBingoTaskPhotos } from '../hooks/useBingoTaskPhotos'
 import { useTaskLinks } from '../hooks/useTaskLinks'
 import { TaskLinkButtons, type LinkItem } from '../components/TaskLinkButtons'
 import { SupportChat } from '../components/SupportChat'
 import { MyQrButton } from '../components/MyQrButton'
+import { BoardBottomBar, BoardBarSpacer } from '../components/BoardBottomBar'
+import { ChainTrail, type TrailStep } from '../components/ChainTrail'
+import { parseAnswerBlocks } from '../lib/answerBlocks'
+import { JoinLinkButton, JoinQrOverlay } from '../components/JoinLinkButton'
 import { DemoBundleCard } from '../components/DemoBundleCard'
 import { AitbMissionModule } from '../components/AitbMissionModule'
 import { CardBonusTimer } from '../components/CardBonusTimer'
@@ -26,6 +31,10 @@ import { PageNavigator } from '../components/PageNavigator'
 import { SwipeablePages } from '../components/SwipeablePages'
 import { ParticleBackground } from '../components/ParticleBackground'
 import { PlayerBackdrop } from '../components/PlayerBackdrop'
+import { TimeUpAlarm } from '../components/TimeUpAlarm'
+import { ForestWaitingScreen } from '../components/ForestWaitingScreen'
+import { WaitingTiger } from '../components/WaitingTiger'
+import { PrizeReveal } from '../lib/prizeCard/PrizeReveal'
 import { normalizePlayerTheme, GRAB_GREEN, type PlayerTheme } from '../lib/playerThemes'
 import { TileFace } from '../components/BingoTileFace'
 import { SpeedEditTargets } from '../components/SpeedEditTargets'
@@ -37,6 +46,10 @@ import { useCardDrawConfig } from '../hooks/useCardDrawConfig'
 import { RetroGamesSample } from '../components/RetroGamesSample'
 import { normalizeTileDisplay, withCategoryColors, chainInfoFn, prereqResolver, type ChainInfo, type TileDisplay } from '../lib/bingoTileDisplay'
 import { normalizeUrl } from '../lib/normalizeUrl'
+import { useAutoAdvance, HERO_ROTATE_MS, INSTRUCTION_ROTATE_MS } from '../lib/useAutoAdvance'
+import { CardNeeds, hasNeeds } from '../components/CardNeeds'
+import { getPuzzle } from '../lib/coopGames/registry'
+import { gameKeyForTitle } from '../lib/coopGames/gameCards'
 import type { BingoSection, BingoTask } from '../types/database'
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -114,6 +127,23 @@ function useOwnerLabel(): (s: BingoSection) => string {
 
 // ── Demo top bar (board switcher + cheat sheet + reset) ──────────────────────
 
+// Header rules (SUGGEST-sample-header, answered by Jiamin 2026-11-18):
+//  1. Every control has a word, 44px high. No icon-only buttons at any width.
+//  2. Nothing wraps. Below 1280px: row 1 = back, badge, board picker; row 2 = strip of equal-width
+//     main buttons (Scores/Board, Join Link, BINGO, More). The rest lives in the More sheet.
+//  3. From 1280px: one row of labelled groups (Present | Connect | Demo) and the two labelled
+//     password pills on the right. The marshal password stays visible on the projector.
+//  4. Strip buttons share the width (flex-1 basis-0 min-w-0), so 320px and 1279px both fit.
+const BTN = 'inline-flex items-center justify-center gap-1.5 min-h-[44px] px-3 rounded-xl border text-xs font-black whitespace-nowrap transition-colors focus-visible:outline focus-visible:outline-[3px] focus-visible:outline-yellow-300'
+const TONE = {
+  plain: 'bg-white/10 text-gray-200 border-white/15 hover:bg-white/20',
+  violet: 'bg-violet-500/20 text-violet-200 border-violet-400/40 hover:bg-violet-500/30',
+  gold: 'bg-yellow-400/20 text-yellow-200 border-yellow-400/40 hover:bg-yellow-400/30',
+  green: 'bg-emerald-500/20 text-emerald-200 border-emerald-400/50 hover:bg-emerald-500/30',
+  sky: 'bg-sky-500/20 text-sky-200 border-sky-400/50 hover:bg-sky-500/30',
+} as const
+const STRIP = 'flex-1 basis-0 min-w-0 px-1.5'
+
 function DemoBar({
   sections,
   selectedId,
@@ -129,6 +159,7 @@ function DemoBar({
   onTryIt,
   view,
   onToggleView,
+  waiting, onToggleWaiting, observer, onToggleObserver,
   showViewToggle,
   backHref,
   backLabel,
@@ -151,29 +182,89 @@ function DemoBar({
   onTryIt: () => void
   view: SampleView
   onToggleView: () => void
+  /** Presenter switches that show the screens a real player can land on besides the board. */
+  waiting: boolean
+  onToggleWaiting: () => void
+  observer: boolean
+  onToggleObserver: () => void
   showViewToggle: boolean
   backHref: string
   backLabel: string
 }) {
+  const [moreOpen, setMoreOpen] = useState(false)
+  useEffect(() => {
+    if (!moreOpen) return
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setMoreOpen(false) }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [moreOpen])
+  const section = sections.find(s => s.id === selectedId)
+  const inSheet = (fn: () => void) => () => { setMoreOpen(false); fn() }
+
+  const toggle = (cls: string, wide: boolean) => showViewToggle && (
+    <button type="button" onClick={onToggleView} className={`${BTN} ${TONE.violet} ${cls}`}>
+      {view === 'board' ? '📊' : '🎯'}
+      <span>{view === 'board' ? (wide ? 'Scoreboard' : 'Scores') : 'Board'}</span>
+    </button>
+  )
+  const bingo = (cls: string) => showQuickWin && (
+    <button type="button" onClick={onQuickWin} className={`${BTN} ${TONE.gold} ${cls}`}>⚡<span>BINGO</span></button>
+  )
+  const join = (cls: string) => (
+    <JoinLinkButton slug={section?.slug} boardName={section?.name} className={`${BTN} ${TONE.plain} ${cls}`} />
+  )
+  const remote = (cls: string, onClick: () => void) => (
+    <button type="button" onClick={onClick} className={`${BTN} ${remoteActive ? TONE.green : TONE.plain} ${cls}`}>
+      📡<span>{remoteActive ? 'Paired' : 'Remote'}</span>
+    </button>
+  )
+  const share = (cls: string, onClick: () => void, long: boolean) => (
+    <button type="button" onClick={onClick} className={`${BTN} ${shareActive ? TONE.sky : TONE.plain} ${cls}`}>
+      📺<span>{shareActive ? 'Sharing' : long ? 'Share screen' : 'Share'}</span>
+    </button>
+  )
+  const tryIt = (cls: string, onClick: () => void, long: boolean) => (
+    <button type="button" onClick={onClick} className={`${BTN} ${TONE.plain} ${cls}`}>📱<span>{long ? 'Try it yourself' : 'Try it'}</span></button>
+  )
+  const reset = (cls: string, onClick: () => void, long: boolean) => (
+    <button type="button" onClick={onClick} className={`${BTN} ${TONE.plain} ${cls}`}>↺<span>{long ? 'Reset demo' : 'Reset'}</span></button>
+  )
+  const waitBtn = (cls: string, onClick: () => void, long: boolean) => (
+    <button type="button" onClick={onClick} className={`${BTN} ${waiting ? TONE.green : TONE.plain} ${cls}`}>⏳<span>{long ? 'Waiting screen' : 'Waiting'}</span></button>
+  )
+  const obsBtn = (cls: string, onClick: () => void, long: boolean) => (
+    <button type="button" onClick={onClick} className={`${BTN} ${observer ? TONE.green : TONE.plain} ${cls}`}>👁<span>{long ? 'Observer view' : 'Observer'}</span></button>
+  )
+  const pill = (label: string, value: string, tone: string) => (
+    <span className="px-2.5 py-2 rounded-xl bg-white/5 text-gray-300 border border-white/10 text-xs font-bold whitespace-nowrap">
+      {label} <span className={`font-black ${tone}`}>{value}</span>
+    </span>
+  )
+  const divider = <span className="w-px self-stretch my-1 bg-white/10" aria-hidden="true" />
+
   return (
     <div className="sticky top-0 z-40 w-full bg-gray-950/95 backdrop-blur border-b border-purple-500/30">
-      <div className="max-w-5xl mx-auto px-2.5 py-2 flex flex-col gap-1.5 sm:flex-row sm:flex-wrap sm:items-center sm:gap-x-4">
-        {/* Row 1: badge + board picker (picker fills the row on mobile) */}
+      <div className="max-w-5xl xl:max-w-none mx-auto px-2.5 py-2 flex flex-col gap-1.5 xl:flex-row xl:items-center xl:gap-2">
+        {/* Row 1: back + badge + board picker */}
         <div className="flex items-center gap-2 min-w-0">
+          {!locked && (
+            <Link to={backHref} aria-label={backLabel} className={`${BTN} ${TONE.plain} flex-shrink-0 min-w-[44px] px-2.5`}>
+              ←<span className="hidden xl:inline">{backLabel}</span>
+            </Link>
+          )}
           <span className="flex-shrink-0 px-2 py-1 rounded-lg bg-purple-500 text-black text-[11px] font-black tracking-wider whitespace-nowrap">
             🎬 SAMPLE
           </span>
           {locked ? (
-            // Shared demo link: one board, no switching.
-            <span className="flex-1 min-w-0 sm:flex-none sm:max-w-[16rem] truncate text-white text-xs font-bold px-2.5 py-2">
-              {sections.find(s => s.id === selectedId)?.name ?? 'Board not found'}
+            <span className="flex-1 min-w-0 xl:flex-none xl:w-40 truncate text-white text-xs font-bold px-2.5 py-2">
+              {section?.name ?? 'Board not found'}
             </span>
           ) : (
             <select
               value={selectedId ?? ''}
               onChange={e => onSelect(e.target.value)}
               aria-label="Choose board"
-              className="flex-1 min-w-0 sm:flex-none sm:max-w-[16rem] bg-white/10 text-white text-xs font-bold rounded-lg px-2.5 py-2 border border-white/15 focus:outline-none focus:border-purple-400"
+              className="flex-1 min-w-0 xl:flex-none xl:w-40 min-h-[44px] bg-white/10 text-white text-xs font-bold rounded-xl px-2.5 border border-white/15 focus:outline-none focus:border-purple-400"
             >
               {sections.length === 0 && <option value="">No boards found</option>}
               {sections.map(s => (
@@ -183,79 +274,68 @@ function DemoBar({
           )}
         </div>
 
-        {/* Row 2: password cheat-sheet pills + actions (icon-only on phones) */}
-        <div className="flex items-center gap-1.5 sm:ml-auto">
-          <span className="flex-shrink-0 px-2 py-1 rounded-lg bg-white/5 text-gray-300 border border-white/10 text-[11px] font-bold whitespace-nowrap">
-            🔑 <span className="text-purple-300">{SAMPLE_TEAM_PASSWORD}</span>
-          </span>
-          <span className="flex-shrink-0 px-2 py-1 rounded-lg bg-white/5 text-gray-300 border border-white/10 text-[11px] font-bold whitespace-nowrap">
-            👮 <span className="text-yellow-300">{marshalPassword}</span>
-          </span>
-          <div className="flex items-center gap-1.5 ml-auto sm:ml-0">
-            {showViewToggle && (
-              <button
-                onClick={onToggleView}
-                title={view === 'board' ? 'Show the scoreboard' : 'Show the bingo board'}
-                className="flex-shrink-0 px-2.5 py-2 rounded-lg bg-violet-500/20 text-violet-200 border border-violet-400/40 text-xs font-black hover:bg-violet-500/30 transition-colors whitespace-nowrap"
-              >
-                {view === 'board' ? '📊' : '🎯'}<span className="hidden sm:inline"> {view === 'board' ? 'Scoreboard' : 'Board'}</span>
-              </button>
-            )}
-            <button
-              onClick={onRemote}
-              title="Remote control — drive this screen from your phone"
-              className={`flex-shrink-0 px-2.5 py-2 rounded-lg text-xs font-black border transition-colors whitespace-nowrap ${
-                remoteActive
-                  ? 'bg-emerald-500/20 text-emerald-200 border-emerald-400/50 hover:bg-emerald-500/30'
-                  : 'bg-white/10 text-gray-200 border-white/15 hover:bg-white/20'
-              }`}
-            >
-              📡<span className="hidden sm:inline"> {remoteActive ? 'Paired' : 'Remote'}</span>
-            </button>
-            <button
-              onClick={onShare}
-              title="Share this screen — the audience watches along, read-only"
-              className={`flex-shrink-0 px-2.5 py-2 rounded-lg text-xs font-black border transition-colors whitespace-nowrap ${
-                shareActive
-                  ? 'bg-sky-500/20 text-sky-200 border-sky-400/50 hover:bg-sky-500/30'
-                  : 'bg-white/10 text-gray-200 border-white/15 hover:bg-white/20'
-              }`}
-            >
-              📺<span className="hidden sm:inline"> {shareActive ? 'Sharing' : 'Share screen'}</span>
-            </button>
-            <button
-              onClick={onTryIt}
-              title="Let the audience try the game on their own phones"
-              className="flex-shrink-0 px-2.5 py-2 rounded-lg bg-white/10 text-gray-200 border border-white/15 text-xs font-black hover:bg-white/20 transition-colors whitespace-nowrap"
-            >
-              📱<span className="hidden sm:inline"> Try it yourself</span>
-            </button>
-            {showQuickWin && (
-              <button
-                onClick={onQuickWin}
-                title="Quick BINGO — instantly complete one line"
-                className="flex-shrink-0 px-2.5 py-2 rounded-lg bg-yellow-400/20 text-yellow-200 border border-yellow-400/40 text-xs font-black hover:bg-yellow-400/30 transition-colors whitespace-nowrap"
-              >
-                ⚡<span className="hidden sm:inline"> BINGO</span>
-              </button>
-            )}
-            <button
-              onClick={onReset}
-              title="Reset demo"
-              className="flex-shrink-0 px-2.5 py-2 rounded-lg bg-white/10 text-gray-200 border border-white/15 text-xs font-bold hover:bg-white/20 transition-colors whitespace-nowrap"
-            >
-              ↺<span className="hidden sm:inline"> Reset</span>
-            </button>
-            {!locked && <Link
-              to={backHref}
-              title={backLabel}
-              className="flex-shrink-0 px-2.5 py-2 rounded-lg bg-white/10 text-gray-200 border border-white/15 text-xs font-bold hover:bg-white/20 transition-colors whitespace-nowrap"
-            >
-              ←<span className="hidden sm:inline"> {backLabel}</span>
-            </Link>}
+        {/* Row 2 below 1280px: equal-width main buttons + More */}
+        <div className="flex gap-1.5 xl:hidden">
+          {toggle(STRIP, false)}
+          {join(STRIP)}
+          {bingo(STRIP)}
+          <button type="button" onClick={() => setMoreOpen(true)} aria-haspopup="dialog" className={`${BTN} ${TONE.plain} ${STRIP} relative`}>
+            ⋯<span>More</span>
+            {(remoteActive || shareActive) && <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-emerald-400" aria-label="Remote or share is on" />}
+          </button>
+        </div>
+
+        {/* From 1280px: one row of labelled groups */}
+        <div className="hidden xl:flex items-center gap-2 flex-1 min-w-0">
+          {toggle('', true)}
+          {join('')}
+          {divider}
+          {remote('', onRemote)}
+          {share('', onShare, true)}
+          {tryIt('', onTryIt, true)}
+          {divider}
+          {bingo('')}
+          {waitBtn('', onToggleWaiting, true)}
+          {obsBtn('', onToggleObserver, true)}
+          {reset('', onReset, false)}
+          <div className="ml-auto flex items-center gap-2">
+            {pill('Team', SAMPLE_TEAM_PASSWORD, 'text-purple-300')}
+            {pill('Marshal', marshalPassword, 'text-yellow-300')}
           </div>
         </div>
       </div>
+
+      {moreOpen && createPortal(
+        <div role="dialog" aria-modal="true" aria-label="More demo controls" onClick={() => setMoreOpen(false)}
+          className="xl:hidden fixed inset-0 z-50 bg-black/60 flex items-end justify-center">
+          <div onClick={e => e.stopPropagation()}
+            className="w-full max-w-md max-h-[85dvh] overflow-y-auto rounded-t-3xl bg-gray-900 border-t border-purple-500/40 px-4 pt-4 flex flex-col gap-4"
+            style={{ paddingBottom: 'calc(16px + env(safe-area-inset-bottom))' }}>
+            <p className="text-white font-black text-base">More</p>
+            <div className="flex flex-col gap-2">
+              <p className="text-white/50 text-[11px] font-black uppercase tracking-wider">Show the room</p>
+              {remote('w-full justify-start px-3', inSheet(onRemote))}
+              {share('w-full justify-start px-3', inSheet(onShare), true)}
+              {tryIt('w-full justify-start px-3', inSheet(onTryIt), true)}
+            </div>
+            <div className="flex flex-col gap-2">
+              <p className="text-white/50 text-[11px] font-black uppercase tracking-wider">Cheat sheet</p>
+              <div className="flex gap-2 flex-wrap">
+                {pill('Team password', SAMPLE_TEAM_PASSWORD, 'text-purple-300')}
+                {pill('Marshal password', marshalPassword, 'text-yellow-300')}
+              </div>
+            </div>
+            <div className="flex flex-col gap-2">
+              <p className="text-white/50 text-[11px] font-black uppercase tracking-wider">Demo</p>
+              {waitBtn('w-full justify-start px-3', inSheet(onToggleWaiting), true)}
+              {obsBtn('w-full justify-start px-3', inSheet(onToggleObserver), true)}
+              {reset('w-full justify-start px-3', inSheet(onReset), true)}
+            </div>
+            <button type="button" onClick={() => setMoreOpen(false)} className={`${BTN} ${TONE.plain} w-full`}>Close</button>
+          </div>
+        </div>,
+        document.body,
+      )}
     </div>
   )
 }
@@ -340,6 +420,7 @@ function JoinScreen({ selected, onSelect, onJoin, theme }: {
               groups.map(group => (
                 <button
                   key={group}
+                  data-tap
                   onClick={() => pick(group)}
                   className="w-full px-5 py-4 rounded-2xl border-2 text-left font-bold text-lg transition-all duration-150 border-gray-200 text-gray-800 hover:border-purple-400 hover:bg-purple-50 active:scale-[0.98]"
                 >
@@ -440,6 +521,7 @@ function BingoTile({
   return (
     <button
       onClick={onClick}
+      data-tap
       title={chained ? `${task.title} (locked)` : task.title}
       aria-label={chained ? `${task.title} (locked)` : task.title}
       className={`bingo-glow relative rounded-xl overflow-hidden flex items-center justify-center aspect-square transition-all duration-200 hover:scale-105 active:scale-95 focus:outline-none${glowing ? ' bingo-glow-on' : ''}`}
@@ -656,10 +738,12 @@ const BoardScreen = forwardRef<BoardScreenHandle, {
   onInviteChange?: (open: boolean) => void
   /** Help-chat state, so the phone's toggle reflects the screen. */
   onChatChange?: (open: boolean) => void
+  /** Show the observer's version of the board: badge, no invite, view-only cards. */
+  observer?: boolean
 }>(function BoardScreen({
   teamName, gridTasks: gridTasksProp, scanState, quickWinSlots, section, glowSlots, glowMode,
   onToggleGlow, onClearGlow, onToggleGlowMode, onOpenTask, onSwitchTeam,
-  inviteUrl, onShowScoreboard, onPopupChange, onInviteChange, onChatChange,
+  inviteUrl, onShowScoreboard, onPopupChange, onInviteChange, onChatChange, observer = false,
 }, ref) {
   // One colour per category on the board, whatever each card row carries.
   const gridTasks = useMemo(() => withCategoryColors(gridTasksProp), [gridTasksProp])
@@ -677,6 +761,15 @@ const BoardScreen = forwardRef<BoardScreenHandle, {
   // Prize cards sit under the grid, not in it (slots 200+); the sandbox claims them locally.
   const [prizeTasks, setPrizeTasks] = useState<BingoTask[]>([])
   const [sandboxClaims, setSandboxClaims] = useState<string[]>([])
+  // The winner's reveal page, with made-up details: nothing is read from or saved to the real prize.
+  const [revealTask, setRevealTask] = useState<BingoTask | null>(null)
+  // The time-up alarm, only if this board's timer was still running when the demo opened.
+  const [alarmOn, setAlarmOn] = useState(false)
+  useEffect(() => {
+    const end = section?.timer_end_at
+    setAlarmOn(!!end && new Date(end).getTime() > Date.now())
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [section?.id])
   const sectionId = section?.id ?? null
   useEffect(() => {
     if (!sectionId) return
@@ -777,9 +870,14 @@ const BoardScreen = forwardRef<BoardScreenHandle, {
   useEffect(() => { onInviteChange?.(inviteOpen) }, [onInviteChange, inviteOpen])
   useEffect(() => { onChatChange?.(chatOpen) }, [onChatChange, chatOpen])
 
+  if (revealTask) {
+    return <SamplePrizeReveal task={revealTask} teamName={teamName} theme={theme} onBack={() => setRevealTask(null)} />
+  }
+
   return (
     <div className={`min-h-[80vh] bg-gray-950 relative overflow-x-hidden ${theme === 'grab' ? 'grab-ui' : ''}`}>
       <PlayerBackdrop theme={theme} />
+      {alarmOn && <TimeUpAlarm settings={section} />}
 
       {popupLetters && <BingoPopup letters={popupLetters} onDismiss={closePopup} />}
 
@@ -792,6 +890,9 @@ const BoardScreen = forwardRef<BoardScreenHandle, {
               <span className="text-green-400 text-xs font-bold">{completedCount}/{visibleTasks.length} completed</span>
               {lettersEarned && (
                 <span className="text-purple-300 text-xs font-black tracking-widest">{lettersEarned}!</span>
+              )}
+              {observer && (
+                <span className="text-blue-300 text-[10px] font-black uppercase tracking-wider bg-blue-900/40 px-1.5 py-0.5 rounded">👁 Observer</span>
               )}
             </div>
             {/* Same help bubble as the player board; demo-only messages. */}
@@ -813,17 +914,20 @@ const BoardScreen = forwardRef<BoardScreenHandle, {
                 the controls a participant actually has. The QR hands out the
                 sandbox link rather than a team invite — nothing here is saved,
                 so each scan opens its own private board. */}
-            <MyQrButton
-              label="Invite teammate"
-              teamName={teamName}
-              hint="Teammate scans this to open their own demo board"
-              value={inviteUrl}
-              open={inviteOpen}
-              onOpenChange={setInviteOpen}
-            />
+            {/* Phone: these two live in the bottom bar, as on the real board. */}
+            <div className={observer ? 'hidden' : 'hidden md:block'}>
+              <MyQrButton
+                label="Invite teammate"
+                teamName={teamName}
+                hint="Teammate scans this to open their own demo board"
+                value={inviteUrl}
+                open={inviteOpen}
+                onOpenChange={setInviteOpen}
+              />
+            </div>
             <button
               onClick={onShowScoreboard}
-              className="text-xs font-bold text-purple-300 hover:text-purple-200 transition-colors"
+              className="hidden md:block text-xs font-bold text-purple-300 hover:text-purple-200 transition-colors"
             >
               🏆 Scoreboard
             </button>
@@ -939,20 +1043,23 @@ const BoardScreen = forwardRef<BoardScreenHandle, {
             <div key={t.placement_id ?? t.id} className="mt-3">
               <PrizeStrip
                 state={stripState({
-                  count: completedCount, threshold: t.prize_threshold ?? 20, teamId: 'sample', role: 'player',
+                  count: completedCount, threshold: t.prize_threshold ?? 20, teamId: 'sample', role: observer ? 'observer' : 'player',
                   claim: sandboxClaims.includes(t.id)
                     ? { id: t.id, board_card_id: t.placement_id ?? t.id, team_id: 'sample', team_name: teamName, claimed_at: new Date().toISOString() }
                     : null,
                 })}
                 theme={theme} busy={false} message={null} title={t.title} hint={t.completion_warning}
                 onClaim={() => setSandboxClaims(c => [...c, t.id])}
-                onOpen={() => {}}
+                onOpen={() => setRevealTask(t)}
               />
             </div>
           ))}
         </div>
       </main>
 
+      {/* Phone bottom bar, same component and tabs as the real player board. */}
+      <BoardBottomBar theme={theme} teamName={teamName} inviteUrl={observer ? '' : inviteUrl} scoreboardPath=""
+        onInvite={() => setInviteOpen(true)} onScores={onShowScoreboard} />
       {gridTasks.length > 0 && (
         <div className="relative z-10 pb-6 flex justify-center gap-4 text-xs text-gray-500">
           <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-gray-600 opacity-50" />Not visited</span>
@@ -987,11 +1094,150 @@ const BoardScreen = forwardRef<BoardScreenHandle, {
           </div>
         </div>
       )}
+      <BoardBarSpacer />
     </div>
   )
 })
 
 // ── Task Detail (sandbox overlay) ─────────────────────────────────────────────
+
+/** The "Waiting to start" screen a player sees until the host sets the game live (copy of the real one in BingoDashHome). */
+/**
+ * Demo of the real co-op game panel (components/CoopPlay.tsx): same "Play in the app"
+ * card, lobby and game panel, but played locally. No server session: the demo
+ * player taps, the puzzle's own reducer runs here. As an observer the icons show.
+ */
+function SampleCoopPlay({ gameKey, color, observer, completed, onSolved, onOpenChange }: {
+  gameKey: string; color: string; observer: boolean; completed: boolean
+  onSolved: () => void; onOpenChange: (open: boolean) => void
+}) {
+  const puzzle = useMemo(() => getPuzzle(gameKey), [gameKey])
+  const [phase, setPhase] = useState<'card' | 'lobby' | 'play'>('card')
+  const [state, setState] = useState<unknown>(() => puzzle.initState())
+  const solved = puzzle.isSolved(state)
+  const PANEL = { background: 'rgba(255,255,255,0.05)', border: '2px solid rgba(255,255,255,0.1)' }
+  const btn = 'w-full min-h-[60px] rounded-2xl font-black uppercase tracking-wide text-white active:scale-95 transition-transform shadow-[0_4px_0_rgba(0,0,0,0.35)]'
+  const chip = (
+    <span className="px-2 py-1 rounded-lg text-xs font-black uppercase" style={{ background: observer ? 'rgba(56,189,248,.2)' : 'rgba(255,255,255,.12)', color: observer ? '#7dd3fc' : '#e5e7eb' }}>
+      {observer ? 'Observer' : 'Player'}
+    </span>
+  )
+  useEffect(() => { if (solved && !completed) onSolved() }, [solved, completed, onSolved])
+  useEffect(() => { onOpenChange(phase !== 'card') }, [phase, onOpenChange])
+
+  if (phase === 'card') return (
+    <div className="rounded-2xl p-4 mb-6" style={PANEL}>
+      <p className="text-gray-400 text-xs font-black uppercase tracking-widest mb-1">Play in the app</p>
+      <p className="text-gray-300 text-sm mb-3">Play this challenge together with your team. The player acts, observers watch.</p>
+      {gameKey === 'icon-matching' && <p className="text-gray-300 text-sm mb-3">Use 1 player and at least 1 observer (up to 9). The player taps two different cards, one at a time. Only observers see both icons after the second tap. Observers call out the positions and help the player remember pairs. Matches stay revealed; non-matches hide after 2.5 seconds. Match all 8 pairs to complete the card.</p>}
+      <div className="mb-3">{chip}</div>
+      <button type="button" className={btn} style={{ background: color }} onClick={() => setPhase('lobby')}>
+        {completed ? 'View game' : 'Play'}
+      </button>
+    </div>
+  )
+
+  return (
+    <div className="rounded-3xl p-4 mb-6" style={{ background: 'rgba(0,0,0,0.30)', border: '2px solid rgba(255,255,255,0.15)' }}>
+      <div className="flex items-center justify-between gap-2 mb-3">
+        <span className="text-xs font-black uppercase tracking-widest text-gray-300">{phase === 'lobby' ? 'Lobby' : solved || completed ? 'Completed' : 'In play'}</span>
+        <span className="flex items-center gap-2"><span className="text-xs font-black text-emerald-300">● Live</span>{chip}</span>
+      </div>
+      {phase === 'lobby' ? (
+        <>
+          <ul className="text-sm text-gray-300 mb-3 space-y-1">
+            <li>✓ Player 1 of 1 needed</li>
+            <li>✓ Observers 1 (at least 1, up to 9)</li>
+          </ul>
+          <ul className="space-y-2 mb-4" aria-label="Who is in the lobby">
+            <li className="flex items-center justify-between gap-2 rounded-xl px-3 py-2 min-h-[44px] bg-white/5"><span className="font-bold text-white truncate">Sample player</span><span className="text-xs font-black text-gray-300">PLAYER</span></li>
+            <li className="flex items-center justify-between gap-2 rounded-xl px-3 py-2 min-h-[44px] bg-white/5"><span className="font-bold text-white truncate">Sample observer</span><span className="text-xs font-black text-sky-300">OBSERVER</span></li>
+          </ul>
+          <button type="button" className={btn} style={{ background: color }} onClick={() => { setState(puzzle.initState()); setPhase('play') }}>Start game</button>
+          <button type="button" onClick={() => setPhase('card')} className="w-full min-h-[44px] mt-2 text-sm font-bold text-gray-300 underline">Leave lobby</button>
+        </>
+      ) : (
+        <>
+          {(solved || completed) && <p className="rounded-xl px-3 py-2 mb-3 text-sm font-bold bg-emerald-400/15 text-emerald-300">Solved. Locked: this game is completed. Your team was credited once.</p>}
+          <puzzle.View state={state} canAct={!observer && !solved} isPlayer={!observer} mySlot={0}
+            dispatch={a => setState((s: unknown) => puzzle.reduce(s, a))} />
+          <button type="button" onClick={() => setPhase('card')} className="w-full min-h-[44px] mt-4 text-sm font-bold text-gray-300 underline">Back to the card</button>
+        </>
+      )}
+    </div>
+  )
+}
+
+const DEMO_NEEDS: Pick<BingoTask, 'players_min' | 'players_max' | 'players_whole_team' | 'play_location'>[] = [
+  { players_min: 2, players_max: 4, players_whole_team: false, play_location: 'Main lobby' },
+  { players_min: null, players_max: null, players_whole_team: true, play_location: 'Anywhere in the venue' },
+  { players_min: 1, players_max: null, players_whole_team: false, play_location: 'Outdoor garden' },
+  { players_min: 3, players_max: null, players_whole_team: false, play_location: null },
+]
+/** Stable example per card, so a card shows the same thing each time it opens. */
+function demoNeeds(id: string) {
+  let h = 0
+  for (let i = 0; i < id.length; i++) h = (h + id.charCodeAt(i)) % 997
+  return DEMO_NEEDS[h % DEMO_NEEDS.length]
+}
+
+function SampleWaiting({ theme, boardName, teamName, onBack }: { theme: PlayerTheme; boardName: string; teamName: string; onBack: () => void }) {
+  return (
+    <div className="relative overflow-hidden flex flex-col items-center justify-end" style={{ minHeight: '80dvh' }}>
+      {theme === 'grab' ? <PlayerBackdrop theme={theme} /> : <ForestWaitingScreen />}
+      <div className="absolute inset-0 pointer-events-none"
+        style={{ zIndex: 5, background: 'linear-gradient(to bottom, rgba(4,15,12,0.60) 0%, rgba(4,15,12,0.28) 42%, rgba(4,15,12,0.75) 100%)' }} />
+      <div className="relative z-10 text-center px-6 pt-16 flex-1 flex flex-col justify-center [text-shadow:0_2px_14px_rgba(0,0,0,0.75)]">
+        <p className="text-[11px] font-black uppercase tracking-[0.25em] text-emerald-200/90 mb-2">{boardName}</p>
+        <h1 className="text-3xl sm:text-4xl font-black text-white tracking-tight mb-3">Waiting to start</h1>
+        <p className="text-white/85 text-sm">
+          You're in <span className="text-amber-300 font-bold">{teamName}</span>.
+          <br className="sm:hidden" /> The game begins when your host says go.
+        </p>
+        <div className="w-48 mx-auto mt-7">
+          <div className="h-1.5 rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,0.1)' }}>
+            <div className="h-full rounded-full tiger-bar" style={{ background: '#fbbf24' }} />
+          </div>
+        </div>
+        {/* Demo only: the real screen has "Switch team" here. */}
+        <button onClick={onBack} className="mt-8 min-h-[44px] px-5 rounded-xl bg-white/15 border border-white/25 text-white text-sm font-black hover:bg-white/25">
+          ▶ Start the game
+        </button>
+      </div>
+      <div className="relative z-10 w-full">{theme !== 'grab' && <WaitingTiger />}</div>
+    </div>
+  )
+}
+
+/** The prize winner's page as the demo team would see it. The details are placeholders. */
+function SamplePrizeReveal({ task, teamName, theme, onBack }: { task: BingoTask; teamName: string; theme: PlayerTheme; onBack: () => void }) {
+  const { photos } = useBingoTaskPhotos(task.id)
+  return (
+    <PrizeReveal
+      status="ready" theme={theme} eventEnded={false}
+      data={{ title: task.title, message: task.completion_warning || 'Show this page to the marshal to collect your prize.', marshal_name: 'Demo marshal', location_text: 'Collect from the facilitator desk', maps_url: null, maps_label: null }}
+      photos={photos.map(p => ({ id: p.id, photo_url: p.photo_url, caption: p.caption ?? null, position_x: p.position_x ?? null, position_y: p.position_y ?? null }))}
+      winner={teamName} claimedAt={new Date().toISOString()}
+      onBack={onBack} onRetry={() => {}}
+    />
+  )
+}
+
+/** Every card in this card's chain, in order, for the "Step n of N" trail (same walk as the player page). */
+function chainTrailOf(gridTasks: BingoTask[], task: BingoTask, scanState: Record<string, string>): Array<TrailStep & { task: BingoTask }> {
+  const prereqOf = prereqResolver(gridTasks)
+  const byId = new Map(gridTasks.map(t => [t.id, t]))
+  const nextOf = new Map<string, BingoTask>()
+  for (const t of gridTasks) { const p = prereqOf(t); if (p) nextOf.set(p, t) }
+  let first = task
+  for (let g = 0; g < 100; g++) { const p = prereqOf(first); const prev = p ? byId.get(p) : undefined; if (!prev) break; first = prev }
+  const steps: Array<TrailStep & { task: BingoTask }> = []
+  for (let cur: BingoTask | undefined = first, g = 0; cur && g < 100; g++) {
+    steps.push({ id: cur.id, title: cur.title, done: scanState[cur.id] === 'completed', task: cur })
+    cur = nextOf.get(cur.id)
+  }
+  return steps.length > 1 && steps.some(x => x.id === task.id) ? steps : []
+}
 
 // Imperative handle so the phone remote can drive the open tile's flow.
 export type SampleTaskDetailHandle = {
@@ -1018,7 +1264,7 @@ export const SampleTaskDetail = forwardRef<SampleTaskDetailHandle, {
   /** The chain around this card, resolved by the page from the demo's own
    *  state: the card it unlocks after (and whether that is done), and the
    *  card it unlocks. */
-  chain: { prev: BingoTask | null; locked: boolean; next: BingoTask | null }
+  chain: { prev: BingoTask | null; locked: boolean; next: BingoTask | null; trail?: Array<TrailStep & { task: BingoTask }> }
   onJump: (task: BingoTask) => void
   onComplete: () => void
   onUncomplete: () => void
@@ -1028,17 +1274,28 @@ export const SampleTaskDetail = forwardRef<SampleTaskDetailHandle, {
   onScrollFrac?: (frac: number) => void
   /** Admin walkthrough: open straight on the instructions, without the tap-to-start splash. */
   skipSplash?: boolean
+  /** An observer reads the card but cannot complete it. */
+  observer?: boolean
 }>(function SampleTaskDetail({
   task, teamName, marshalPassword, completed, bonusDefaults, chain, onJump, onComplete, onUncomplete, onClose, onStep,
-  onScrollFrac, skipSplash,
+  onScrollFrac, skipSplash, observer = false,
 }, ref) {
   const { pages } = useBingoTaskPages(task.id)
   const { photos } = useBingoTaskPhotos(task.id)
   const { links } = useTaskLinks(task.id, 'bingo_task_links')
 
   const [showSplash, setShowSplash] = useState(!skipSplash)
-  const [currentPage, setCurrentPage] = useState(0)
-  const [carouselIdx, setCarouselIdx] = useState(0)
+  const pagesAuto = useAutoAdvance(pages.length, INSTRUCTION_ROTATE_MS, pages.some(p => p.media_type === 'video'))
+  const currentPage = pagesAuto.idx
+  const setCurrentPage = pagesAuto.go
+  const coopGameKey = gameKeyForTitle(task.title)
+  const [coopOpen, setCoopOpen] = useState(false)
+  const heroAuto = useAutoAdvance(photos.length, HERO_ROTATE_MS)
+  // A card that sets no people/place still shows an example, so the demo shows the component.
+  const needsIsDemo = !hasNeeds(task)
+  const needs = needsIsDemo ? demoNeeds(task.id) : task
+  const carouselIdx = heroAuto.idx
+  const setCarouselIdx = heroAuto.go
   const [marshalInput, setMarshalInput] = useState('')
   const [marshalError, setMarshalError] = useState('')
   const [photoPreview, setPhotoPreview] = useState<string | null>(null)
@@ -1073,11 +1330,30 @@ export const SampleTaskDetail = forwardRef<SampleTaskDetailHandle, {
   const aitbActivity = aitbBase
   const [aitbWords, setAitbWords] = useState<string[]>([])
 
-  const needsDrawnAnswer = !!(inputs.answer && !task.answer_text && task.answer_min == null && drawConfig)
+  // Several typed questions (answer_blocks), checked here instead of in the database.
+  const answerBlocks = useMemo(() => parseAnswerBlocks(task.answer_blocks), [task.answer_blocks])
+  const blocksMode = !!inputs.answer && answerBlocks.length > 0
+  const [blockValues, setBlockValues] = useState<string[]>([])
+  const [blockResults, setBlockResults] = useState<boolean[] | null>(null)
+  const [blocksOk, setBlocksOk] = useState(false)
+  const needsDrawnAnswer = !!(inputs.answer && !blocksMode && !task.answer_text && task.answer_min == null && drawConfig)
   // Text input with only a question: free text, approved by the demo marshal.
-  const freeTextMode = !!(inputs.answer && !task.answer_text && task.answer_min == null && !drawConfig)
+  const freeTextMode = !!(inputs.answer && !blocksMode && !task.answer_text && task.answer_min == null && !drawConfig)
   const drawnPrompt = needsDrawnAnswer ? (aitbWords[0] || '') : ''
   const riddleSolved = !needsDrawnAnswer || riddleOk
+
+  const checkBlocks = () => {
+    const norm = (v: string) => v.replace(/\s/g, '').toLowerCase()
+    const res = answerBlocks.map((b, i) => {
+      const v = (blockValues[i] ?? '').trim()
+      return b.kind === 'number' ? v !== '' && Number(v) >= (b.min ?? 0) : norm(v) === norm(b.answer)
+    })
+    setBlockResults(res)
+    if (res.every(Boolean)) {
+      setBlocksOk(true); setBlockResults(null)
+      if (!completed && !(inputs.photo || inputs.video || inputs.link || inputs.versus)) onComplete()
+    }
+  }
 
   const checkDrawnAnswer = async () => {
     const typed = guess.trim()
@@ -1355,6 +1631,12 @@ export const SampleTaskDetail = forwardRef<SampleTaskDetailHandle, {
           </div>
         )}
 
+        {/* People needed and where to play: under the hero image, above the instructions. */}
+        <CardNeeds task={needs} hexCode={task.hex_code} mapsHref={task.maps_url ? normalizeUrl(task.maps_url) : null} />
+        {needsIsDemo && hasNeeds(needs) && (
+          <p className="-mt-3 mb-5 text-center text-[10px] font-bold text-white/40">Example values. Set your own with the 👥 tool on the card edit page.</p>
+        )}
+
         {/* Maps button */}
         {task.maps_url && (
           <div className="mb-5 animate-slide-up">
@@ -1377,7 +1659,12 @@ export const SampleTaskDetail = forwardRef<SampleTaskDetailHandle, {
         {/* AI Team Building brief — a live bonus bar, the real description
             + skill tag, then the module and a tickable mission checklist
             instead of swipeable instruction pages. */}
-        {aitbActivity ? (
+        {!chain.locked && coopGameKey && (
+          <SampleCoopPlay gameKey={coopGameKey} color={task.hex_code} observer={observer} completed={completed}
+            onSolved={onComplete} onOpenChange={setCoopOpen} />
+        )}
+
+        {coopOpen ? null : aitbActivity ? (
           <>
             <div className="flex items-center gap-2 mb-4">
               <span className="px-2 py-1 rounded-lg text-xs font-black uppercase" style={{ background: `${aitbActivity.color}22`, color: aitbActivity.color }}>
@@ -1394,8 +1681,8 @@ export const SampleTaskDetail = forwardRef<SampleTaskDetailHandle, {
             </div>
           </>
         ) : pages.length > 0 ? (
-          <SwipeablePages currentPage={currentPage} total={pages.length} onChange={setCurrentPage}>
-            <InstructionPage page={pages[currentPage]} hexCode={task.hex_code} />
+          <SwipeablePages currentPage={currentPage} total={pages.length} onChange={setCurrentPage} onInteract={pagesAuto.stop}>
+            <InstructionPage key={currentPage} page={pages[currentPage]} hexCode={task.hex_code} />
             <PageNavigator
               current={currentPage}
               total={pages.length}
@@ -1489,6 +1776,8 @@ export const SampleTaskDetail = forwardRef<SampleTaskDetailHandle, {
         {/* Whatever this card deals the team — colours, a riddle,
             checkpoints. Sits after the instructions and before the AI
             tool links, so it reads in the order the team acts. */}
+        <ChainTrail steps={chain.trail ?? []} currentId={task.id} onOpen={id => { const t = chain.trail?.find(x => x.id === id); if (t) onJump(t.task) }} />
+
         {/* Helpful links — plus the chain's neighbours, as on the player
             view. In-app hops go through onJump so the demo swaps cards
             without leaving the page. */}
@@ -1507,8 +1796,15 @@ export const SampleTaskDetail = forwardRef<SampleTaskDetailHandle, {
           )
         })()}
 
+        {/* Observer notice */}
+        {observer && (
+          <div className="mt-8 p-4 rounded-2xl border-2 border-blue-400/40 bg-blue-400/10 text-center">
+            <p className="text-blue-300 font-black text-sm">👁 Observer Mode — viewing only</p>
+          </div>
+        )}
+
         {/* Complete Activity */}
-        <div className="mt-8 animate-slide-up">
+        {!observer && <div className="mt-8 animate-slide-up">
           {chain.locked && chain.prev ? (
             <>
               <div className="p-5 rounded-3xl border-2 border-amber-400/50 bg-amber-400/10 text-center">
@@ -1556,7 +1852,7 @@ export const SampleTaskDetail = forwardRef<SampleTaskDetailHandle, {
                 </button>
               </div>
               <button
-                onClick={() => { onUncomplete(); if (task.task_type === 'answer') setAnswerInputs(answerRows.map(() => '')) }}
+                onClick={() => { onUncomplete(); setBlocksOk(false); setBlockValues([]); if (task.task_type === 'answer') setAnswerInputs(answerRows.map(() => '')) }}
                 className="mt-3 px-4 py-2 text-sm text-white/40 hover:text-red-400 transition-colors"
               >
                 Undo completion
@@ -1956,7 +2252,59 @@ export const SampleTaskDetail = forwardRef<SampleTaskDetailHandle, {
                   </>
                 )}
 
-                {inputs.answer && !freeTextMode && (
+                {blocksMode && (
+                  <div className="mb-6 flex flex-col gap-4">
+                    {blocksOk ? (
+                      <>
+                        <div className="p-4 rounded-2xl bg-green-400/15 border border-green-400/40 text-center">
+                          <p className="text-green-300 font-black">✓ All answers correct</p>
+                        </div>
+                        {/* The real card hands each team its own box code from the card's pool. */}
+                        {/passcode/i.test(task.title) && (
+                          <div className="p-4 rounded-2xl bg-green-400/15 border border-green-400/40 text-center">
+                            <p className="text-green-300 text-xs font-black uppercase tracking-widest mb-1">Correct! Your passcode</p>
+                            <p className="text-white text-4xl font-black tracking-[0.35em] pl-[0.35em] tabular-nums" translate="no">193</p>
+                            <p className="text-green-300/70 text-xs font-bold mt-2">Use it to open the box.</p>
+                          </div>
+                        )}
+                      </>
+                    ) : (
+                      <>
+                        {answerBlocks.map((b, i) => {
+                          const wrong = blockResults != null && blockResults[i] === false
+                          return (
+                            <div key={b.id}>
+                              {b.question && (
+                                <p className="text-white font-black text-base mb-2 leading-snug">
+                                  {answerBlocks.length > 1 && <span className="text-white/50 mr-1.5">{i + 1}.</span>}{b.question}
+                                </p>
+                              )}
+                              <input
+                                type="text" inputMode={b.kind === 'number' ? 'numeric' : 'text'} autoComplete="off"
+                                value={blockValues[i] ?? ''}
+                                onChange={e => { const v = e.target.value; setBlockValues(prev => { const n = [...prev]; n[i] = v; return n }); setBlockResults(null) }}
+                                onKeyDown={e => { if (e.key === 'Enter') checkBlocks() }}
+                                placeholder={b.kind === 'number' ? 'Enter a number' : 'Type your answer'}
+                                className={`w-full px-4 py-3 rounded-2xl bg-white/10 border-2 text-white placeholder-white/30 text-sm font-bold focus:outline-none ${wrong ? 'border-red-400/70' : 'border-white/25 focus:border-white/50'}`}
+                              />
+                              {wrong && <p className="text-red-300 text-xs font-bold mt-1">Not right yet</p>}
+                            </div>
+                          )
+                        })}
+                        <button
+                          onClick={checkBlocks}
+                          disabled={answerBlocks.some((_, i) => !(blockValues[i] ?? '').trim())}
+                          className="w-full py-3.5 rounded-2xl font-black uppercase tracking-wider transition-all active:scale-95 disabled:opacity-40"
+                          style={{ backgroundColor: task.hex_code, color: '#000' }}
+                        >
+                          {answerBlocks.length > 1 ? 'Check my answers' : 'Check my answer'}
+                        </button>
+                      </>
+                    )}
+                  </div>
+                )}
+
+                {inputs.answer && !freeTextMode && !blocksMode && (
                   <>
                     {task.answer_question && (
                       <p className="text-white font-black text-lg mb-4 text-center leading-snug">{task.answer_question}</p>
@@ -2081,7 +2429,7 @@ export const SampleTaskDetail = forwardRef<SampleTaskDetailHandle, {
               )}
             </>
           )}
-        </div>
+        </div>}
       </main>
     </div>
   )
@@ -2219,6 +2567,7 @@ function SampleProjector() {
   // Celebration on screen, mirrored to the paired phone.
   const [popup, setPopup] = useState<{ letters: string | null; queued: number }>({ letters: null, queued: 0 })
   const [inviteOpen, setInviteOpen] = useState(false)
+  const [joinQr, setJoinQr] = useState<JoinQrMode>('off')
   const [chatOpen, setChatOpen] = useState(false)
   const boardRef = useRef<BoardScreenHandle>(null)
   const detailRef = useRef<SampleTaskDetailHandle | null>(null)
@@ -2319,6 +2668,10 @@ function SampleProjector() {
     window.location.reload()
   }
 
+  // What a player sees before the host starts the game, and what an observer sees instead of a player.
+  const [waiting, setWaiting] = useState(false)
+  const [observer, setObserver] = useState(false)
+
   const handleOpenTask = (task: BingoTask) => {
     setScanState(prev => prev[task.id] ? prev : { ...prev, [task.id]: 'scanned' })
     setOpenTask(task)
@@ -2356,6 +2709,7 @@ function SampleProjector() {
     popup: popup.letters,
     popupQueued: popup.queued,
     inviteOpen,
+    joinQr,
     quickWinRows,
     chatOpen,
     scroll: scrollFrac,
@@ -2390,9 +2744,20 @@ function SampleProjector() {
         if (openTask && detailRef.current) detailRef.current.scroll(c.direction)
         else window.scrollBy({ top: c.direction === 'down' ? 400 : -400, behavior: 'smooth' })
         break
+      case 'scrollTo': {
+        // Phone-driven scroll: a fraction, so different screen heights still line up.
+        const f = Math.min(1, Math.max(0, c.frac))
+        if (openTask && detailRef.current) detailRef.current.scrollTo(f)
+        else {
+          const range = document.documentElement.scrollHeight - window.innerHeight
+          if (range > 0) window.scrollTo({ top: f * range })
+        }
+        break
+      }
       case 'dismissPopup': boardRef.current?.dismissPopup(); break
       case 'setInvite': boardRef.current?.setInvite(c.open); break
       case 'setChat': boardRef.current?.setChat(c.open); break
+      case 'setJoinQr': setJoinQr(c.mode); break
       case 'requestState': sendState(snapshot()); break
     }
   }
@@ -2413,13 +2778,14 @@ function SampleProjector() {
       popup: popup.letters,
       popupQueued: popup.queued,
       inviteOpen,
+      joinQr,
       quickWinRows,
       chatOpen,
       scroll: scrollFrac,
     }
     if (remoteCode) sendState(snap)
     if (watchCode) sendWatchState(snap)
-  }, [remoteCode, watchCode, selectedId, teamName, pendingGroup, scanState, openTask, view, detailStep, popup, inviteOpen, quickWinRows, chatOpen, scrollFrac, sendState, sendWatchState])
+  }, [remoteCode, watchCode, selectedId, teamName, pendingGroup, scanState, openTask, view, detailStep, popup, inviteOpen, joinQr, quickWinRows, chatOpen, scrollFrac, sendState, sendWatchState])
 
   // Heartbeat. The phone cannot tell "nothing has changed" from "the projector
   // is gone", so the projector re-broadcasts its state every few seconds and
@@ -2488,6 +2854,10 @@ function SampleProjector() {
         onTryIt={() => setShowTryIt(true)}
         view={view}
         onToggleView={() => setView(v => v === 'board' ? 'scoreboard' : 'board')}
+        waiting={waiting}
+        onToggleWaiting={() => { setWaiting(v => !v); setOpenTask(null); setView('board') }}
+        observer={observer}
+        onToggleObserver={() => setObserver(v => !v)}
         showViewToggle={sections.length > 0}
         backHref="/"
         backLabel="Hub"
@@ -2516,12 +2886,15 @@ function SampleProjector() {
           onSelect={setPendingGroup}
           onJoin={name => { setTeamName(name); setPendingGroup(null) }}
         />
+      ) : waiting ? (
+        <SampleWaiting theme={normalizePlayerTheme(selectedSection?.player_theme)} boardName={selectedSection?.name ?? ''} teamName={teamName} onBack={() => setWaiting(false)} />
       ) : tasksLoading ? (
         <div className="min-h-[70vh] flex items-center justify-center">
           <div className="text-gray-400 text-xl font-bold animate-pulse">Loading board…</div>
         </div>
       ) : (
         <BoardScreen
+          observer={observer}
           key={selectedId ?? 'none'}
           teamName={teamName}
           gridTasks={gridTasks}
@@ -2554,6 +2927,7 @@ function SampleProjector() {
         <SampleTaskDetail
           key={openTask.id}
           ref={detailRef}
+          observer={observer}
           task={openTask}
           teamName={teamName ?? 'Sample Team'}
           marshalPassword={marshalPassword}
@@ -2563,6 +2937,7 @@ function SampleProjector() {
             prev: gridTasks.find(t => t.id === prereqResolver(gridTasks)(openTask)) ?? null,
             locked: (() => { const p = prereqResolver(gridTasks)(openTask); return !!p && scanState[p] !== 'completed' })(),
             next: gridTasks.find(t => prereqResolver(gridTasks)(t) === openTask.id) ?? null,
+            trail: chainTrailOf(gridTasks, openTask, scanState),
           }}
           onJump={handleOpenTask}
           onComplete={() => markComplete(openTask.id)}
@@ -2594,6 +2969,10 @@ function SampleProjector() {
           onClose={() => setShowTryIt(false)}
           onShowScoreboard={() => setView('scoreboard')}
         />
+      )}
+
+      {joinQr !== 'off' && selectedSection?.slug && (
+        <JoinQrOverlay slug={selectedSection.slug} boardName={selectedSection.name} role={joinQr} onClose={() => setJoinQr('off')} />
       )}
     </div>
   )
@@ -2824,13 +3203,16 @@ function SampleScoreboard({
             <h1 className="text-white text-3xl sm:text-5xl font-black tracking-tight mt-1">Scoreboard</h1>
             {section && <p className="text-gray-400 text-sm sm:text-lg font-bold mt-1">{section.name}</p>}
           </div>
-          <p className="text-gray-500 text-xs sm:text-sm font-bold whitespace-nowrap">{DEMO_GROUPS.length} teams competing</p>
+          <div className="flex flex-col items-end gap-2">
+            <p className="text-gray-500 text-xs sm:text-sm font-bold whitespace-nowrap">{DEMO_GROUPS.length} teams competing</p>
+            <JoinLinkButton slug={section?.slug} boardName={section?.name} />
+          </div>
         </div>
       </header>
 
       <main className="relative z-10 px-4 sm:px-8 pb-10">
         <div className="max-w-4xl mx-auto flex flex-col gap-2.5">
-          <div className="grid grid-cols-[48px_1fr_84px_84px_84px] sm:grid-cols-[64px_1fr_140px_140px_140px] gap-2 sm:gap-4 px-3 sm:px-6 text-gray-500 text-[10px] sm:text-xs font-black uppercase tracking-widest">
+          <div className="grid grid-cols-[34px_minmax(0,1fr)_58px_54px_48px] sm:grid-cols-[64px_1fr_140px_140px_140px] gap-1.5 sm:gap-4 px-3 sm:px-6 text-gray-500 text-[10px] sm:text-xs font-black uppercase tracking-widest">
             <div>Rank</div>
             <div>Team</div>
             <div className="text-center">Points</div>
@@ -2845,7 +3227,7 @@ function SampleScoreboard({
             return (
               <div
                 key={row.name}
-                className="grid grid-cols-[48px_1fr_84px_84px_84px] sm:grid-cols-[64px_1fr_140px_140px_140px] gap-2 sm:gap-4 items-center px-3 sm:px-6 py-3 sm:py-4 rounded-2xl transition-all duration-500"
+                className="grid grid-cols-[34px_minmax(0,1fr)_58px_54px_48px] sm:grid-cols-[64px_1fr_140px_140px_140px] gap-1.5 sm:gap-4 items-center px-3 sm:px-6 py-3 sm:py-4 rounded-2xl transition-all duration-500"
                 style={{
                   background: row.isPlayed
                     ? 'linear-gradient(90deg, rgba(168,85,247,0.25) 0%, rgba(255,255,255,0.03) 100%)'
@@ -2855,7 +3237,7 @@ function SampleScoreboard({
                   border: row.isPlayed ? '1px solid rgba(168,85,247,0.6)' : isTop3 ? `1px solid ${rankColor}55` : '1px solid rgba(255,255,255,0.05)',
                 }}
               >
-                <div className="text-2xl sm:text-4xl font-black tabular-nums" style={{ color: rankColor }}>
+                <div className="text-xl sm:text-4xl font-black tabular-nums" style={{ color: rankColor }}>
                   {rank === 1 ? '🥇' : rank === 2 ? '🥈' : rank === 3 ? '🥉' : `#${rank}`}
                 </div>
                 <div className="min-w-0">
@@ -2896,6 +3278,23 @@ function SampleScoreboard({
 // `readOnly` turns this same screen into an audience viewer: it already is a
 // phone-sized mirror of the projector driven entirely by RemoteState, so the
 // viewer is this component with its controls hidden and nothing sent back.
+// ── Phone remote / viewer (DESIGN-010) ───────────────────────────────────────
+// Both are a mirror of the projector: the same components, drawn at the phone's width.
+//   readOnly (?watch=CODE): inert mirror, sends nothing.
+//   remote   (?remote=CODE): the mirror drives the projector. Finger-scroll on it sends a scroll
+//   fraction; a tap on a tile or group row opens it there; everything else on the mirror is inert.
+//   The buttons live in a footer: context strip + Board / Scores / Join QR / More dock.
+const DRIVE_MS = 900   // the phone keeps driving this long after the finger lifts
+const SEND_MS = 100    // at most ~10 scroll messages a second
+
+const remoteBtn = 'inline-flex items-center justify-center gap-1.5 min-h-[48px] px-2.5 whitespace-nowrap rounded-xl border text-sm font-black transition-colors active:scale-95 disabled:opacity-40 disabled:active:scale-100 focus-visible:outline focus-visible:outline-[3px] focus-visible:outline-yellow-300'
+const rTone = {
+  plain: 'bg-white/10 text-gray-100 border-white/15 hover:bg-white/20',
+  go: 'bg-emerald-500 text-black border-emerald-400 hover:bg-emerald-400',
+  primary: 'bg-purple-500 text-white border-purple-400 hover:bg-purple-400',
+  gold: 'bg-yellow-400/20 text-yellow-200 border-yellow-400/40 hover:bg-yellow-400/30',
+} as const
+
 function SampleController({ code, readOnly = false }: { code: string; readOnly?: boolean }) {
   const [sections, setSections] = useState<BingoSection[]>([])
   const [gridTasks, setGridTasks] = useState<BingoTask[]>([])
@@ -2927,16 +3326,12 @@ function SampleController({ code, readOnly = false }: { code: string; readOnly?:
   const live = lastSeen > 0 && now - lastSeen < HEARTBEAT_TIMEOUT_MS
 
   // Keep asking the projector to introduce itself whenever we are not hearing
-  // from it — on first open, and again after it drops. This used to give up
-  // after 15 tries, which meant a projector reloaded later in the session
-  // never got picked back up and the phone stayed dead until someone noticed.
+  // from it — on first open, and again after it drops.
   const liveRef = useRef(live)
   liveRef.current = live
   useEffect(() => {
     // Viewers stay silent: a read-only screen should not be able to drive the
-    // projector, and a roomful of phones polling is pointless chatter. They
-    // pick the state up from the projector's heartbeat instead - up to
-    // HEARTBEAT_MS late, which the "connecting" state below covers.
+    // projector, and a roomful of phones polling is pointless chatter.
     if (readOnly) return
     sendCommand({ action: 'requestState' })
     const iv = setInterval(() => {
@@ -2963,43 +3358,69 @@ function SampleController({ code, readOnly = false }: { code: string; readOnly?:
   const scanState = state?.scanState ?? {}
   const openTaskId = state?.openTaskId ?? null
   const openTaskObj = gridTasks.find(t => t.id === openTaskId) ?? null
-  const slots = buildSlots(gridTasks)
-  const completedCount = Object.values(scanState).filter(s => s === 'completed').length
   const view = state?.view ?? 'board'
   const detail = state?.detail ?? null
   const popup = state?.popup ?? null
   const popupQueued = state?.popupQueued ?? 0
   const inviteOpen = state?.inviteOpen ?? false
+  const joinQr: JoinQrMode = state?.joinQr ?? 'off'
   const quickWinRows = state?.quickWinRows ?? 0
   // Quick BINGO lights whole rows by SLOT, not by scanState (see handleQuickWin),
-  // and the snapshot carries only the row count - so rebuild the lit slots from
-  // it rather than widening the protocol. Without this the mirrored grid stays
-  // empty while the big screen fills up, which is the one move a presenter
-  // makes most.
+  // and the snapshot carries only the row count - so rebuild the lit slots from it.
   const quickSlots = new Set(QUICK_WIN_STEPS.slice(0, quickWinRows).flat())
   const watchSection = sections.find(x => x.id === selectedId) ?? null
 
-  // A viewer cannot tap the BINGO celebration away - the board is inert - so
-  // BoardScreen would sit behind it forever. Mirror the projector instead:
-  // once the big screen has cleared its celebration, clear ours. The heartbeat
-  // ticks state every few seconds, which also drains a queue of them.
   const watchBoardRef = useRef<BoardScreenHandle>(null)
   const watchDetailRef = useRef<SampleTaskDetailHandle>(null)
   const [watchStep, setWatchStep] = useState<DetailStep | null>(null)
   // Bumped to remount the detail. The handle can go forward but never back to
-  // the splash, so a viewer that ran ahead - a stale snapshot is enough - could
-  // never return. Remounting is the only way back, and it resets to the splash.
+  // the splash, so a mirror that ran ahead could never return without it.
   const [watchDetailNonce, setWatchDetailNonce] = useState(0)
   const watchScrollRef = useRef<HTMLDivElement>(null)
 
-  // Everything the presenter does that is not a board change: the message box,
-  // the invite QR, and how far the screen is scrolled. All three are already
-  // in the snapshot, and BoardScreen/SampleTaskDetail already expose handles
-  // for them - the viewer just has to apply them.
+  // ── Scroll: who is driving? ──
+  // While a finger is on the phone (and DRIVE_MS after), the phone sends its position and ignores the
+  // projector's echo; otherwise the phone follows the projector.
+  const driveUntil = useRef(0)
+  const [driving, setDriving] = useState(false)
+  const pendingFrac = useRef<number | null>(null)
+  const sendTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const lastSend = useRef(0)
+  const startDrive = () => {
+    if (readOnly) return
+    driveUntil.current = Date.now() + DRIVE_MS
+    setDriving(true)
+  }
   useEffect(() => {
-    if (!readOnly || !state) return
+    if (!driving) return
+    const iv = setInterval(() => { if (Date.now() >= driveUntil.current) setDriving(false) }, 150)
+    return () => clearInterval(iv)
+  }, [driving])
+  useEffect(() => () => { if (sendTimer.current) clearTimeout(sendTimer.current) }, [])
+  const flushScroll = () => {
+    sendTimer.current = null
+    if (pendingFrac.current === null) return
+    lastSend.current = Date.now()
+    sendCommand({ action: 'scrollTo', frac: pendingFrac.current })
+    pendingFrac.current = null
+  }
+  // Called by the page scroller and by the open tile's own scroller.
+  const mirrorScrolled = (frac: number) => {
+    if (readOnly || Date.now() >= driveUntil.current) return   // an echo, not the finger
+    driveUntil.current = Date.now() + DRIVE_MS
+    pendingFrac.current = frac
+    const wait = SEND_MS - (Date.now() - lastSend.current)
+    if (wait <= 0) flushScroll()
+    else if (!sendTimer.current) sendTimer.current = setTimeout(flushScroll, wait)
+  }
+
+  // Everything the presenter does that is not a board change: the message box, the invite QR, and
+  // how far the screen is scrolled. All are in the snapshot; BoardScreen/SampleTaskDetail expose handles.
+  useEffect(() => {
+    if (!state) return
     watchBoardRef.current?.setChat(state.chatOpen)
     watchBoardRef.current?.setInvite(state.inviteOpen)
+    if (Date.now() < driveUntil.current) return                   // the finger is in charge
     // The open tile scrolls inside its own overlay; otherwise it is the page.
     if (state.openTaskId) watchDetailRef.current?.scrollTo(state.scroll ?? 0)
     else {
@@ -3012,16 +3433,11 @@ function SampleController({ code, readOnly = false }: { code: string; readOnly?:
         }
       }
     }
-  }, [readOnly, state])
+  }, [state])
 
-  // Walk the viewer's copy of the tile detail onto the projector's step. The
-  // snapshot carries where the big screen is (splash/page/marshal) but not how
-  // it got there, so converge one move per render using the same imperative
-  // handle the phone remote drives: each call re-reports via onStep, which
-  // re-runs this until the two agree. Moves that have no handle (going back to
-  // the splash) are simply not made, so it settles instead of looping.
+  // Walk the mirror's copy of the tile detail onto the projector's step, one move per render, using the
+  // same imperative handle the projector exposes. Moves that have no handle (back to the splash) are not made.
   useEffect(() => {
-    if (!readOnly) return
     const target = state?.detail
     const h = watchDetailRef.current
     if (!target || !watchStep || !h) return
@@ -3030,28 +3446,281 @@ function SampleController({ code, readOnly = false }: { code: string; readOnly?:
     if (target.pageIndex > watchStep.pageIndex) { h.nextPage(); return }
     if (target.pageIndex < watchStep.pageIndex) { h.prevPage(); return }
     if (target.marshalFilled && !watchStep.marshalFilled) h.fillMarshal()
-  }, [readOnly, state, watchStep])
+  }, [state, watchStep])
+  // A mirror cannot tap the BINGO celebration away, so clear ours when the big screen clears its own.
   useEffect(() => {
-    if (readOnly && !state?.popup) watchBoardRef.current?.dismissPopup()
-  }, [readOnly, state])
+    if (!state?.popup) watchBoardRef.current?.dismissPopup()
+  }, [state])
   const chatOpen = state?.chatOpen ?? false
 
+  // ── Remote-only UI state ──
+  const [sheet, setSheet] = useState<'none' | 'qr' | 'more'>('none')
+  const [toast, setToast] = useState<string | null>(null)
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const showToast = (msg: string) => {
+    setToast(msg)
+    if (toastTimer.current) clearTimeout(toastTimer.current)
+    toastTimer.current = setTimeout(() => setToast(null), 1200)
+  }
+  useEffect(() => () => { if (toastTimer.current) clearTimeout(toastTimer.current) }, [])
+  const [hint, setHint] = useState(() => {
+    try { return !readOnly && !localStorage.getItem('sample-remote-hint') } catch { return false }
+  })
+  const dismissHint = () => { setHint(false); try { localStorage.setItem('sample-remote-hint', '1') } catch { /* private mode: hint shows again */ } }
+  const send = (c: RemoteCommand) => { if (connected) sendCommand(c) }
+
+  // Taps on the mirror: only tiles and group rows (data-tap) go through; everything else is inert, so a stray
+  // touch can never press Start or Complete. A scroll never produces a click, so it cannot open a tile.
+  const guardClick = (e: React.SyntheticEvent) => {
+    if (readOnly) return
+    if (!(e.target as HTMLElement).closest('[data-tap]')) { e.preventDefault(); e.stopPropagation() }
+  }
+  // Typing fields in the mirror are read-only copies: no keyboard pops up when the presenter scrolls past one.
+  const mirrorRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (readOnly) return
+    mirrorRef.current?.querySelectorAll('input,textarea').forEach(el => { el.setAttribute('readonly', ''); el.setAttribute('tabindex', '-1') })
+    mirrorRef.current?.querySelectorAll('select').forEach(el => el.setAttribute('disabled', ''))
+  })
+
+  const mirror = (
+    <div
+      ref={mirrorRef}
+      className={`relative flex-1 min-h-0 overflow-hidden [transform:translateZ(0)] ${!readOnly && !connected ? 'opacity-55 grayscale' : ''}`}
+      onClickCapture={guardClick}
+      onPointerDownCapture={startDrive}
+      onTouchStartCapture={startDrive}
+      onWheelCapture={startDrive}
+    >
+      <div
+        ref={watchScrollRef}
+        className="h-full overflow-y-auto overscroll-contain select-none relative"
+        {...(readOnly ? { inert: true } : {})}
+        onScroll={e => {
+          const el = e.currentTarget
+          const range = el.scrollHeight - el.clientHeight
+          mirrorScrolled(range > 0 ? el.scrollTop / range : 0)
+        }}
+      >
+        {readOnly && !connected && (
+          <div className="sticky top-0 z-50 bg-red-500/90 text-white text-center text-xs font-black py-1.5">
+            Reconnecting to the screen…
+          </div>
+        )}
+        {view === 'scoreboard' ? (
+          <SampleScoreboard
+            gridTasks={gridTasks}
+            section={watchSection}
+            playedTeamName={teamName}
+            scanState={scanState}
+            quickWinSlots={quickSlots}
+          />
+        ) : !teamName ? (
+          /* Mirrors the group list and, once a group is picked, the "Enter Password" step. */
+          <JoinScreen
+            theme={normalizePlayerTheme(watchSection?.player_theme)}
+            selected={pendingGroup}
+            onSelect={g => { if (!readOnly && g) { showToast('Opening on screen…'); send({ action: 'join', teamName: g }) } }}
+            onJoin={() => {}}
+          />
+        ) : gridTasks.length > 0 ? (
+          /* Wait for the tasks before mounting the board: BoardScreen seeds its "already celebrated"
+             baseline on its first run, so an empty grid would make old lines look brand new. */
+          <BoardScreen
+            ref={watchBoardRef}
+            key={selectedId ?? 'none'}
+            teamName={teamName}
+            gridTasks={gridTasks}
+            scanState={scanState}
+            quickWinSlots={quickSlots}
+            section={watchSection}
+            glowSlots={new Set(watchSection?.glow_slots ?? [])}
+            glowMode={false}
+            onToggleGlow={() => {}}
+            onClearGlow={() => {}}
+            onToggleGlowMode={() => {}}
+            onOpenTask={t => { if (!readOnly) { showToast('Opening on screen…'); send({ action: 'openTask', taskId: t.id }) } }}
+            onSwitchTeam={() => {}}
+            onShowScoreboard={() => {}}
+            inviteUrl={`${window.location.origin}/bingo-dash/sample`}
+          />
+        ) : (
+          <div className="min-h-[70vh] flex items-center justify-center">
+            <div className="text-gray-400 text-xl font-bold animate-pulse">Loading board…</div>
+          </div>
+        )}
+      </div>
+      {openTaskObj && view === 'board' && (
+        <div className="[&>div]:!overflow-x-hidden" {...(readOnly ? { inert: true } : {})}>
+          <SampleTaskDetail
+            key={`${openTaskObj.id}:${watchDetailNonce}`}
+            ref={watchDetailRef}
+            task={openTaskObj}
+            teamName={teamName ?? 'Sample Team'}
+            marshalPassword={DEMO_MARSHAL_PASSWORD}
+            completed={scanState[openTaskObj.id] === 'completed'}
+            bonusDefaults={watchSection ?? undefined}
+            chain={{
+              prev: gridTasks.find(t => t.id === prereqResolver(gridTasks)(openTaskObj)) ?? null,
+              locked: (() => { const p = prereqResolver(gridTasks)(openTaskObj); return !!p && scanState[p] !== 'completed' })(),
+              next: gridTasks.find(t => prereqResolver(gridTasks)(t) === openTaskObj.id) ?? null,
+              trail: chainTrailOf(gridTasks, openTaskObj, scanState),
+            }}
+            onJump={() => {}}
+            onComplete={() => {}}
+            onUncomplete={() => {}}
+            onClose={() => {}}
+            onStep={setWatchStep}
+            onScrollFrac={mirrorScrolled}
+          />
+        </div>
+      )}
+      {!readOnly && toast && (
+        <div className="absolute left-1/2 -translate-x-1/2 bottom-3 z-[60] px-3 py-1.5 rounded-full bg-emerald-500 text-black text-xs font-black shadow-lg pointer-events-none">
+          {toast}
+        </div>
+      )}
+      {!readOnly && hint && connected && (
+        <button type="button" onClick={dismissHint}
+          className="absolute left-3 right-3 bottom-3 z-[60] min-h-[44px] rounded-xl bg-gray-900/95 border border-white/20 text-white text-xs font-bold px-3 py-2 text-left">
+          Scroll to move the room screen. Tap a tile to open it there. <span className="text-emerald-300 font-black">Got it</span>
+        </button>
+      )}
+    </div>
+  )
+
+  // ── Footer: context strip + dock ──
+  const off = !connected
+  const strip = (() => {
+    if (popup) return (
+      <div className="flex flex-col gap-1.5">
+        <p className="text-xs font-black text-purple-200 text-center">
+          🎉 On screen: <span className="text-white tracking-widest">{popup}!</span>{popupQueued > 0 && <span className="text-purple-300/80"> · {popupQueued} more to come</span>}
+        </p>
+        <button disabled={off} onClick={() => send({ action: 'dismissPopup' })} className={`${remoteBtn} ${rTone.primary} min-h-[56px] w-full text-base`}>▶ Tap to continue</button>
+      </div>
+    )
+    if (off) return <p className="text-xs text-gray-400 font-bold text-center py-2">Taps will not land until the screen is back.</p>
+    if (!teamName && pendingGroup) return (
+      <div className="flex gap-2">
+        <button onClick={() => send({ action: 'cancelJoin' })} className={`${remoteBtn} ${rTone.plain} flex-1`}>← Groups</button>
+        <button onClick={() => send({ action: 'confirmJoin' })} className={`${remoteBtn} ${rTone.primary} flex-[2]`}>Join group · password {SAMPLE_TEAM_PASSWORD}</button>
+      </div>
+    )
+    if (!teamName) return <p className="text-xs text-gray-400 font-bold text-center py-2">Tap a group in the screen above to pick it.</p>
+    if (view === 'scoreboard') return <p className="text-xs text-gray-400 font-bold text-center py-2">Scoreboard is on screen. Scroll it with your finger.</p>
+    if (openTaskObj) {
+      const done = scanState[openTaskObj.id] === 'completed'
+      const back = <button onClick={() => send({ action: 'closeTask' })} className={`${remoteBtn} ${rTone.plain} flex-1`}>← Back</button>
+      if (done) return <div className="flex gap-2">{back}<button onClick={() => send({ action: 'uncomplete', taskId: openTaskObj.id })} className={`${remoteBtn} ${rTone.plain} flex-[2]`}>↺ Undo complete</button></div>
+      if (detail?.phase === 'splash') return <div className="flex gap-2">{back}<button onClick={() => send({ action: 'startChallenge' })} className={`${remoteBtn} ${rTone.go} flex-[2]`}>▶ Start challenge</button></div>
+      const needMarshal = !!detail?.isMarshalTask && !detail.marshalFilled
+      return (
+        <div className="flex flex-col gap-2">
+          {detail?.isMarshalTask && !detail.marshalFilled && (
+            <button onClick={() => send({ action: 'fillMarshal' })} className={`${remoteBtn} ${rTone.gold} w-full`}>👮 Fill marshal {DEMO_MARSHAL_PASSWORD}</button>
+          )}
+          <div className="flex gap-2">
+            {back}
+            {detail && detail.pageCount > 1 && <>
+              <button disabled={detail.pageIndex <= 0} onClick={() => send({ action: 'prevPage' })} className={`${remoteBtn} ${rTone.plain} flex-1`}>‹ Prev</button>
+              <button disabled={detail.pageIndex >= detail.pageCount - 1} onClick={() => send({ action: 'nextPage' })} className={`${remoteBtn} ${rTone.plain} flex-1`}>Next ›</button>
+            </>}
+            <button disabled={needMarshal} onClick={() => send({ action: 'submitComplete' })} className={`${remoteBtn} ${rTone.go} flex-[1.4]`}>✓ Complete</button>
+          </div>
+        </div>
+      )
+    }
+    return (
+      <button disabled={quickWinRows >= 5} onClick={() => send({ action: 'quickWin' })} className={`${remoteBtn} ${rTone.gold} w-full`}>
+        ⚡ Quick BINGO <span className="tabular-nums">{quickWinRows}/5</span>
+      </button>
+    )
+  })()
+
+  const tab = (label: string, icon: string, on: boolean, onClick: () => void, extra = '') => (
+    <button key={label} type="button" disabled={off} onClick={onClick} aria-pressed={on}
+      className={`flex flex-col items-center justify-center gap-0.5 min-h-[56px] rounded-2xl text-[11px] font-black transition-colors active:scale-95 disabled:opacity-40 focus-visible:outline focus-visible:outline-[3px] focus-visible:outline-yellow-300 ${extra} ${on ? 'text-purple-200 bg-purple-500/20' : 'text-gray-300'}`}>
+      <span className="text-lg leading-none" aria-hidden="true">{icon}</span>{label}
+    </button>
+  )
+  const dock = (
+    <div className="grid grid-cols-4 gap-1 rounded-[20px] border border-white/10 backdrop-blur-xl p-1" style={{ background: 'rgba(17,20,30,.86)' }}>
+      {tab('Board', '🎯', view === 'board', () => send({ action: 'setView', view: 'board' }))}
+      {tab('Scores', '📊', view === 'scoreboard', () => send({ action: 'setView', view: 'scoreboard' }))}
+      {tab(joinQr !== 'off' ? 'Close QR' : 'Join QR', '▦', joinQr !== 'off', () => (joinQr !== 'off' ? send({ action: 'setJoinQr', mode: 'off' }) : setSheet('qr')), joinQr !== 'off' ? '!text-emerald-200 !bg-emerald-500/20' : '')}
+      {tab('More', '⋯', sheet === 'more', () => setSheet('more'))}
+    </div>
+  )
+
+  const sheetBody = sheet === 'none' ? null : (
+    <div role="dialog" aria-modal="true" aria-label={sheet === 'qr' ? 'Join QR' : 'More controls'} onClick={() => setSheet('none')}
+      className="fixed inset-0 z-50 bg-black/60 flex items-end justify-center">
+      <div onClick={e => e.stopPropagation()} className="w-full max-w-md max-h-[85dvh] overflow-y-auto rounded-t-3xl bg-gray-900 border-t border-purple-500/40 px-4 pt-4 flex flex-col gap-3"
+        style={{ paddingBottom: 'calc(16px + env(safe-area-inset-bottom))' }}>
+        <p className="text-white font-black text-base">{sheet === 'qr' ? 'Show a join QR on the screen' : 'More'}</p>
+        {sheet === 'qr' ? (
+          <div className="grid grid-cols-2 gap-2">
+            {(['player', 'observer'] as const).map(r => (
+              <button key={r} disabled={!watchSection?.slug} onClick={() => { send({ action: 'setJoinQr', mode: r }); setSheet('none') }}
+                className={`${remoteBtn} ${rTone.plain}`}>▦ {r === 'player' ? 'Player QR' : 'Observer QR'}</button>
+            ))}
+          </div>
+        ) : (
+          <>
+            <div>
+              <label className="text-[11px] text-gray-400 font-black uppercase tracking-wide">Board</label>
+              {state?.locked ? (
+                <p className="mt-1 text-white text-sm font-bold px-1 py-2">{sections.find(s => s.id === selectedId)?.name ?? 'This board'}</p>
+              ) : (
+                <select value={selectedId ?? ''} onChange={e => send({ action: 'selectBoard', id: e.target.value })}
+                  className="w-full mt-1 min-h-[48px] bg-white/10 text-white text-sm font-bold rounded-xl px-3 border border-white/15 focus:outline-none focus:border-emerald-400">
+                  {sections.length === 0 && <option value="">No boards</option>}
+                  {sections.map(s => <option key={s.id} value={s.id} className="bg-gray-900">{s.name} — {ownerLabel(s)}</option>)}
+                </select>
+              )}
+            </div>
+            {teamName && (
+              <div className="grid grid-cols-2 gap-2">
+                <button onClick={() => send({ action: 'setChat', open: !chatOpen })} className={`${remoteBtn} ${chatOpen ? rTone.go : rTone.plain}`}>{chatOpen ? '✕ Close message' : '💬 Message'}</button>
+                <button onClick={() => send({ action: 'setInvite', open: !inviteOpen })} className={`${remoteBtn} ${inviteOpen ? rTone.go : rTone.plain}`}>{inviteOpen ? '✕ Close QR' : '▦ Invite QR'}</button>
+              </div>
+            )}
+            {teamName && (
+              <button onClick={() => { send({ action: 'leave' }); setSheet('none') }} className={`${remoteBtn} ${rTone.plain} w-full`}>👥 Leave team ({teamName})</button>
+            )}
+            <button onClick={() => { send({ action: 'reset' }); setSheet('none') }} className={`${remoteBtn} ${rTone.plain} w-full mt-2`}>↺ Reset demo</button>
+          </>
+        )}
+        <button type="button" onClick={() => setSheet('none')} className={`${remoteBtn} ${rTone.plain} w-full`}>Close</button>
+      </div>
+    </div>
+  )
+
   return (
-    <div className="min-h-screen bg-gray-950 text-white flex flex-col">
-      {/* Header */}
-      {/* The viewer is meant to look like the big screen, so it carries no
-          chrome of its own - the only exception is the reconnect notice below,
-          which has to be visible or a frozen screen looks like a live one. */}
-      <div className={`sticky top-0 z-40 bg-gray-950/95 backdrop-blur border-b border-emerald-500/30 px-3 py-2.5 items-center gap-2 ${readOnly ? 'hidden' : 'flex'}`}>
+    <div className={`bg-gray-950 text-white flex flex-col ${readOnly ? 'min-h-screen' : 'h-[100dvh] overflow-hidden'}`}>
+      {readOnly && joinQr !== 'off' && watchSection?.slug && (
+        <JoinQrOverlay slug={watchSection.slug} boardName={watchSection.name} role={joinQr} />
+      )}
+      {/* The viewer is meant to look like the big screen, so it carries no chrome of its own. */}
+      <div className={`border-b border-emerald-500/30 px-3 items-center gap-2 h-[52px] flex-shrink-0 ${readOnly ? 'hidden' : 'flex'}`}>
         <span className="px-2 py-1 rounded-lg bg-emerald-500 text-black text-[11px] font-black tracking-wider">📡 REMOTE</span>
         <span className="text-[11px] text-gray-400 font-bold tracking-[0.2em]">{code}</span>
         <span className="ml-auto flex items-center gap-1.5 text-[11px] font-bold">
-          <span className={`w-2 h-2 rounded-full ${
-            connected ? 'bg-emerald-400' : state ? 'bg-red-400 animate-pulse' : 'bg-amber-400 animate-pulse'
-          }`} />
+          <span className={`w-2 h-2 rounded-full ${connected ? 'bg-emerald-400' : state ? 'bg-red-400 animate-pulse' : 'bg-amber-400 animate-pulse'}`} />
           {connected ? 'Connected' : state ? 'Reconnecting' : 'Connecting…'}
         </span>
       </div>
+      {!readOnly && state && (
+        <div className={`h-7 flex-shrink-0 flex items-center justify-center gap-1.5 text-[11px] font-black transition-colors motion-reduce:transition-none ${
+          !connected ? 'bg-amber-500/15 text-amber-200' : driving ? 'bg-purple-500/20 text-purple-200' : 'bg-emerald-500/10 text-emerald-200'}`}>
+          <span className={`w-1.5 h-1.5 rounded-full ${!connected ? 'bg-amber-400' : driving ? 'bg-purple-400' : 'bg-emerald-400'}`} />
+          {!connected ? 'Paused' : driving ? 'Driving the screen' : 'Following the screen'}
+        </div>
+      )}
+      {!readOnly && state && !connected && (
+        <div className="flex-shrink-0 bg-red-500/15 text-red-200 text-[11px] font-black text-center py-1">⚠ Lost the projector, reconnecting…</div>
+      )}
 
       {!state ? (
         <div className="flex-1 flex flex-col items-center justify-center text-center px-6 gap-2">
@@ -3064,323 +3733,18 @@ function SampleController({ code, readOnly = false }: { code: string; readOnly?:
           </p>
         </div>
       ) : readOnly ? (
-        /* A viewer sees exactly what the room sees, in the projector's own
-           render order - the join screen, then the board - rather than only
-           the board once a team is picked. Everything here is the component
-           the projector itself renders.
-
-           `inert` makes the whole subtree non-interactive in one word; unlike
-           pointer-events-none it also drops it out of the tab order, so there
-           is no keyboard route in either, and no disabled flag to thread
-           through every control and miss one. */
-        <div ref={watchScrollRef} className="flex-1 min-h-0 overflow-y-auto select-none relative" inert>
-          {!connected && (
-            <div className="sticky top-0 z-50 bg-red-500/90 text-white text-center text-xs font-black py-1.5">
-              Reconnecting to the screen…
-            </div>
-          )}
-          {view === 'scoreboard' ? (
-            <SampleScoreboard
-              gridTasks={gridTasks}
-              section={watchSection}
-              playedTeamName={teamName}
-              scanState={scanState}
-              quickWinSlots={quickSlots}
-            />
-          ) : !teamName ? (
-            /* Mirrors the group list and, once the presenter picks one, the
-               "Enter Password" step - JoinScreen derives that from `selected`
-               and pre-fills the demo password exactly as on the big screen. */
-            <JoinScreen theme={normalizePlayerTheme(watchSection?.player_theme)} selected={pendingGroup} onSelect={() => {}} onJoin={() => {}} />
-          ) : gridTasks.length > 0 ? (
-            /* Wait for the tasks before mounting the board. BoardScreen seeds
-               its "already celebrated" baseline on its first run, so mounting
-               with an empty grid seeds it as NO lines - and the moment the
-               tasks land, lines completed long ago look brand new and the
-               viewer is ambushed by a celebration it cannot tap away. */
-            <BoardScreen
-              ref={watchBoardRef}
-              key={selectedId ?? 'none'}
-              teamName={teamName}
-              gridTasks={gridTasks}
-              scanState={scanState}
-              quickWinSlots={quickSlots}
-              section={watchSection}
-              /* Glow comes from the board row loaded at mount. ponytail: a
-                 viewer will not see glow toggled mid-show; subscribe to
-                 bingo_sections like the projector does if that matters. */
-              glowSlots={new Set(watchSection?.glow_slots ?? [])}
-              glowMode={false}
-              onToggleGlow={() => {}}
-              onClearGlow={() => {}}
-              onToggleGlowMode={() => {}}
-              onOpenTask={() => {}}
-              onSwitchTeam={() => {}}
-              onShowScoreboard={() => {}}
-              inviteUrl={`${window.location.origin}/bingo-dash/sample`}
-            />
-          ) : (
-            <div className="min-h-[70vh] flex items-center justify-center">
-              <div className="text-gray-400 text-xl font-bold animate-pulse">Loading board…</div>
-            </div>
-          )}
-          {openTaskObj && view === 'board' && (
-            <SampleTaskDetail
-              key={`${openTaskObj.id}:${watchDetailNonce}`}
-              ref={watchDetailRef}
-              task={openTaskObj}
-              teamName={teamName ?? 'Sample Team'}
-              marshalPassword={DEMO_MARSHAL_PASSWORD}
-              completed={scanState[openTaskObj.id] === 'completed'}
-              bonusDefaults={watchSection ?? undefined}
-              /* Same chain the projector builds - it comes from gridTasks and
-                 scanState, both of which a viewer already has. */
-              chain={{
-                prev: gridTasks.find(t => t.id === prereqResolver(gridTasks)(openTaskObj)) ?? null,
-                locked: (() => { const p = prereqResolver(gridTasks)(openTaskObj); return !!p && scanState[p] !== 'completed' })(),
-                next: gridTasks.find(t => prereqResolver(gridTasks)(t) === openTaskObj.id) ?? null,
-              }}
-              onJump={() => {}}
-              onComplete={() => {}}
-              onUncomplete={() => {}}
-              onClose={() => {}}
-              onStep={setWatchStep}
-            />
-          )}
-        </div>
+        <div className="flex-1 min-h-0 flex flex-col">{mirror}</div>
       ) : (
-        <div className="flex-1 p-3 flex flex-col gap-3 max-w-md w-full mx-auto">
-          {!connected && (
-            <div className="rounded-xl bg-red-500/15 border border-red-400/40 px-3 py-2.5">
-              <p className="text-xs font-black text-red-200">⚠ Lost the projector</p>
-              <p className="text-[11px] text-red-200/70 font-bold mt-0.5">
-                Taps won't land until it's back. The controls below show its last known state.
-              </p>
-            </div>
-          )}
-          {/* The celebration is full-screen and opaque, so while it is up the
-              phone says so and offers the same "Tap to continue" the screen
-              shows — otherwise the only way past it is walking over to the
-              laptop, and taps here land on a board nobody can see. */}
-          {popup && (
-            <div className="rounded-xl bg-purple-500/20 border border-purple-400/50 p-3 flex flex-col gap-2 animate-bounce-in">
-              <p className="text-xs font-black text-purple-200">
-                🎉 On screen: <span className="text-white tracking-widest">{popup}!</span>
-                {popupQueued > 0 && (
-                  <span className="text-purple-300/80 font-bold"> · {popupQueued} more to come</span>
-                )}
-              </p>
-              <button onClick={() => sendCommand({ action: 'dismissPopup' })}
-                className="w-full py-3.5 rounded-lg bg-purple-500 text-white text-base font-black hover:bg-purple-400 active:scale-95 transition-all">
-                ▶ Tap to continue
-              </button>
-            </div>
-          )}
-
-          {/* Board / Scoreboard view toggle */}
-          <div className="grid grid-cols-2 gap-1 p-1 rounded-xl bg-white/5 border border-white/10">
-            <button
-              onClick={() => sendCommand({ action: 'setView', view: 'board' })}
-              className={`py-2 rounded-lg text-sm font-black transition-colors ${view === 'board' ? 'bg-purple-500 text-white' : 'text-gray-400 hover:text-white'}`}>
-              🎯 Board
-            </button>
-            <button
-              onClick={() => sendCommand({ action: 'setView', view: 'scoreboard' })}
-              className={`py-2 rounded-lg text-sm font-black transition-colors ${view === 'scoreboard' ? 'bg-purple-500 text-white' : 'text-gray-400 hover:text-white'}`}>
-              📊 Scoreboard
-            </button>
-          </div>
-
-          {/* Scroll the projector's screen up/down */}
-          <div className="grid grid-cols-2 gap-2">
-            <button onClick={() => sendCommand({ action: 'scroll', direction: 'up' })}
-              className="py-2.5 rounded-lg bg-white/10 text-gray-200 border border-white/15 text-sm font-black hover:bg-white/20 active:scale-95 transition-all">
-              ↑ Scroll up
-            </button>
-            <button onClick={() => sendCommand({ action: 'scroll', direction: 'down' })}
-              className="py-2.5 rounded-lg bg-white/10 text-gray-200 border border-white/15 text-sm font-black hover:bg-white/20 active:scale-95 transition-all">
-              ↓ Scroll down
-            </button>
-          </div>
-
-          {/* Board picker */}
-          <div>
-            <label className="text-[11px] text-gray-500 font-bold uppercase tracking-wide">Board</label>
-            {state?.locked ? (
-              <p className="mt-1 text-white text-sm font-bold px-3 py-2.5">
-                {sections.find(s => s.id === selectedId)?.name ?? 'This board'}
-              </p>
-            ) : (
-              <select
-                value={selectedId ?? ''}
-                onChange={e => sendCommand({ action: 'selectBoard', id: e.target.value })}
-                className="w-full mt-1 bg-white/10 text-white text-sm font-bold rounded-lg px-3 py-2.5 border border-white/15 focus:outline-none focus:border-emerald-400"
-              >
-                {sections.length === 0 && <option value="">No boards</option>}
-                {sections.map(s => <option key={s.id} value={s.id} className="bg-gray-900">{s.name} — {ownerLabel(s)}</option>)}
-              </select>
-            )}
-          </div>
-
-          {/* Join / team */}
-          {!teamName && pendingGroup ? (
-            <div className="rounded-xl bg-purple-500/10 border border-purple-400/40 p-3 flex flex-col gap-2">
-              <p className="text-xs text-purple-200 font-bold">
-                🔑 On screen: Enter Password for <span className="text-white">{pendingGroup}</span>
-              </p>
-              <button onClick={() => sendCommand({ action: 'confirmJoin' })}
-                className="w-full py-3 rounded-lg bg-purple-500 text-white text-sm font-black hover:bg-purple-400 active:scale-95 transition-all">
-                Join Group → <span className="text-purple-200 font-bold">(password {SAMPLE_TEAM_PASSWORD})</span>
-              </button>
-              <button onClick={() => sendCommand({ action: 'cancelJoin' })}
-                className="w-full py-2 rounded-lg bg-white/5 text-gray-300 border border-white/10 text-xs font-bold hover:bg-white/10 transition-colors">
-                ← Back to groups
-              </button>
-            </div>
-          ) : !teamName ? (
-            <div>
-              <label className="text-[11px] text-gray-500 font-bold uppercase tracking-wide">Join as</label>
-              <div className="grid grid-cols-2 gap-2 mt-1">
-                {DEMO_GROUPS.map(g => (
-                  <button key={g}
-                    onClick={() => sendCommand({ action: 'join', teamName: g })}
-                    className="px-2 py-2.5 rounded-lg bg-purple-500/20 text-purple-100 border border-purple-400/40 text-xs font-bold hover:bg-purple-500/30 transition-colors">
-                    {g.replace('Sample Team ', '')}
-                  </button>
-                ))}
-              </div>
-            </div>
-          ) : (
-            <div className="flex items-center gap-2 bg-white/5 border border-white/10 rounded-lg px-3 py-2">
-              <span className="text-sm font-bold text-white">👥 {teamName}</span>
-              <span className="text-[11px] text-gray-500">{completedCount} done</span>
-              <button onClick={() => sendCommand({ action: 'leave' })}
-                className="ml-auto text-[11px] font-bold text-gray-300 border border-white/15 rounded-lg px-2.5 py-1 hover:bg-white/10 transition-colors">
-                Leave
-              </button>
-            </div>
-          )}
-
-          {/* Tile grid — tap to open on the projector */}
-          {teamName && (
-            <div>
-              <label className="text-[11px] text-gray-500 font-bold uppercase tracking-wide">Tap a tile to show it on screen</label>
-              <div className="grid grid-cols-5 gap-1.5 mt-1">
-                {slots.map((task, i) => {
-                  if (!task) return <div key={i} className="rounded-lg aspect-square bg-white/5 border border-white/10" />
-                  const st = quickSlots.has(i) ? 'completed' : scanState[task.id]
-                  const isOpen = task.id === openTaskId
-                  return (
-                    <button key={i}
-                      onClick={() => sendCommand({ action: 'openTask', taskId: task.id })}
-                      title={task.title}
-                      className={`relative rounded-lg aspect-square flex items-center justify-center text-[9px] font-black leading-none p-0.5 text-center transition-all active:scale-95 ${isOpen ? 'ring-2 ring-emerald-400' : ''}`}
-                      style={{ backgroundColor: task.hex_code, opacity: st ? 1 : 0.8 }}>
-                      {st === 'completed' && (
-                        <span className="absolute inset-0 flex items-center justify-center bg-black/30 rounded-lg text-white text-sm">✓</span>
-                      )}
-                      {st === 'scanned' && <span className="absolute top-0.5 right-0.5 w-1.5 h-1.5 rounded-full border border-white/80" />}
-                    </button>
-                  )
-                })}
-              </div>
-            </div>
-          )}
-
-          {/* Open-task controls — walk the tile's flow on the big screen */}
-          {openTaskObj && (
-            <div className="bg-emerald-500/10 border border-emerald-400/30 rounded-xl p-3 flex flex-col gap-2">
-              <p className="text-xs text-emerald-200 font-bold">On screen now: <span className="text-white">{openTaskObj.title}</span></p>
-
-              {scanState[openTaskObj.id] === 'completed' ? (
-                <button onClick={() => sendCommand({ action: 'uncomplete', taskId: openTaskObj.id })}
-                  className="w-full py-2.5 rounded-lg bg-white/10 text-gray-200 border border-white/15 text-sm font-bold hover:bg-white/20 transition-colors">
-                  ↺ Undo complete
-                </button>
-              ) : detail?.phase === 'splash' ? (
-                <button onClick={() => sendCommand({ action: 'startChallenge' })}
-                  className="w-full py-3 rounded-lg bg-emerald-500 text-black text-sm font-black hover:bg-emerald-400 transition-colors">
-                  ▶ Start Challenge
-                </button>
-              ) : (
-                <>
-                  {detail && detail.pageCount > 1 && (
-                    <div className="flex items-center gap-2">
-                      <button onClick={() => sendCommand({ action: 'prevPage' })}
-                        disabled={detail.pageIndex <= 0}
-                        className="flex-1 py-2 rounded-lg bg-white/10 text-gray-200 border border-white/15 text-sm font-bold hover:bg-white/20 disabled:opacity-30 transition-colors">
-                        ‹ Prev
-                      </button>
-                      <span className="text-[11px] text-gray-400 font-bold tabular-nums">{detail.pageIndex + 1}/{detail.pageCount}</span>
-                      <button onClick={() => sendCommand({ action: 'nextPage' })}
-                        disabled={detail.pageIndex >= detail.pageCount - 1}
-                        className="flex-1 py-2 rounded-lg bg-white/10 text-gray-200 border border-white/15 text-sm font-bold hover:bg-white/20 disabled:opacity-30 transition-colors">
-                        Next ›
-                      </button>
-                    </div>
-                  )}
-                  {detail?.isMarshalTask && !detail.marshalFilled && (
-                    <button onClick={() => sendCommand({ action: 'fillMarshal' })}
-                      className="w-full py-2.5 rounded-lg bg-yellow-400/20 text-yellow-200 border border-yellow-400/40 text-sm font-black hover:bg-yellow-400/30 transition-colors">
-                      👮 Fill marshal password (4321)
-                    </button>
-                  )}
-                  <button
-                    onClick={() => sendCommand({ action: 'submitComplete' })}
-                    disabled={!!detail?.isMarshalTask && !detail.marshalFilled}
-                    className="w-full py-2.5 rounded-lg bg-emerald-500 text-black text-sm font-black hover:bg-emerald-400 disabled:opacity-40 transition-colors">
-                    ✓ Complete Challenge
-                  </button>
-                </>
-              )}
-
-              <button onClick={() => sendCommand({ action: 'closeTask' })}
-                className="w-full py-2 rounded-lg bg-white/5 text-gray-300 border border-white/10 text-xs font-bold hover:bg-white/10 transition-colors">
-                ← Back to board
-              </button>
-            </div>
-          )}
-
-          {/* Put something on the big screen on demand. Both are toggles so
-              the presenter can take them away without touching the laptop. */}
-          {teamName && (
-            <div className="grid grid-cols-2 gap-2">
-              <button
-                onClick={() => sendCommand({ action: 'setChat', open: !chatOpen })}
-                className={`py-2.5 rounded-lg border text-sm font-black active:scale-95 transition-all ${
-                  chatOpen
-                    ? 'bg-teal-500 text-black border-teal-400'
-                    : 'bg-teal-500/20 text-teal-100 border-teal-400/40 hover:bg-teal-500/30'
-                }`}>
-                {chatOpen ? '✕ Close message' : '💬 Message'}
-              </button>
-              <button
-                onClick={() => sendCommand({ action: 'setInvite', open: !inviteOpen })}
-                className={`py-2.5 rounded-lg border text-sm font-black active:scale-95 transition-all ${
-                  inviteOpen
-                    ? 'bg-emerald-500 text-black border-emerald-400'
-                    : 'bg-white/10 text-gray-200 border-white/15 hover:bg-white/20'
-                }`}>
-                {inviteOpen ? '✕ Close QR' : '▦ Invite QR'}
-              </button>
-            </div>
-          )}
-
-          {/* Bottom actions */}
-          <div className="mt-auto grid grid-cols-2 gap-2 pt-2">
-            <button onClick={() => sendCommand({ action: 'quickWin' })}
-              disabled={!teamName || quickWinRows >= 5}
-              title={quickWinRows >= 5 ? 'Board is full — reset the demo to run it again' : 'Complete the next row'}
-              className="py-3 rounded-lg bg-yellow-400/20 text-yellow-200 border border-yellow-400/40 text-sm font-black hover:bg-yellow-400/30 disabled:opacity-40 transition-colors">
-              ⚡ Quick BINGO <span className="tabular-nums font-black">{quickWinRows}/5</span>
-            </button>
-            <button onClick={() => sendCommand({ action: 'reset' })}
-              className="py-3 rounded-lg bg-white/10 text-gray-200 border border-white/15 text-sm font-bold hover:bg-white/20 transition-colors">
-              ↺ Reset demo
-            </button>
+        <div className="flex-1 min-h-0 flex flex-col md:flex-row">
+          <div className="flex-1 min-h-0 flex flex-col md:flex-none md:w-[420px] md:border-r md:border-white/10">{mirror}</div>
+          <div className="flex-shrink-0 md:flex-1 md:overflow-y-auto flex flex-col gap-2 px-3 pt-2 border-t border-white/10 md:border-t-0 md:p-4 md:max-w-sm"
+            style={{ paddingBottom: 'calc(8px + env(safe-area-inset-bottom))' }}>
+            {strip}
+            {dock}
           </div>
         </div>
       )}
+      {sheetBody}
     </div>
   )
 }

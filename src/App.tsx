@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route, Outlet, Navigate, useParams } from 'react
 import { BingoAuthProvider } from './hooks/useBingoAuth'
 import { RequireBingoAdmin } from './components/RequireBingoAdmin'
 import { useAutoTranslate } from './lib/autoTranslate'
+import { ObserverFrame } from './components/ObserverFrame'
 
 const InstructionsSlide     = lazy(() => import('./pages/InstructionsSlide').then(m => ({ default: m.InstructionsSlide })))
 const InstructionsHub       = lazy(() => import('./pages/InstructionsHub').then(m => ({ default: m.InstructionsHub })))
@@ -43,6 +44,7 @@ export default function App() {
   useAutoTranslate()
   return (
     <BrowserRouter>
+      <ObserverFrame />
       <Suspense fallback={null}>
         <Routes>
           <Route path="/" element={<BingoDashHub />} />

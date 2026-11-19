@@ -33,6 +33,7 @@ export type RemoteCommand =
   | { action: 'fillMarshal' }
   | { action: 'submitComplete' }
   | { action: 'scroll'; direction: 'up' | 'down' } // scroll the projector's viewport
+  | { action: 'scrollTo'; frac: number }            // phone finger-scroll: jump to a fraction of the range
   // The BINGO celebration covering the projector. It self-clears after 4s, so
   // dismiss is about skipping ahead when several lines land at once.
   | { action: 'dismissPopup' }
@@ -40,9 +41,12 @@ export type RemoteCommand =
   | { action: 'setChat'; open: boolean }
   // Put the Invite-teammate QR on the projector, or take it away.
   | { action: 'setInvite'; open: boolean }
+  // Put the board's Join QR (players or observers) on the projector, or take it away.
+  | { action: 'setJoinQr'; mode: JoinQrMode }
   | { action: 'requestState' } // controller → projector: "resend your state now"
 
 export type SampleView = 'board' | 'scoreboard'
+export type JoinQrMode = 'off' | 'player' | 'observer'
 
 // Live step of the open task detail, so the controller shows the right buttons.
 export type DetailStep = {
@@ -75,6 +79,8 @@ export type RemoteState = {
   popupQueued: number
   /** Whether the Invite-teammate QR overlay is up on the projector. */
   inviteOpen: boolean
+  /** Which Join QR is on the projector. Absent from an older projector = off. */
+  joinQr?: JoinQrMode
   /** Bingo lines Quick BINGO has completed so far, 0-5 — one per press. */
   quickWinRows: number
   /** Whether the help-chat message box is open on the projector. */

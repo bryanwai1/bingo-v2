@@ -18,6 +18,8 @@ import { InstructionPage } from '../components/InstructionPage'
 import { PageNavigator } from '../components/PageNavigator'
 import { SwipeablePages } from '../components/SwipeablePages'
 import { ParticleBackground } from '../components/ParticleBackground'
+import { PlayerBackdrop } from '../components/PlayerBackdrop'
+import { normalizePlayerTheme, type PlayerTheme } from '../lib/playerThemes'
 import { TimeUpAlarm } from '../components/TimeUpAlarm'
 import { ContestCard } from '../components/ContestCard'
 import { SupportChat } from '../components/SupportChat'
@@ -39,6 +41,8 @@ import { registerCoopMember } from '../lib/coopGames/registerMember'
 import { resolveBonusWindow, activeElapsedMs, type BonusDefaults } from '../lib/timeBonus'
 import { aitbByName, aitbToolUrl, aitbToolCaption, AITB_POINTS } from '../lib/aitbActivities'
 import { normalizeUrl } from '../lib/normalizeUrl'
+import { useAutoAdvance, HERO_ROTATE_MS, INSTRUCTION_ROTATE_MS } from '../lib/useAutoAdvance'
+import { CardNeeds } from '../components/CardNeeds'
 import { isGridSlot } from '../lib/prizeCard/logic'
 import type { BingoScan, BingoTask } from '../types/database'
 
@@ -172,7 +176,10 @@ export function BingoDashParticipant() {
   // Game RPCs own completion, even if a copied card still has marshal/input settings.
   const coopGameKey = gameKeyForTitle(task?.title)
   const coopMember = useCoopMember(coopGameKey ? team?.id : undefined, team?.section_id)
-  const [currentPage, setCurrentPage] = useState(0)
+  // Instructions turn over on their own until the player takes over.
+  const pagesAuto = useAutoAdvance(pages.length, INSTRUCTION_ROTATE_MS, pages.some(p => p.media_type === 'video'))
+  const currentPage = pagesAuto.idx
+  const setCurrentPage = pagesAuto.go
   const [completing, setCompleting] = useState(false)
   const [showLeaveConfirm, setShowLeaveConfirm] = useState(false)
   const [leaving, setLeaving] = useState(false)
@@ -192,7 +199,9 @@ export function BingoDashParticipant() {
   const [staged, setStaged] = useState<{ id: string; file: File; preview: string }[]>([])
   // Answer-input state: one string per answer row
   const [answerInputs, setAnswerInputs] = useState<string[]>([])
-  const [carouselIdx, setCarouselIdx] = useState(0)
+  const heroAuto = useAutoAdvance(photos.length, HERO_ROTATE_MS)
+  const carouselIdx = heroAuto.idx
+  const setCarouselIdx = heroAuto.go
   const letterRefs = useRef<(HTMLInputElement | null)[][]>([])
 
   // Send the player back to THEIR OWN board. /bingo-dash always resolves the
@@ -351,10 +360,13 @@ export function BingoDashParticipant() {
 
   // Load the board's marshal password + photo-submissions toggle, subscribe to live changes
   const sectionId = team?.section_id ?? null
+  // Grab Game Day boards keep their stadium art behind every card page too.
+  const [playerTheme, setPlayerTheme] = useState<PlayerTheme>('default')
   useEffect(() => {
     if (isSnakeLadder || !sectionId) return
-    const applySettings = (data: ({ marshal_password?: string | null; photo_submissions_enabled?: boolean | null } & BonusDefaults) | null) => {
+    const applySettings = (data: ({ marshal_password?: string | null; photo_submissions_enabled?: boolean | null; player_theme?: string | null } & BonusDefaults) | null) => {
       if (!data) return
+      if ('player_theme' in data) setPlayerTheme(normalizePlayerTheme(data.player_theme))
       setBonusDefaults({
         default_bonus_full_minutes: data.default_bonus_full_minutes,
         default_bonus_timer_minutes: data.default_bonus_timer_minutes,
@@ -365,7 +377,7 @@ export function BingoDashParticipant() {
         setPhotoSubmissionsEnabled(data.photo_submissions_enabled)
       }
     }
-    const baseCols = 'marshal_password, photo_submissions_enabled, default_bonus_full_minutes, default_bonus_timer_minutes'
+    const baseCols = 'marshal_password, photo_submissions_enabled, default_bonus_full_minutes, default_bonus_timer_minutes, player_theme'
     // card_pauses only exists once supabase/core-tables/20261027_freeze_card_timers.sql
     // has been run — fall back so the page still loads before that.
     supabase.from('bingo_sections').select(`${baseCols}, card_pauses`).eq('id', sectionId).single()
@@ -1028,7 +1040,7 @@ export function BingoDashParticipant() {
       className="min-h-screen relative overflow-x-hidden"
       style={{ backgroundColor: `color-mix(in srgb, ${task.hex_code} 50%, #0a0a0a)` }}
     >
-      <ParticleBackground hexCode={task.hex_code} />
+      {playerTheme === 'grab' ? <PlayerBackdrop theme="grab" /> : <ParticleBackground hexCode={task.hex_code} />}
 
       {/* Header */}
       <header className="px-6 py-5 text-white relative z-10 overflow-hidden">
@@ -1132,6 +1144,9 @@ export function BingoDashParticipant() {
           </div>
         )}
 
+        {/* People needed and where to play: under the hero image, above the instructions. */}
+        <CardNeeds task={task} hexCode={task.hex_code} mapsHref={task.maps_url ? normalizeUrl(task.maps_url) : null} />
+
         {/* Maps button */}
         {task.maps_url && (
           <div className="mb-5 animate-slide-up">
@@ -1216,8 +1231,9 @@ export function BingoDashParticipant() {
             currentPage={currentPage}
             total={pages.length}
             onChange={setCurrentPage}
+            onInteract={pagesAuto.stop}
           >
-            <InstructionPage page={pages[currentPage]} hexCode={task.hex_code} />
+            <InstructionPage key={currentPage} page={pages[currentPage]} hexCode={task.hex_code} />
             <PageNavigator
               current={currentPage}
               total={pages.length}

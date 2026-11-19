@@ -124,3 +124,9 @@ test('a slow poll never rolls back a newer snapshot of the same session', async 
   assert.equal(newerSnap(snap(5), snap(1, 's2')).session_id, 's2')
   assert.equal(newerSnap(null, snap(1)).version, 1)
 })
+
+test('lobby message uses "an observer", not "a observer"', () => {
+  const player = [{ member_id: 'p', name: 'P', role: 'player', slot: 0 }] as unknown as Parameters<typeof lobbyMessage>[0]
+  assert.equal(lobbyMessage(player, 'icon-matching'), 'Waiting for an observer.')
+  assert.equal(lobbyMessage([], 'icon-matching'), 'Waiting for a player and an observer.')
+})

@@ -12,7 +12,10 @@ import { BingoAdminPhotoUpload } from '../components/BingoAdminPhotoUpload'
 import { prizeFlagLocked } from '../lib/prizeCard/logic'
 import { PrizeCardAdmin } from '../components/PrizeCardAdmin'
 import { CardRail, RailDrawer } from '../components/CardRail'
-import { railKeys, type RailKey } from '../lib/cardRail'
+import { type RailKey } from '../lib/cardRail'
+import { useAutoAdvance, HERO_ROTATE_MS, INSTRUCTION_ROTATE_MS } from '../lib/useAutoAdvance'
+import { CardNeeds, hasNeeds } from '../components/CardNeeds'
+import { normalizeUrl } from '../lib/normalizeUrl'
 import { SignSpliceAdminPanel } from '../components/SignSpliceAdminPanel'
 import { BreakoutHuntAdminPanel } from '../components/BreakoutHuntAdminPanel'
 import { TaskSampleEditor } from '../components/TaskSampleEditor'
@@ -109,11 +112,8 @@ export function BingoDashTaskEdit() {
   const [editingTitle, setEditingTitle] = useState(false)
   const [titleValue, setTitleValue] = useState('')
   const [previewMode, setPreviewMode] = useState(false)
-  const [previewPage, setPreviewPage] = useState(0)
-  const [carouselIdx, setCarouselIdx] = useState(0)
-  // Optional components live in a right-edge rail; `drawer` is the one open, `added` the ones picked with "+".
+  // Optional components live in a right-edge rail; `drawer` is the one open (shown under the instructions).
   const [drawer, setDrawer] = useState<RailKey | null>(null)
-  const [added, setAdded] = useState<RailKey[]>([])
   const [activeTab, setActiveTab] = useState<'instructions' | 'answer' | 'sample'>('instructions')
   // Answer tab state
   const [taskType, setTaskType] = useState<'standard' | 'answer' | 'photo' | 'video' | 'media'>('standard')
@@ -169,15 +169,27 @@ export function BingoDashTaskEdit() {
   const [previewNow, setPreviewNow] = useState(Date.now())
   const { pages, createPage, updatePage, deletePage, reorderPages } = useBingoTaskPages(taskId)
   const { photos, reload: reloadPhotos } = useBingoTaskPhotos(taskId)
+  // Preview turns the hero image and instructions over by themselves, like the player view.
+  const pagesAuto = useAutoAdvance(pages.length, INSTRUCTION_ROTATE_MS, !previewMode || pages.some(p => p.media_type === 'video'))
+  const heroAuto = useAutoAdvance(photos.length, HERO_ROTATE_MS, !previewMode)
+  const previewPage = pagesAuto.idx
+  const setPreviewPage = pagesAuto.go
+  const carouselIdx = heroAuto.idx
+  const setCarouselIdx = heroAuto.go
+  // People & place component fields (strings so the inputs can be empty).
+  const [needsMin, setNeedsMin] = useState('')
+  const [needsMax, setNeedsMax] = useState('')
+  const [needsWhole, setNeedsWhole] = useState(false)
+  const [needsPlace, setNeedsPlace] = useState('')
   const { links } = useTaskLinks(taskId, 'bingo_task_links')
   // A component the card already uses always has its icon; "+" only adds ones it does not.
   const railInUse: Partial<Record<RailKey, boolean>> = {
     unlock: !!(prereqId || completionWarning.trim()),
+    needs: !!task && hasNeeds(task),
     maps: !!mapsUrl.trim(),
     links: links.length > 0,
     draw: !!drawConfig,
   }
-  const railList = railKeys(railInUse, added)
 
   useEffect(() => {
     if (!taskId) return
@@ -213,6 +225,10 @@ export function BingoDashTaskEdit() {
             setBoardCards(list.map(r => ({ id: r.id, title: r.title })))
           })
         setMapsLabel(data.maps_label ?? '')
+        setNeedsMin(data.players_min ? String(data.players_min) : '')
+        setNeedsMax(data.players_max ? String(data.players_max) : '')
+        setNeedsWhole(!!data.players_whole_team)
+        setNeedsPlace(data.play_location ?? '')
       }
     })
   // eslint-disable-next-line react-hooks/exhaustive-deps -- isNew is fixed for the page's lifetime
@@ -457,7 +473,7 @@ export function BingoDashTaskEdit() {
         <ParticleBackground hexCode={task.hex_code} />
 
         <button
-          onClick={() => { setPreviewMode(false); setPreviewPage(0) }}
+          onClick={() => { setPreviewMode(false); pagesAuto.reset() }}
           className="fixed top-4 right-4 z-50 px-4 py-2 bg-black/60 backdrop-blur-sm text-white rounded-lg hover:bg-black/80 text-sm font-bold border border-white/20 transition-colors"
         >
           ✕ Exit Preview
@@ -513,6 +529,8 @@ export function BingoDashTaskEdit() {
               )}
             </div>
           )}
+
+          <CardNeeds task={task} hexCode={task.hex_code} mapsHref={task.maps_url ? normalizeUrl(task.maps_url) : null} />
 
           {previewActivity ? (
             <>
@@ -581,7 +599,7 @@ export function BingoDashTaskEdit() {
             </>
           ) : pages.length > 0 ? (
             <>
-              <InstructionPage page={pages[previewPage]} hexCode={task.hex_code} />
+              <div onPointerDownCapture={pagesAuto.stop}><InstructionPage key={previewPage} page={pages[previewPage]} hexCode={task.hex_code} /></div>
               {pages.length > 1 && (
                 <div className="flex justify-between items-center mt-6">
                   <button
@@ -669,7 +687,7 @@ export function BingoDashTaskEdit() {
               {isDirty ? '● Unsaved changes' : '✓ All changes saved'}
             </span>
             <button
-              onClick={() => { setPreviewMode(true); setPreviewPage(0); setCarouselIdx(0); reloadPhotos() }}
+              onClick={() => { setPreviewMode(true); pagesAuto.reset(); heroAuto.reset(); reloadPhotos() }}
               className="px-4 py-2 bg-gray-900 text-white rounded-lg hover:bg-gray-700 text-sm transition-colors"
             >
               Preview
@@ -1089,6 +1107,56 @@ export function BingoDashTaskEdit() {
         </div>
           </RailDrawer>
         )}
+        {drawer === 'needs' && (
+          <RailDrawer title="People & place" onClose={() => setDrawer(null)}>
+        <div className="bg-white rounded-xl border border-gray-200 p-6 mt-6">
+          <h2 className="text-lg font-bold text-gray-900 mb-1">People &amp; place</h2>
+          <p className="text-xs text-gray-400 mb-4">Players see this in your card colour under the hero image, above the instructions. Fill in either one or both; leave blank to hide it.</p>
+          <label className="flex items-center gap-2 mb-3 text-sm font-bold text-gray-700">
+            <input type="checkbox" checked={needsWhole} onChange={e => setNeedsWhole(e.target.checked)} className="w-4 h-4" />
+            Whole team plays together
+          </label>
+          <div className={`grid grid-cols-2 gap-3 mb-3 ${needsWhole ? 'opacity-40 pointer-events-none' : ''}`}>
+            <div>
+              <label className="block text-xs font-bold uppercase tracking-wider text-gray-500 mb-1">People needed</label>
+              <input type="number" min={1} max={99} value={needsMin} onChange={e => setNeedsMin(e.target.value)} placeholder="e.g. 2"
+                className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-violet-500" />
+            </div>
+            <div>
+              <label className="block text-xs font-bold uppercase tracking-wider text-gray-500 mb-1">Up to (optional)</label>
+              <input type="number" min={1} max={99} value={needsMax} onChange={e => setNeedsMax(e.target.value)} placeholder="e.g. 4"
+                className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-violet-500" />
+            </div>
+          </div>
+          <label className="block text-xs font-bold uppercase tracking-wider text-gray-500 mb-1">Where to play</label>
+          <input type="text" value={needsPlace} onChange={e => setNeedsPlace(e.target.value)} maxLength={80} placeholder="e.g. Level 3 atrium"
+            className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-violet-500" />
+          <p className="text-xs text-gray-400 mt-2">If this card also has a Google Maps link, the place tile opens it when tapped.</p>
+          {(() => {
+            const min = Math.floor(Number(needsMin)) || 0
+            const max = Math.floor(Number(needsMax)) || 0
+            const bad = !needsWhole && ((needsMin !== '' && (min < 1 || min > 99)) || (needsMax !== '' && (min < 1 || max < min || max > 99)))
+            return (
+              <>
+                {bad && <p className="mt-2 text-xs font-bold text-red-500">Check the numbers: 1 to 99, and "up to" cannot be below "people needed".</p>}
+                <button
+                  disabled={bad}
+                  onClick={() => stage({
+                    players_whole_team: needsWhole,
+                    players_min: needsWhole || !min ? null : min,
+                    players_max: needsWhole || !min || !max ? null : max,
+                    play_location: needsPlace.trim() || null,
+                  })}
+                  className="mt-3 px-6 py-2.5 bg-violet-600 text-white rounded-lg hover:bg-violet-700 text-sm font-bold transition-colors disabled:opacity-50"
+                >
+                  Apply people &amp; place
+                </button>
+              </>
+            )
+          })()}
+        </div>
+          </RailDrawer>
+        )}
         {drawer === 'maps' && (
           <RailDrawer title="Google Maps link" onClose={() => setDrawer(null)}>
         {/* Maps URL */}
@@ -1158,7 +1226,7 @@ export function BingoDashTaskEdit() {
         )}
 
         {!task.is_prize && (
-          <CardRail keys={railList} inUse={railInUse} open={drawer} onOpen={setDrawer} onAdd={k => setAdded(a => (a.includes(k) ? a : [...a, k]))} />
+          <CardRail inUse={railInUse} open={drawer} onOpen={k => { if (k) setActiveTab('instructions'); setDrawer(k) }} />
         )}
       </main>
 

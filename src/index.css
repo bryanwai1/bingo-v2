@@ -989,3 +989,18 @@ input, select, textarea { min-width: 0; max-width: 100%; }
   .a-touch a[class*="px-"] { display: inline-flex; align-items: center; }
   .a-touch [data-compact] { min-height: 0; }
 }
+
+/* Observer frame (components/ObserverFrame.tsx): the glowing border and the
+   "Observer" badge live in a strip around the page instead of on top of it, so
+   they can never cover a button, a timer or a score. Full-height pages shrink
+   to what is left. */
+html.observer-on, html.observer-on body { background: #050816; }
+html.observer-on #root {
+  background: #050816;
+  box-sizing: border-box;
+  height: 100dvh;
+  overflow-y: auto;
+  padding: calc(env(safe-area-inset-top, 0px) + 30px) 12px 12px;
+}
+html.observer-on #root .h-screen { height: 100%; }
+html.observer-on #root .min-h-screen { min-height: 100%; }

@@ -47,7 +47,7 @@ export function lobbyNeeds(members: CoopMember[], gameKey?: string) {
 export function lobbyMessage(members: CoopMember[], gameKey?: string): string | null {
   const n = lobbyNeeds(members, gameKey)
   if (n.canStart) return null
-  if (n.need === 1) return `Waiting for ${n.missing.map(m => `a ${m}`).join(' and ') || 'exactly one player'}.`
+  if (n.need === 1) return `Waiting for ${n.missing.map(m => `${m === 'observer' ? 'an' : 'a'} ${m}`).join(' and ') || 'exactly one player'}.`
   const parts = [n.players < n.need ? `${n.need} players` : '', n.observers < 1 ? 'at least 1 observer' : ''].filter(Boolean)
   return parts.length ? `Needs ${parts.join(' and ')}.` : `Needs exactly ${n.need} players.`
 }
