@@ -1,4 +1,4 @@
-import { loadCelebratedLines, saveCelebratedLines } from '../lib/bingoLines'
+import { loadCelebratedLines, saveCelebratedLines, planLineCelebrations } from '../lib/bingoLines'
 import { useEffect, useRef, useState, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
@@ -6,6 +6,7 @@ import { useTeamReviews, type ReviewFlag } from '../hooks/useTeamReviews'
 import { fetchBoardTasks, fetchPrizeTasks } from '../lib/boardCards'
 import { PrizeCardStrips, PrizeRevealScreen } from '../components/PrizeCardArea'
 import { useBingoDashTeam } from '../hooks/useBingoDashTeam'
+import { savedPlayerName } from '../lib/coopGames/registerMember'
 import { PlayerBackdrop } from '../components/PlayerBackdrop'
 import { TimeUpAlarm } from '../components/TimeUpAlarm'
 import { TileFace } from '../components/BingoTileFace'
@@ -52,12 +53,17 @@ const BINGO_LINES = [
 
 const BINGO_WORD = 'BINGO'
 
-// ── Join Screen (search group → password) ─────────────────────────────────────
+// ── Join Screen (name → search group → password) ──────────────────────────────
+// Same order as the /bingo-dash/play join page: the name comes first so the
+// player is a named member from the start, and a card that needs one (the
+// co-op games) never has to ask for it again.
 
-function JoinScreen({ onJoin, theme }: { onJoin: (teamId: string, password: string) => Promise<void>; theme: PlayerTheme }) {
+function JoinScreen({ onJoin, theme }: { onJoin: (teamId: string, password: string, name: string) => Promise<void>; theme: PlayerTheme }) {
   const grab = theme === 'grab'
   const accent = grab ? GRAB_GREEN : '#a855f7'
-  const [step, setStep] = useState<1 | 2>(1)
+  const [step, setStep] = useState<'name' | 'group' | 'password'>('name')
+  const [playerName, setPlayerName] = useState(savedPlayerName)
+  const trimmedName = playerName.trim()
   const [groups, setGroups] = useState<BingoTeam[]>([])
   const [groupsLoading, setGroupsLoading] = useState(true)
   const [search, setSearch] = useState('')
@@ -83,16 +89,23 @@ function JoinScreen({ onJoin, theme }: { onJoin: (teamId: string, password: stri
     setSelectedTeam(team)
     setPassword('')
     setError('')
-    setStep(2)
+    setStep('password')
+  }
+
+  const handleSubmitName = (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!trimmedName) return
+    setError('')
+    setStep('group')
   }
 
   const handleSubmitPassword = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!selectedTeam || password.length !== 4) return
+    if (!selectedTeam || password.length !== 4 || !trimmedName) return
     setSubmitting(true)
     setError('')
     try {
-      await onJoin(selectedTeam.id, password)
+      await onJoin(selectedTeam.id, password, trimmedName)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to join group')
       setSubmitting(false)
@@ -130,12 +143,50 @@ function JoinScreen({ onJoin, theme }: { onJoin: (teamId: string, password: stri
         )}
       </div>
 
-      {step === 1 && (
+      {step === 'name' && (
         <div
           className="relative z-10 bg-white rounded-3xl shadow-2xl p-8 w-full max-w-sm animate-bounce-in"
           style={{ animationDelay: '0.15s', opacity: 0, animationFillMode: 'forwards' }}
         >
+          <h2 className="text-2xl font-black text-gray-900 text-center mb-1">What's your name?</h2>
+          <p className="text-gray-400 text-center text-sm mb-5">Your team will see this name.</p>
+          <form onSubmit={handleSubmitName} className="flex flex-col gap-3">
+            <input
+              type="text"
+              value={playerName}
+              onChange={e => setPlayerName(e.target.value)}
+              placeholder="Your name"
+              maxLength={40}
+              autoFocus
+              aria-label="Your name"
+              className="w-full px-5 py-4 rounded-2xl border-2 text-lg font-bold text-gray-900 focus:outline-none transition-colors text-center"
+              style={{ borderColor: trimmedName ? accent : '#e5e7eb' }}
+            />
+            <button
+              type="submit"
+              disabled={!trimmedName}
+              className="w-full py-4 rounded-2xl text-white font-black text-xl transition-all duration-200 disabled:opacity-40 hover:scale-105 active:scale-95 mt-1"
+              style={{ backgroundColor: accent, boxShadow: `0 8px 24px ${accent}44` }}
+            >
+              Next →
+            </button>
+          </form>
+        </div>
+      )}
+
+      {step === 'group' && (
+        <div
+          className="relative z-10 bg-white rounded-3xl shadow-2xl p-8 w-full max-w-sm animate-bounce-in"
+          style={{ animationDelay: '0.15s', opacity: 0, animationFillMode: 'forwards' }}
+        >
+          <button
+            onClick={() => { setStep('name'); setError('') }}
+            className="text-sm text-teal-500 font-bold mb-4 hover:text-purple-700 transition-colors"
+          >
+            &larr; Back
+          </button>
           <h2 className="text-2xl font-black text-gray-900 text-center mb-1">Join Game</h2>
+          <p className="text-gray-400 text-center text-sm mb-1">Hi <span className="text-teal-500 font-bold">{trimmedName}</span>!</p>
           <p className="text-gray-400 text-center text-sm mb-5">Search and select your group</p>
 
           <input
@@ -187,13 +238,13 @@ function JoinScreen({ onJoin, theme }: { onJoin: (teamId: string, password: stri
         </div>
       )}
 
-      {step === 2 && selectedTeam && (
+      {step === 'password' && selectedTeam && (
         <div
           className="relative z-10 bg-white rounded-3xl shadow-2xl p-8 w-full max-w-sm animate-bounce-in"
           style={{ animationDelay: '0.05s', opacity: 0, animationFillMode: 'forwards' }}
         >
           <button
-            onClick={() => { setStep(1); setPassword(''); setError('') }}
+            onClick={() => { setStep('group'); setPassword(''); setError('') }}
             className="text-sm text-teal-500 font-bold mb-4 hover:text-purple-700 transition-colors"
           >
             &larr; Back
@@ -495,6 +546,7 @@ function BoardScreen({
   team,
   gridTasks: gridTasksProp,
   scans,
+  scansReady,
   reviews,
   settings,
   boardNote,
@@ -517,6 +569,8 @@ function BoardScreen({
   inviteUrl?: string | null
   gridTasks: BingoTask[]
   scans: BingoScan[]
+  /** The team's scans have been fetched at least once (an empty list before that is not "no lines"). */
+  scansReady: boolean
   reviews: Record<string, ReviewFlag>
   settings: BoardTimer | null
   boardNote: string
@@ -616,6 +670,10 @@ function BoardScreen({
   // Tracking the set of celebrated indices (not a count) ensures every new line
   // gets its own announcement, even when one tile completes multiple lines at once.
   useEffect(() => {
+    // The team's scans arrive after the board mounts. Taking the "already
+    // celebrated" baseline from an empty board would make every line finished
+    // earlier look new, and replay B, BI, BIN... on each reload.
+    if (!scansReady) return
     if (celebratedLinesRef.current === null) {
       // Remember across visits to the board: coming back from a card page must
       // not celebrate a line the team was already congratulated for.
@@ -626,20 +684,14 @@ function BoardScreen({
         return
       }
     }
-    const newLines: number[] = []
-    completedLineIndices.forEach(idx => {
-      if (!celebratedLinesRef.current!.has(idx)) newLines.push(idx)
-    })
-    if (newLines.length === 0) return
-    const baseSize = celebratedLinesRef.current.size
-    newLines.forEach(idx => celebratedLinesRef.current!.add(idx))
-    saveCelebratedLines(team.id, celebratedLinesRef.current)
-    const queued = newLines.map((_, i) =>
-      BINGO_WORD.slice(0, Math.min(baseSize + i + 1, 5))
-    )
-    setPopupQueue(prev => [...prev, ...queued])
+    // Each step of BINGO is shown once, ever; lines past the fifth show nothing.
+    const { next, popups } = planLineCelebrations(celebratedLinesRef.current, completedLineIndices)
+    if (next.size === celebratedLinesRef.current.size) return
+    celebratedLinesRef.current = next
+    saveCelebratedLines(team.id, next)
+    if (popups.length) setPopupQueue(prev => [...prev, ...popups])
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [completedLinesKey])
+  }, [completedLinesKey, scansReady])
 
   // Drive the popup from the queue: show each item for 4s, then advance.
   useEffect(() => {
@@ -863,6 +915,7 @@ export function BingoDashHome() {
   const [gridTasks, setGridTasks] = useState<BingoTask[]>([])
   const [prizeTasks, setPrizeTasks] = useState<BingoTask[]>([])
   const [scans, setScans] = useState<BingoScan[]>([])
+  const [scansReady, setScansReady] = useState(false)
   const reviews = useTeamReviews(team?.id)
   const [section, setSection] = useState<BingoSection | null>(null)
   const [sectionId, setSectionId] = useState<string | null>(null)
@@ -928,7 +981,7 @@ export function BingoDashHome() {
       }
       if (team?.id) {
         supabase.from('bingo_scans').select('*').eq('team_id', team.id)
-          .then(({ data }) => { if (data) setScans(data) })
+          .then(({ data }) => { if (data) { setScans(data); setScansReady(true) } })
       }
     }
     document.addEventListener('visibilitychange', resync)
@@ -953,12 +1006,12 @@ export function BingoDashHome() {
 
   // Load this team's scans
   useEffect(() => {
-    if (!team) { setScans([]); return }
+    if (!team) { setScans([]); setScansReady(false); return }
     supabase
       .from('bingo_scans')
       .select('*')
       .eq('team_id', team.id)
-      .then(({ data }) => { if (data) setScans(data) })
+      .then(({ data }) => { if (data) { setScans(data); setScansReady(true) } })
   }, [team])
 
   // Live: scan updates
@@ -974,7 +1027,7 @@ export function BingoDashHome() {
             .from('bingo_scans')
             .select('*')
             .eq('team_id', team.id)
-            .then(({ data }) => { if (data) setScans(data) })
+            .then(({ data }) => { if (data) { setScans(data); setScansReady(true) } })
         }
       )
       .subscribe()
@@ -994,7 +1047,7 @@ export function BingoDashHome() {
   if (!isRegistered) {
     return (
       <>
-        <JoinScreen theme={theme} onJoin={async (teamId, pwd) => { await joinTeamById(teamId, pwd) }} />
+        <JoinScreen theme={theme} onJoin={async (teamId, pwd, name) => { await joinTeamById(teamId, pwd, name) }} />
         <TimeUpAlarm settings={section} />
       </>
     )
@@ -1064,6 +1117,7 @@ export function BingoDashHome() {
           : null}
         gridTasks={gridTasks}
         scans={scans}
+        scansReady={scansReady}
         reviews={reviews}
         settings={section}
         boardNote={boardNote}

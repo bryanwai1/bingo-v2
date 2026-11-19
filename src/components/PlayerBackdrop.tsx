@@ -1,5 +1,6 @@
+import { useEffect } from 'react'
 import { ParticleBackground } from './ParticleBackground'
-import type { PlayerTheme } from '../lib/playerThemes'
+import { rememberPlayerTheme, type PlayerTheme } from '../lib/playerThemes'
 
 /**
  * Full-screen backdrop for the player screens. The Grab art is two images:
@@ -8,6 +9,9 @@ import type { PlayerTheme } from '../lib/playerThemes'
  * frame the edges. Fixed, so it does not scroll away behind a tall board.
  */
 export function PlayerBackdrop({ theme }: { theme: PlayerTheme }) {
+  // Every player screen draws this, so it is the one place that notes the look
+  // for screens that load before they know it (the scoreboard).
+  useEffect(() => { rememberPlayerTheme(theme) }, [theme])
   if (theme !== 'grab') return <ParticleBackground />
   return (
     <div aria-hidden className="fixed inset-0 z-0 pointer-events-none bg-[#0b3d22]">

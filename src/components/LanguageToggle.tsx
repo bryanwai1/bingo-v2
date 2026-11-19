@@ -20,7 +20,7 @@ export function LanguageToggle({ className = '', variant = 'dark' }: Props) {
         return (
           <button
             key={l}
-            onClick={() => setLang(l)}
+            onClick={() => setLang(l)} data-remote={`lang-${l}`}
             className={`px-2.5 py-0.5 rounded-full text-[11px] font-black uppercase tracking-wider transition-all ${
               active
                 ? isDark ? 'bg-white text-gray-900' : 'a-surface a-text shadow-sm'

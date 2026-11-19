@@ -9,7 +9,7 @@ import { useFullscreen } from '../hooks/useFullscreen'
 import { getScoreboardTheme } from '../lib/scoreboardThemes'
 import { isGridSlot } from '../lib/prizeCard/logic'
 import { ProjectorPrizeBandLive } from '../components/PrizeCardArea'
-import { normalizePlayerTheme } from '../lib/playerThemes'
+import { normalizePlayerTheme, lastPlayerTheme, rememberPlayerTheme } from '../lib/playerThemes'
 import { scoreTeams, compareTeamScores, formatScore, type TeamScore, type BoardTask } from '../lib/teamScore'
 import type { BingoTask, BingoTeam, BingoScan, BingoSettings, BingoSection, BingoBoardCard, BingoDuel } from '../types/database'
 
@@ -265,7 +265,13 @@ export function BingoDashProjector() {
   // Per-board skin. A hotel room with windows needs 'daylight' or the
   // projected scoreboard is unreadable; a dim AV suite wants 'midnight'.
   const theme = getScoreboardTheme(activeSection?.scoreboard_theme)
-  const grabLook = normalizePlayerTheme(activeSection?.player_theme) === 'grab'
+  // A player arrives before the board has loaded, so until it has, use the look
+  // of the board they just came from rather than flashing the default background.
+  const grabLook = activeSection
+    ? normalizePlayerTheme(activeSection.player_theme) === 'grab'
+    : playerView && lastPlayerTheme() === 'grab'
+  const sectionTheme = activeSection?.player_theme
+  useEffect(() => { if (playerView && sectionTheme !== undefined) rememberPlayerTheme(normalizePlayerTheme(sectionTheme)) }, [playerView, sectionTheme])
 
 
   // Rank-change motion.

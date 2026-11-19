@@ -8,7 +8,8 @@ import { PrizeStrip } from '../lib/prizeCard/PrizeStrip'
 import { stripState } from '../lib/prizeCard/logic'
 import { hasOwnMechanism, effectiveInputs, inputKinds, isCompulsory, fileAccept, fileEmoji, fileHeading, fileNoun } from '../lib/completionInputs'
 import { activeFaces, faceName, faceColor, normaliseFaceCount } from '../lib/cubeFaces'
-import { buildBingoSlots, completedBingoLines, scoreWithBingoLines } from '../lib/bingoLines'
+import { buildBingoSlots, completedBingoLines, scoreWithBingoLines, planLineCelebrations } from '../lib/bingoLines'
+import { scanControls, controlRing, pressControl, typeControl, giveFile, tapControl, type RemoteControl } from '../lib/remoteControls'
 import { useSampleRemote, makeRemoteCode, HEARTBEAT_MS, HEARTBEAT_TIMEOUT_MS, type RemoteCommand, type RemoteState, type SampleView, type DetailStep, type JoinQrMode } from '../hooks/useSampleRemote'
 import { useBingoTaskPages } from '../hooks/useBingoTaskPages'
 import { useBingoTaskPhotos } from '../hooks/useBingoTaskPhotos'
@@ -25,6 +26,7 @@ import { AitbMissionModule } from '../components/AitbMissionModule'
 import { CardBonusTimer } from '../components/CardBonusTimer'
 import { resolveBonusWindow, type BonusDefaults } from '../lib/timeBonus'
 import { LanguageToggle } from '../components/LanguageToggle'
+import { useLang, setLang } from '../hooks/useLanguage'
 import { aitbByName, aitbToolUrl, aitbToolCaption, AITB_POINTS } from '../lib/aitbActivities'
 import { InstructionPage } from '../components/InstructionPage'
 import { PageNavigator } from '../components/PageNavigator'
@@ -155,8 +157,6 @@ function DemoBar({
   showQuickWin,
   onRemote,
   remoteActive,
-  onShare,
-  shareActive,
   onTryIt,
   view,
   onToggleView,
@@ -178,8 +178,6 @@ function DemoBar({
   showQuickWin: boolean
   onRemote: () => void
   remoteActive: boolean
-  onShare: () => void
-  shareActive: boolean
   onTryIt: () => void
   view: SampleView
   onToggleView: () => void
@@ -209,7 +207,7 @@ function DemoBar({
     </button>
   )
   const bingo = (cls: string) => showQuickWin && (
-    <button type="button" onClick={onQuickWin} className={`${BTN} ${TONE.gold} ${cls}`}>⚡<span>BINGO</span></button>
+    <button type="button" onClick={onQuickWin} data-remote="quickWin" className={`${BTN} ${TONE.gold} ${cls}`}>⚡<span>BINGO</span></button>
   )
   const join = (cls: string) => (
     <JoinLinkButton slug={section?.slug} boardName={section?.name} className={`${BTN} ${TONE.plain} ${cls}`} />
@@ -219,11 +217,6 @@ function DemoBar({
       📡<span>{remoteActive ? 'Paired' : 'Remote'}</span>
     </button>
   )
-  const share = (cls: string, onClick: () => void, long: boolean) => (
-    <button type="button" onClick={onClick} className={`${BTN} ${shareActive ? TONE.sky : TONE.plain} ${cls}`}>
-      📺<span>{shareActive ? 'Sharing' : long ? 'Share screen' : 'Share'}</span>
-    </button>
-  )
   const tryIt = (cls: string, onClick: () => void, long: boolean) => (
     <button type="button" onClick={onClick} className={`${BTN} ${TONE.plain} ${cls}`}>📱<span>{long ? 'Try it yourself' : 'Try it'}</span></button>
   )
@@ -231,10 +224,10 @@ function DemoBar({
     <button type="button" onClick={onClick} className={`${BTN} ${TONE.plain} ${cls}`}>↺<span>{long ? 'Reset demo' : 'Reset'}</span></button>
   )
   const waitBtn = (cls: string, onClick: () => void, long: boolean) => (
-    <button type="button" onClick={onClick} className={`${BTN} ${waiting ? TONE.green : TONE.plain} ${cls}`}>⏳<span>{long ? 'Waiting screen' : 'Waiting'}</span></button>
+    <button type="button" onClick={onClick} data-remote="setWaiting" className={`${BTN} ${waiting ? TONE.green : TONE.plain} ${cls}`}>⏳<span>{long ? 'Waiting screen' : 'Waiting'}</span></button>
   )
   const obsBtn = (cls: string, onClick: () => void, long: boolean) => (
-    <button type="button" onClick={onClick} className={`${BTN} ${observer ? TONE.green : TONE.plain} ${cls}`}>👁<span>{long ? 'Observer view' : 'Observer'}</span></button>
+    <button type="button" onClick={onClick} data-remote="setObserver" className={`${BTN} ${observer ? TONE.green : TONE.plain} ${cls}`}>👁<span>{long ? 'Observer view' : 'Observer'}</span></button>
   )
   const pill = (label: string, value: string, tone: string) => (
     <span className="px-2.5 py-2 rounded-xl bg-white/5 text-gray-300 border border-white/10 text-xs font-bold whitespace-nowrap">
@@ -282,17 +275,16 @@ function DemoBar({
           {bingo(STRIP)}
           <button type="button" onClick={() => setMoreOpen(true)} aria-haspopup="dialog" className={`${BTN} ${TONE.plain} ${STRIP} relative`}>
             ⋯<span>More</span>
-            {(remoteActive || shareActive) && <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-emerald-400" aria-label="Remote or share is on" />}
+            {remoteActive && <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-emerald-400" aria-label="Remote is on" />}
           </button>
         </div>
 
         {/* From 1280px: one row of labelled groups */}
-        <div className="hidden xl:flex items-center gap-2 flex-1 min-w-0">
+        <div className="hidden xl:flex flex-wrap items-center gap-2 flex-1 min-w-0">
           {toggle('', true)}
           {join('')}
           {divider}
           {remote('', onRemote)}
-          {share('', onShare, true)}
           {tryIt('', onTryIt, true)}
           {divider}
           {bingo('')}
@@ -316,7 +308,6 @@ function DemoBar({
             <div className="flex flex-col gap-2">
               <p className="text-white/50 text-[11px] font-black uppercase tracking-wider">Show the room</p>
               {remote('w-full justify-start px-3', inSheet(onRemote))}
-              {share('w-full justify-start px-3', inSheet(onShare), true)}
               {tryIt('w-full justify-start px-3', inSheet(onTryIt), true)}
             </div>
             <div className="flex flex-col gap-2">
@@ -345,15 +336,22 @@ function DemoBar({
 
 // The picked group is held by the projector (not here) so a group chosen on the
 // paired phone lands on the same "Enter Password" step as a click on screen.
-function JoinScreen({ selected, onSelect, onJoin, theme }: {
+function JoinScreen({ selected, onSelect, onJoin, theme, name, named, onName, onNameNext, onNameBack }: {
   theme: PlayerTheme
+  /** The name step is held by the screen (not here) so the paired remote types, taps Next and goes back in step with it. */
+  name: string
+  named: boolean
+  onName: (name: string) => void
+  onNameNext: () => void
+  onNameBack: () => void
   selected: string | null
   onSelect: (groupName: string | null) => void
   onJoin: (groupName: string) => void
 }) {
   const grab = theme === 'grab'
   const accent = grab ? GRAB_GREEN : '#a855f7'
-  const step = selected ? 2 : 1
+  // A group the big screen already picked wins, so the remote follows it to the password step.
+  const step = selected ? 2 : !named ? 0 : 1
   const [search, setSearch] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
@@ -397,12 +395,41 @@ function JoinScreen({ selected, onSelect, onJoin, theme }: {
         )}
       </div>
 
+      {step === 0 && (
+        <div
+          className="relative z-10 bg-white rounded-3xl shadow-2xl p-8 w-full max-w-sm animate-bounce-in"
+          style={{ animationDelay: '0.15s', opacity: 0, animationFillMode: 'forwards' }}
+        >
+          <h2 className="text-2xl font-black text-gray-900 text-center mb-1">What's your name?</h2>
+          <p className="text-gray-400 text-center text-sm mb-5">Your team will see this name.</p>
+          <form onSubmit={e => { e.preventDefault(); if (name.trim()) onNameNext() }} className="flex flex-col gap-3">
+            <input
+              type="text" value={name} onChange={e => onName(e.target.value)} placeholder="Your name" maxLength={40}
+              aria-label="Your name" data-tap
+              className="w-full px-5 py-4 rounded-2xl border-2 text-lg font-bold text-gray-900 focus:outline-none transition-colors text-center"
+              style={{ borderColor: name.trim() ? accent : '#e5e7eb' }}
+            />
+            <button
+              type="submit" disabled={!name.trim()} data-tap data-remote="joinNameNext"
+              className="w-full py-4 rounded-2xl text-white font-black text-xl transition-all duration-200 disabled:opacity-40 hover:scale-105 active:scale-95 mt-1"
+              style={{ backgroundColor: accent, boxShadow: `0 8px 24px ${accent}44` }}
+            >
+              Next →
+            </button>
+          </form>
+        </div>
+      )}
+
       {step === 1 && (
         <div
           className="relative z-10 bg-white rounded-3xl shadow-2xl p-8 w-full max-w-sm animate-bounce-in"
           style={{ animationDelay: '0.15s', opacity: 0, animationFillMode: 'forwards' }}
         >
+          <button data-tap data-remote="joinNameBack" onClick={onNameBack} className="text-sm text-purple-500 font-bold mb-4 hover:text-purple-700 transition-colors">
+            &larr; Back
+          </button>
           <h2 className="text-2xl font-black text-gray-900 text-center mb-1">Join Game</h2>
+          <p className="text-gray-400 text-center text-sm mb-1">Hi <span className="text-purple-500 font-bold">{name.trim()}</span>!</p>
           <p className="text-gray-400 text-center text-sm mb-5">Search and select your group</p>
 
           <input
@@ -421,7 +448,7 @@ function JoinScreen({ selected, onSelect, onJoin, theme }: {
               groups.map(group => (
                 <button
                   key={group}
-                  data-tap
+                  data-tap data-remote="group" data-group={group}
                   onClick={() => pick(group)}
                   className="w-full px-5 py-4 rounded-2xl border-2 text-left font-bold text-lg transition-all duration-150 border-gray-200 text-gray-800 hover:border-purple-400 hover:bg-purple-50 active:scale-[0.98]"
                 >
@@ -443,7 +470,7 @@ function JoinScreen({ selected, onSelect, onJoin, theme }: {
           style={{ animationDelay: '0.05s', opacity: 0, animationFillMode: 'forwards' }}
         >
           <button
-            onClick={() => onSelect(null)}
+            onClick={() => onSelect(null)} data-remote="cancelJoin"
             className="text-sm text-purple-500 font-bold mb-4 hover:text-purple-700 transition-colors"
           >
             &larr; Back
@@ -487,7 +514,7 @@ function JoinScreen({ selected, onSelect, onJoin, theme }: {
             )}
 
             <button
-              type="submit"
+              type="submit" data-remote="confirmJoin"
               disabled={password.length !== 4}
               className="w-full py-4 rounded-2xl text-white font-black text-xl transition-all duration-200 disabled:opacity-40 hover:scale-105 active:scale-95 mt-1"
               style={{ backgroundColor: accent, boxShadow: `0 8px 24px ${accent}44` }}
@@ -829,16 +856,11 @@ const BoardScreen = forwardRef<BoardScreenHandle, {
       celebratedLinesRef.current = new Set(completedLineIndices)
       return
     }
-    const newLines: number[] = []
-    completedLineIndices.forEach(idx => { if (!celebratedLinesRef.current!.has(idx)) newLines.push(idx) })
-    if (newLines.length === 0) return
-    const baseSize = celebratedLinesRef.current.size
-    newLines.forEach(idx => celebratedLinesRef.current!.add(idx))
-    // Distinct letters only. Past five lines the label is capped at 'BINGO',
-    // so a press that lands several lines at once would otherwise queue the
-    // same celebration over and over — 4s each, with the room waiting.
-    const queued = [...new Set(newLines.map((_, i) => BINGO_WORD.slice(0, Math.min(baseSize + i + 1, 5))))]
-    setPopupQueue(prev => [...prev, ...queued])
+    // Same rule as the player board: each step of BINGO once, nothing past the fifth line.
+    const { next, popups } = planLineCelebrations(celebratedLinesRef.current, completedLineIndices)
+    if (next.size === celebratedLinesRef.current.size) return
+    celebratedLinesRef.current = next
+    if (popups.length) setPopupQueue(prev => [...prev, ...popups])
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [completedLinesKey])
 
@@ -916,7 +938,7 @@ const BoardScreen = forwardRef<BoardScreenHandle, {
                 sandbox link rather than a team invite — nothing here is saved,
                 so each scan opens its own private board. */}
             {/* Phone: these two live in the bottom bar, as on the real board. */}
-            <div className={observer ? 'hidden' : 'hidden md:block'}>
+            <div className="hidden">
               <MyQrButton
                 label="Invite teammate"
                 teamName={teamName}
@@ -928,7 +950,7 @@ const BoardScreen = forwardRef<BoardScreenHandle, {
             </div>
             <button
               onClick={onShowScoreboard}
-              className="hidden md:block text-xs font-bold text-purple-300 hover:text-purple-200 transition-colors"
+              className="hidden text-xs font-bold text-purple-300 hover:text-purple-200 transition-colors"
             >
               🏆 Scoreboard
             </button>
@@ -1059,7 +1081,7 @@ const BoardScreen = forwardRef<BoardScreenHandle, {
       </main>
 
       {/* Phone bottom bar, same component and tabs as the real player board. */}
-      <BoardBottomBar theme={theme} teamName={teamName} inviteUrl={observer ? '' : inviteUrl} scoreboardPath=""
+      <BoardBottomBar always theme={theme} teamName={teamName} inviteUrl={observer ? '' : inviteUrl} scoreboardPath=""
         onInvite={() => setInviteOpen(true)} onScores={onShowScoreboard} />
       {gridTasks.length > 0 && (
         <div className="relative z-10 pb-6 flex justify-center gap-4 text-xs text-gray-500">
@@ -1095,7 +1117,7 @@ const BoardScreen = forwardRef<BoardScreenHandle, {
           </div>
         </div>
       )}
-      <BoardBarSpacer />
+      <BoardBarSpacer always />
     </div>
   )
 })
@@ -1247,6 +1269,8 @@ export type SampleTaskDetailHandle = {
   prevPage: () => void
   fillMarshal: () => void
   submitComplete: () => void
+  /** Demo shortcut for cards with their own mechanism: mark the card done without playing it. */
+  autoComplete: () => void
   scroll: (direction: 'up' | 'down') => void
   /** Jump to a fraction of the scrollable range, for mirroring. */
   scrollTo: (frac: number) => void
@@ -1337,6 +1361,11 @@ export const SampleTaskDetail = forwardRef<SampleTaskDetailHandle, {
   const [blockValues, setBlockValues] = useState<string[]>([])
   const [blockResults, setBlockResults] = useState<boolean[] | null>(null)
   const [blocksOk, setBlocksOk] = useState(false)
+  // A number with a floor (answer_min), like the player view: type the total, it must reach the floor.
+  const numberMode = !!inputs.answer && task.answer_min != null
+  const [numberValue, setNumberValue] = useState('')
+  const [numberRejected, setNumberRejected] = useState<string | null>(null)
+  const [numberOk, setNumberOk] = useState(false)
   const needsDrawnAnswer = !!(inputs.answer && !blocksMode && !task.answer_text && task.answer_min == null && drawConfig)
   // Text input with only a question: free text, approved by the demo marshal.
   const freeTextMode = !!(inputs.answer && !blocksMode && !task.answer_text && task.answer_min == null && !drawConfig)
@@ -1355,6 +1384,21 @@ export const SampleTaskDetail = forwardRef<SampleTaskDetailHandle, {
       if (!completed && !(inputs.photo || inputs.video || inputs.link || inputs.versus)) onComplete()
     }
   }
+
+  /** The demo knows the floor, so it checks here what the real card asks the database. */
+  const checkNumber = (): boolean => {
+    const value = Number(numberValue.replace(/[,\s]/g, ''))
+    if (numberValue.trim() === '' || !Number.isFinite(value)) return false
+    if (value >= (task.answer_min ?? 0)) {
+      setNumberOk(true); setNumberRejected(null)
+      if (!completed && !(inputs.photo || inputs.video || inputs.link || inputs.versus)) onComplete()
+      return true
+    }
+    setNumberRejected(numberValue)
+    return false
+  }
+  // A number beside a photo/video has no Check button: Submit checks it first, as the player view does.
+  const combinedCheck = numberMode && !!(inputs.photo || inputs.video) && !numberOk
 
   const checkDrawnAnswer = async () => {
     const typed = guess.trim()
@@ -1463,6 +1507,7 @@ export const SampleTaskDetail = forwardRef<SampleTaskDetailHandle, {
 
   const submitStaged = () => {
     if (staged.length === 0 && !combinedVersus) return
+    if (combinedCheck && !checkNumber()) return
     if (combinedVersus) setVersusSent(true)
     if (staged.length === 0) return
     // The demo keeps the last frame to show the marshal what arrived, then
@@ -1490,6 +1535,7 @@ export const SampleTaskDetail = forwardRef<SampleTaskDetailHandle, {
     prevPage: () => setCurrentPage(p => Math.max(0, p - 1)),
     fillMarshal: () => { setMarshalInput(marshalPassword); setMarshalError('') },
     submitComplete: () => doComplete(),
+    autoComplete: () => onComplete(),
     scroll: direction => scrollRef.current?.scrollBy({ top: direction === 'down' ? 400 : -400, behavior: 'smooth' }),
     scrollTo: frac => {
       const el = scrollRef.current
@@ -1503,6 +1549,7 @@ export const SampleTaskDetail = forwardRef<SampleTaskDetailHandle, {
   }))
 
   // Report the current step up so the controller renders the right buttons.
+  const ownMechanism = hasOwnMechanism(task.completion_inputs)
   useEffect(() => {
     onStep?.({
       phase: showSplash ? 'splash' : 'main',
@@ -1510,8 +1557,9 @@ export const SampleTaskDetail = forwardRef<SampleTaskDetailHandle, {
       pageCount: pages.length,
       isMarshalTask,
       marshalFilled,
+      ownMechanism,
     })
-  }, [onStep, showSplash, currentPage, pages.length, isMarshalTask, marshalFilled])
+  }, [onStep, showSplash, currentPage, pages.length, isMarshalTask, marshalFilled, ownMechanism])
 
   // ── Splash ──
   if (showSplash) {
@@ -1526,6 +1574,7 @@ export const SampleTaskDetail = forwardRef<SampleTaskDetailHandle, {
         <div className="absolute -bottom-32 -right-32 w-80 h-80 bg-white/10 rounded-full blur-3xl animate-float" style={{ animationDelay: '1s' }} />
         <button
           onClick={(e) => { e.stopPropagation(); onClose() }}
+          data-remote="closeTask"
           className="absolute top-5 left-5 z-20 flex items-center gap-1.5 px-3 py-2 rounded-xl bg-black/25 hover:bg-black/35 text-white/90 text-sm font-bold backdrop-blur-sm transition-colors"
         >
           ← Back to Board
@@ -1542,6 +1591,7 @@ export const SampleTaskDetail = forwardRef<SampleTaskDetailHandle, {
         </div>
 
         <button
+          data-remote="startChallenge"
           className="relative z-10 mt-8 px-10 py-4 bg-white/20 backdrop-blur-sm rounded-2xl text-xl font-black uppercase tracking-wider border-2 border-white/30 hover:bg-white/30 active:scale-95 transition-all animate-slide-up"
           style={{ animationDelay: '0.4s' }}
           onClick={(e) => { e.stopPropagation(); setShowSplash(false) }}
@@ -1565,7 +1615,7 @@ export const SampleTaskDetail = forwardRef<SampleTaskDetailHandle, {
   // ── Main view ──
   return (
     <div
-      ref={scrollRef}
+      ref={scrollRef} data-remote-card
       onScroll={e => {
         const el = e.currentTarget
         const range = el.scrollHeight - el.clientHeight
@@ -1582,7 +1632,7 @@ export const SampleTaskDetail = forwardRef<SampleTaskDetailHandle, {
         <div className={`${containerMaxW} mx-auto relative z-10 flex flex-wrap items-start justify-between gap-x-4 gap-y-3`}>
           <div className="flex items-start gap-3">
             <button
-              onClick={onClose}
+              onClick={onClose} data-remote="closeTask"
               className="mt-1 flex-shrink-0 flex items-center gap-1 px-2.5 py-1.5 bg-white/15 hover:bg-white/25 rounded-lg text-white/80 hover:text-white text-xs font-bold transition-colors"
             >
               ← Board
@@ -1822,7 +1872,7 @@ export const SampleTaskDetail = forwardRef<SampleTaskDetailHandle, {
                     icon: '🔒', sub: 'Complete this card first' }]} />
               </div>
               <button
-                onClick={onClose}
+                onClick={onClose} data-remote="closeTask"
                 className="mt-3 w-full py-3 rounded-2xl text-white/70 font-bold border border-white/15 hover:bg-white/5 transition-colors"
               >
                 ← Back to Board
@@ -1832,7 +1882,7 @@ export const SampleTaskDetail = forwardRef<SampleTaskDetailHandle, {
             <>
               <DemoBundleCard task={task} marshalPassword={marshalPassword} />
               <button
-                onClick={onClose}
+                onClick={onClose} data-remote="closeTask"
                 className="mt-4 w-full py-3 rounded-2xl text-white/70 font-bold border border-white/15 hover:bg-white/5 transition-colors"
               >
                 ← Back to Board
@@ -1845,7 +1895,7 @@ export const SampleTaskDetail = forwardRef<SampleTaskDetailHandle, {
                 <p className="text-2xl font-black mb-1 text-white">Challenge Complete!</p>
                 <p className="text-white/60 text-sm font-medium">Great job, {teamName}!</p>
                 <button
-                  onClick={onClose}
+                  onClick={onClose} data-remote="closeTask"
                   className="mt-5 w-full py-3 rounded-2xl text-white font-black uppercase tracking-wider transition-all active:scale-95"
                   style={{ backgroundColor: task.hex_code, boxShadow: `0 4px 0 ${task.hex_code}88` }}
                 >
@@ -1853,6 +1903,7 @@ export const SampleTaskDetail = forwardRef<SampleTaskDetailHandle, {
                 </button>
               </div>
               <button
+                data-remote="uncomplete"
                 onClick={() => { onUncomplete(); setBlocksOk(false); setBlockValues([]); if (task.task_type === 'answer') setAnswerInputs(answerRows.map(() => '')) }}
                 className="mt-3 px-4 py-2 text-sm text-white/40 hover:text-red-400 transition-colors"
               >
@@ -1909,7 +1960,7 @@ export const SampleTaskDetail = forwardRef<SampleTaskDetailHandle, {
                         </div>
                         <div className="mb-4">
                           <input
-                            type="password"
+                            type="password" data-remote="fillMarshal"
                             value={marshalInput}
                             onChange={e => { setMarshalInput(e.target.value); setMarshalError('') }}
                             placeholder="Marshal password..."
@@ -1922,6 +1973,7 @@ export const SampleTaskDetail = forwardRef<SampleTaskDetailHandle, {
                       </>
                     )}
                     <button
+                      data-remote="complete"
                       onClick={() => {
                         if (task.require_marshal && marshalInput.trim() !== marshalPassword) {
                           setMarshalError('Wrong marshal password.')
@@ -1935,6 +1987,51 @@ export const SampleTaskDetail = forwardRef<SampleTaskDetailHandle, {
                       Complete Challenge ✅
                     </button>
                   </>
+                )}
+
+                {/* A number with a floor comes before the evidence: prove the count, then send the screenshots. */}
+                {numberMode && !needsDrawnAnswer && (
+                  <div className="mb-6">
+                    {task.answer_question && (
+                      <p className="text-white font-black text-lg mb-4 text-center leading-snug">{task.answer_question}</p>
+                    )}
+                    {numberOk ? (
+                      <div className="p-4 rounded-2xl bg-green-400/15 border border-green-400/40 text-center">
+                        <p className="text-green-300 font-black">✓ Number accepted</p>
+                        <p className="text-green-300/60 text-xs font-bold mt-1">
+                          {inputs.photo ? 'Now send your screenshots as evidence.' : 'That is over the line.'}
+                        </p>
+                      </div>
+                    ) : (
+                      <>
+                        <div className="flex gap-2">
+                          <input
+                            type="text" inputMode="numeric" value={numberValue}
+                            onChange={e => { setNumberValue(e.target.value); setNumberRejected(null) }}
+                            onKeyDown={e => { if (e.key === 'Enter' && !combinedCheck) checkNumber() }}
+                            placeholder="Enter the total" aria-label="Total"
+                            className="flex-1 min-w-0 px-4 py-3 rounded-2xl border-2 text-center text-xl font-black focus:outline-none bg-white/10 text-white placeholder-white/30"
+                            style={{ borderColor: numberRejected ? '#ef4444' : numberValue ? task.hex_code : 'rgba(255,255,255,0.2)' }}
+                          />
+                          {!combinedCheck && (
+                            <button
+                              onClick={() => checkNumber()}
+                              disabled={!numberValue.trim()}
+                              className="px-5 rounded-2xl font-black uppercase tracking-wider text-sm transition-all active:scale-95 disabled:opacity-40"
+                              style={{ background: task.hex_code, color: '#000' }}
+                            >
+                              Check
+                            </button>
+                          )}
+                        </div>
+                        {numberRejected && (
+                          <p className="text-red-400 text-xs font-bold text-center mt-2">
+                            {numberRejected} is not enough yet - keep going and try again.
+                          </p>
+                        )}
+                      </>
+                    )}
+                  </div>
                 )}
 
                 {/* Photo: submit → marshal approve (demo) */}
@@ -2032,7 +2129,7 @@ export const SampleTaskDetail = forwardRef<SampleTaskDetailHandle, {
                           return (
                             <button
                               onClick={submitStaged}
-                              disabled={missingFile || missingVersus}
+                              disabled={missingFile || missingVersus || (combinedCheck && !numberValue.trim())}
                               className="w-full mt-4 py-3.5 rounded-2xl font-black uppercase tracking-wider transition-all active:scale-95 disabled:opacity-50"
                               style={{ backgroundColor: task.hex_code, color: '#000' }}
                             >
@@ -2305,7 +2402,7 @@ export const SampleTaskDetail = forwardRef<SampleTaskDetailHandle, {
                   </div>
                 )}
 
-                {inputs.answer && !freeTextMode && !blocksMode && (
+                {inputs.answer && !freeTextMode && !blocksMode && !numberMode && !needsDrawnAnswer && (
                   <>
                     {task.answer_question && (
                       <p className="text-white font-black text-lg mb-4 text-center leading-snug">{task.answer_question}</p>
@@ -2400,7 +2497,7 @@ export const SampleTaskDetail = forwardRef<SampleTaskDetailHandle, {
                 )}
 
                 <button
-                  onClick={onClose}
+                  onClick={onClose} data-remote="closeTask"
                   className="mt-5 w-full py-3 rounded-2xl text-white/70 font-bold text-sm uppercase tracking-wider border border-white/20 hover:bg-white/10 hover:text-white transition-all active:scale-95"
                 >
                   ← Back to Board
@@ -2440,17 +2537,10 @@ export const SampleTaskDetail = forwardRef<SampleTaskDetailHandle, {
 
 // Entry point:
 //   ?remote=<code> → the phone controller
-//   ?watch=<code>  → the same screen read-only, for the audience to follow
 //   otherwise      → the normal sample view, which doubles as the "projector"
-//
-// A viewer is literally the controller with its buttons hidden: that component
-// is already a phone-sized mirror of the big screen driven entirely by
-// RemoteState, so there is nothing else to build.
 export function BingoDashSample() {
   const params = new URLSearchParams(window.location.search)
   const remoteCode = params.get('remote')
-  const watchCode = params.get('watch')
-  if (watchCode) return <SampleController code={watchCode} readOnly />
   return remoteCode ? <SampleController code={remoteCode} /> : <SampleProjector />
 }
 
@@ -2477,6 +2567,97 @@ const QUICK_WIN_STEPS: number[][] = [
 // Board to come back to after "Reset demo" reloads the page.
 const RESET_BOARD_KEY = 'sample_reset_board'
 
+// ── Remote taps shown on the screen ───────────────────────────────────────────
+// When the paired phone presses something, the screen shows the press first (a yellow ring round the
+// button) and acts a moment later, so the room can see which
+// button was pressed. The buttons are found through their data-remote markers.
+const REMOTE_TAP_MS = 240
+
+/** The name shown for a remote command, or null for ones that are not button presses (scrolling, typing). */
+function remoteTapLabel(c: RemoteCommand): string | null {
+  switch (c.action) {
+    case 'join': return c.teamName
+    case 'confirmJoin': return 'Join group'
+    case 'cancelJoin': case 'joinNameBack': return 'Back'
+    case 'joinNameNext': return 'Next'
+    case 'leave': return 'Leave team'
+    case 'openTask': return 'Open card'
+    case 'closeTask': return 'Back to board'
+    case 'complete': case 'submitComplete': case 'autoComplete': return 'Complete'
+    case 'uncomplete': return 'Undo complete'
+    case 'startChallenge': return 'Start challenge'
+    case 'nextPage': return 'Next'
+    case 'prevPage': return 'Back'
+    case 'fillMarshal': return 'Marshal password'
+    case 'quickWin': return 'Quick BINGO'
+    case 'reset': return 'Reset demo'
+    case 'setView': return c.view === 'scoreboard' ? 'Scoreboard' : 'Board'
+    case 'selectBoard': return 'Switch board'
+    case 'dismissPopup': return 'Continue'
+    case 'setChat': return c.open ? 'Message' : 'Close message'
+    case 'setInvite': return c.open ? 'Invite QR' : 'Close QR'
+    case 'setJoinQr': return c.mode === 'off' ? 'Close QR' : c.mode === 'player' ? 'Player QR' : 'Observer QR'
+    case 'setWaiting': return 'Waiting screen'
+    case 'setObserver': return 'Observer view'
+    case 'setLang': return c.lang === 'ms' ? 'BM' : 'EN'
+    case 'uiClick': case 'uiFile': case 'uiTap': return c.label // typing (uiType) is not a press: it applies as it comes
+    default: return null
+  }
+}
+
+/** The button on this screen that a remote command stands for, if it is showing. */
+function remoteTapTarget(c: RemoteCommand, tileIndex: number): HTMLElement | null {
+  const marked = (name: string) =>
+    [...document.querySelectorAll<HTMLElement>(`[data-remote="${name}"]`)].find(e => e.getClientRects().length > 0) ?? null
+  switch (c.action) {
+    case 'openTask': return tileIndex >= 0 ? document.querySelectorAll<HTMLElement>('.board-grid > *')[tileIndex] ?? null : null
+    case 'join': return [...document.querySelectorAll<HTMLElement>('[data-remote="group"]')].find(e => e.dataset.group === c.teamName) ?? null
+    case 'setView': return marked(c.view === 'scoreboard' ? 'viewScoreboard' : 'viewBoard')
+    case 'setInvite': return c.open ? marked('invite') : null
+    case 'setLang': return marked(`lang-${c.lang}`)
+    case 'complete': case 'submitComplete': case 'autoComplete': return marked('complete')
+    case 'uiClick': case 'uiFile': case 'uiTap': return controlRing(c.i, c.label)
+    case 'confirmJoin': case 'cancelJoin': case 'joinNameNext': case 'joinNameBack': case 'closeTask': case 'uncomplete':
+    case 'startChallenge': case 'nextPage': case 'prevPage': case 'fillMarshal': case 'quickWin': case 'setWaiting': case 'setObserver':
+      return marked(c.action)
+    default: return null
+  }
+}
+
+/**
+ * Show a remote press on this screen. The yellow ring is at full strength from the first frame and is removed
+ * the moment the press is acted on (the returned function), so it can never sit over what the press just
+ * changed. A press with no button to ring (Board, a QR toggle) shows a short label at the top instead, which
+ * is clear of the card and the board.
+ */
+function showRemoteTap(el: HTMLElement | null, label: string): () => void {
+  const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+  const layer = document.createElement('div')
+  layer.setAttribute('aria-hidden', 'true')
+  layer.style.cssText = 'position:fixed;inset:0;pointer-events:none;z-index:2147483000;'
+  document.body.appendChild(layer)
+  if (el) {
+    el.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+    const r = el.getBoundingClientRect()
+    const ring = document.createElement('div')
+    ring.style.cssText = `position:absolute;left:${r.left - 4}px;top:${r.top - 4}px;width:${r.width + 8}px;height:${r.height + 8}px;` +
+      `border-radius:${getComputedStyle(el).borderRadius};border:3px solid #facc15;box-sizing:border-box;box-shadow:0 0 14px 3px rgba(250,204,21,.8);`
+    layer.append(ring)
+    if (!reduce) {
+      ring.animate([{ transform: 'scale(1.08)' }, { transform: 'scale(1)' }], { duration: 140, easing: 'ease-out' })
+      el.animate([{ transform: 'scale(1)' }, { transform: 'scale(.95)' }, { transform: 'scale(1)' }], { duration: REMOTE_TAP_MS })
+    }
+    return () => layer.remove()
+  }
+  const pill = document.createElement('div')
+  pill.textContent = `📱 Remote: ${label}`
+  pill.style.cssText = 'position:absolute;left:50%;transform:translateX(-50%);top:calc(8px + env(safe-area-inset-top));' +
+    'padding:6px 14px;border-radius:9999px;background:#facc15;color:#111827;font:800 13px/1.2 system-ui,sans-serif;white-space:nowrap;max-width:calc(100vw - 32px);overflow:hidden;text-overflow:ellipsis;box-shadow:0 4px 14px rgba(0,0,0,.4);'
+  layer.appendChild(pill)
+  window.setTimeout(() => layer.remove(), 800)
+  return () => {}
+}
+
 function SampleProjector() {
   // `?board=<sectionId>` lets the admin launch the demo pre-scoped to a
   // specific event's board (from the Run Event panel); when present it also
@@ -2500,6 +2681,9 @@ function SampleProjector() {
   const [teamName, setTeamName] = useState<string | null>(null)
   // Group picked on the join screen but not yet past "Enter Password".
   const [pendingGroup, setPendingGroup] = useState<string | null>(null)
+  // The join screen's name step. Pre-filled so a demo (or its remote) can just tap Next.
+  const [joinName, setJoinName] = useState('Player')
+  const [joinNamed, setJoinNamed] = useState(false)
   const [scanState, setScanState] = useState<ScanState>({})
   const [openTask, setOpenTask] = useState<BingoTask | null>(null)
   // Quick BINGO's own completion, tracked by SLOT rather than task id. A card
@@ -2553,14 +2737,6 @@ function SampleProjector() {
     () => new URLSearchParams(window.location.search).get('pair'),
   )
   const [showPair, setShowPair] = useState(false)
-  // Audience viewers get their OWN code on their own channel. The control code
-  // is never handed out, so a scanned link cannot be edited into control mode.
-  // Lives in the URL as ?share=<code> for the same reason as ?pair= below: a
-  // reload would otherwise kill every QR already scanned in the room.
-  const [watchCode, setWatchCode] = useState<string | null>(
-    () => new URLSearchParams(window.location.search).get('share'),
-  )
-  const [showShare, setShowShare] = useState(false)
   const [showTryIt, setShowTryIt] = useState(false)
   // Live step of the open task detail, reported up so the phone shows the right
   // buttons (Start Challenge → pages → marshal password → Complete).
@@ -2669,9 +2845,12 @@ function SampleProjector() {
     window.location.reload()
   }
 
+  const lang = useLang()
   // What a player sees before the host starts the game, and what an observer sees instead of a player.
   const [waiting, setWaiting] = useState(false)
   const [observer, setObserver] = useState(false)
+  // What the open card has on screen that the phone can press, type into or tap (see lib/remoteControls).
+  const [cardControls, setCardControls] = useState<RemoteControl[]>([])
 
   const handleOpenTask = (task: BingoTask) => {
     setScanState(prev => prev[task.id] ? prev : { ...prev, [task.id]: 'scanned' })
@@ -2703,6 +2882,8 @@ function SampleProjector() {
     locked,
     teamName,
     pendingGroup,
+    joinName,
+    joinNamed,
     scanState,
     openTaskId: openTask?.id ?? null,
     view,
@@ -2713,6 +2894,10 @@ function SampleProjector() {
     joinQr,
     quickWinRows,
     chatOpen,
+    waiting,
+    observer,
+    lang,
+    controls: openTask ? cardControls : [],
     scroll: scrollFrac,
   })
 
@@ -2721,10 +2906,13 @@ function SampleProjector() {
       case 'selectBoard': if (!locked) handleSelectBoard(c.id); break
       case 'join': setPendingGroup(c.teamName); break // → "Enter Password" step
       case 'cancelJoin': setPendingGroup(null); break
+      case 'setJoinName': setJoinName(c.name.slice(0, 40)); break
+      case 'joinNameNext': if (joinName.trim()) setJoinNamed(true); break
+      case 'joinNameBack': setJoinNamed(false); setPendingGroup(null); break
       case 'confirmJoin':
         if (pendingGroup) { setTeamName(pendingGroup); setPendingGroup(null) }
         break
-      case 'leave': setTeamName(null); setPendingGroup(null); setOpenTask(null); break
+      case 'leave': setTeamName(null); setPendingGroup(null); setJoinNamed(false); setOpenTask(null); break
       case 'openTask': {
         const t = gridTasks.find(x => x.id === c.taskId)
         if (t) handleOpenTask(t)
@@ -2741,6 +2929,7 @@ function SampleProjector() {
       case 'prevPage': detailRef.current?.prevPage(); break
       case 'fillMarshal': detailRef.current?.fillMarshal(); break
       case 'submitComplete': detailRef.current?.submitComplete(); break
+      case 'autoComplete': detailRef.current?.autoComplete(); break
       case 'scroll':
         if (openTask && detailRef.current) detailRef.current.scroll(c.direction)
         else window.scrollBy({ top: c.direction === 'down' ? 400 : -400, behavior: 'smooth' })
@@ -2759,34 +2948,49 @@ function SampleProjector() {
       case 'setInvite': boardRef.current?.setInvite(c.open); break
       case 'setChat': boardRef.current?.setChat(c.open); break
       case 'setJoinQr': setJoinQr(c.mode); break
+      case 'setWaiting': setWaiting(c.on); setOpenTask(null); setView('board'); break
+      case 'setObserver': setObserver(c.on); break
+      case 'setLang': setLang(c.lang); break
+      case 'uiClick': pressControl(c.i, c.label); break
+      case 'uiType': typeControl(c.i, c.label, c.value); break
+      case 'uiFile': void giveFile(c.i, c.label); break
+      case 'uiTap': tapControl(c.i, c.label, c.x, c.y); break
       case 'requestState': sendState(snapshot()); break
     }
   }
 
-  const { sendState } = useSampleRemote(remoteCode, { onCommand: applyCommand })
-  // Send-only: viewers never talk back, so this channel has no handlers.
-  const { sendState: sendWatchState } = useSampleRemote(watchCode, {})
+  // A button press from the phone is shown on this screen first, then acted on REMOTE_TAP_MS later.
+  // The timer runs the newest applyCommand, since it reads state (the name typed, the group picked...).
+  const applyRef = useRef(applyCommand)
+  applyRef.current = applyCommand
+  const onRemoteCommand = (c: RemoteCommand) => {
+    const label = remoteTapLabel(c)
+    if (!label) { applyCommand(c); return }
+    const tileIndex = c.action === 'openTask' ? buildBingoSlots(gridTasks).findIndex(t => t?.id === c.taskId) : -1
+    const clear = showRemoteTap(remoteTapTarget(c, tileIndex), label)
+    window.setTimeout(() => { clear(); applyRef.current(c) }, REMOTE_TAP_MS)
+  }
+  const { sendState } = useSampleRemote(remoteCode, { onCommand: onRemoteCommand })
 
-  // Push a fresh snapshot to the paired phone and to any viewers on every
-  // meaningful change. One snapshot, sent down both channels.
+  // Push a fresh snapshot to the paired phone on every meaningful change.
   useEffect(() => {
-    if (!remoteCode && !watchCode) return
-    const snap = {
-      selectedId, locked, teamName, pendingGroup, scanState,
-      openTaskId: openTask?.id ?? null,
-      view,
-      detail: openTask ? detailStep : null,
-      popup: popup.letters,
-      popupQueued: popup.queued,
-      inviteOpen,
-      joinQr,
-      quickWinRows,
-      chatOpen,
-      scroll: scrollFrac,
+    if (!remoteCode) return
+    sendState(snapshot())
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [remoteCode, selectedId, teamName, pendingGroup, joinName, joinNamed, scanState, openTask, view, detailStep, popup, inviteOpen, joinQr, quickWinRows, chatOpen, waiting, observer, lang, cardControls, scrollFrac, sendState])
+
+  // The card's own controls change as it is played (a game starts, an answer is accepted), so look again
+  // while a card is open and a phone is paired; state only changes when what was found did.
+  useEffect(() => {
+    if (!remoteCode || !openTask) { setCardControls(prev => (prev.length ? [] : prev)); return }
+    const look = () => {
+      const next = scanControls()
+      setCardControls(prev => (JSON.stringify(prev) === JSON.stringify(next) ? prev : next))
     }
-    if (remoteCode) sendState(snap)
-    if (watchCode) sendWatchState(snap)
-  }, [remoteCode, watchCode, selectedId, teamName, pendingGroup, scanState, openTask, view, detailStep, popup, inviteOpen, joinQr, quickWinRows, chatOpen, scrollFrac, sendState, sendWatchState])
+    look()
+    const id = window.setInterval(look, 400)
+    return () => window.clearInterval(id)
+  }, [remoteCode, openTask])
 
   // Heartbeat. The phone cannot tell "nothing has changed" from "the projector
   // is gone", so the projector re-broadcasts its state every few seconds and
@@ -2795,14 +2999,10 @@ function SampleProjector() {
   const snapshotRef = useRef(snapshot)
   snapshotRef.current = snapshot
   useEffect(() => {
-    if (!remoteCode && !watchCode) return
-    const id = setInterval(() => {
-      const snap = snapshotRef.current()
-      if (remoteCode) sendState(snap)
-      if (watchCode) sendWatchState(snap)
-    }, HEARTBEAT_MS)
+    if (!remoteCode) return
+    const id = setInterval(() => sendState(snapshotRef.current()), HEARTBEAT_MS)
     return () => clearInterval(id)
-  }, [remoteCode, watchCode, sendState, sendWatchState])
+  }, [remoteCode, sendState])
 
   const enableRemote = () => {
     setRemoteCode(prev => {
@@ -2816,18 +3016,6 @@ function SampleProjector() {
       return code
     })
     setShowPair(true)
-  }
-
-  const enableShare = () => {
-    setWatchCode(prev => {
-      if (prev) return prev
-      const code = makeRemoteCode()
-      const url = new URL(window.location.href)
-      url.searchParams.set('share', code)
-      window.history.replaceState(null, '', url)
-      return code
-    })
-    setShowShare(true)
   }
 
   if (loading) {
@@ -2850,8 +3038,6 @@ function SampleProjector() {
         showQuickWin={!!teamName && gridTasks.length > 0}
         onRemote={enableRemote}
         remoteActive={!!remoteCode}
-        onShare={enableShare}
-        shareActive={!!watchCode}
         onTryIt={() => setShowTryIt(true)}
         view={view}
         onToggleView={() => setView(v => v === 'board' ? 'scoreboard' : 'board')}
@@ -2886,6 +3072,8 @@ function SampleProjector() {
           selected={pendingGroup}
           onSelect={setPendingGroup}
           onJoin={name => { setTeamName(name); setPendingGroup(null) }}
+          name={joinName} named={joinNamed} onName={setJoinName}
+          onNameNext={() => setJoinNamed(true)} onNameBack={() => { setJoinNamed(false); setPendingGroup(null) }}
         />
       ) : waiting ? (
         <SampleWaiting theme={normalizePlayerTheme(selectedSection?.player_theme)} boardName={selectedSection?.name ?? ''} teamName={teamName} onBack={() => setWaiting(false)} />
@@ -2952,18 +3140,6 @@ function SampleProjector() {
       {showPair && remoteCode && (
         <RemotePairModal code={remoteCode} onClose={() => setShowPair(false)} />
       )}
-      {showShare && watchCode && (
-        <RemotePairModal
-          code={watchCode}
-          param="watch"
-          title="📺 Share this screen"
-          subtitle="Everyone scans this to watch along, read-only"
-          codeLabel="Viewer code"
-          footer="Viewers see exactly what is on this screen and cannot change it. Leave this open while you present."
-          onClose={() => setShowShare(false)}
-        />
-      )}
-
       {showTryIt && (
         <TryItModal
           boardId={selectedId}
@@ -2998,9 +3174,10 @@ function RemotePairModal({
   codeLabel?: string
   footer?: string
 }) {
-  // VITE_APP_URL first, like QRCodeModal: a QR pointing at localhost cannot be
-  // scanned from a phone, which is the entire point of showing one.
-  const base = import.meta.env.VITE_APP_URL || window.location.origin
+  // VITE_APP_URL first in a real build: a QR pointing at localhost cannot be scanned from a phone,
+  // which is the entire point of showing one. In the dev server the link stays on this page's own
+  // address, so a remote opened from it runs the local code instead of the deployed one.
+  const base = (!import.meta.env.DEV && import.meta.env.VITE_APP_URL) || window.location.origin
   const url = `${base.replace(/\/$/, '')}/bingo-dash/sample?${param}=${code}`
   const [copied, setCopied] = useState(false)
   const copy = () => {
@@ -3194,9 +3371,13 @@ function SampleScoreboard({
 
   const rankColors = ['#fbbf24', '#cbd5e1', '#d97706']
 
+  // Same backdrop the real scoreboard uses for this board: the Grab art for a
+  // Grab board, the particle field otherwise.
+  const grabLook = normalizePlayerTheme(section?.player_theme) === 'grab'
+
   return (
-    <div className="relative">
-      <ParticleBackground />
+    <div className="relative min-h-[80vh]">
+      {grabLook ? <PlayerBackdrop theme="grab" /> : <ParticleBackground />}
       <header className="relative z-10 px-4 sm:px-8 pt-6 sm:pt-8 pb-3">
         <div className="max-w-4xl mx-auto flex items-end justify-between gap-4">
           <div>
@@ -3271,21 +3452,13 @@ function SampleScoreboard({
   )
 }
 
-// ── Phone controller ──────────────────────────────────────────────────────────
-// Loads at /bingo-dash/sample?remote=<code>. Mirrors the projector's live state
-// and drives it: switch board, join, tap tiles (open on screen), complete,
-// Quick Win, reset. Read-only fetches for board/task names; no DB writes.
-
-// `readOnly` turns this same screen into an audience viewer: it already is a
-// phone-sized mirror of the projector driven entirely by RemoteState, so the
-// viewer is this component with its controls hidden and nothing sent back.
-// ── Phone remote / viewer (DESIGN-010) ───────────────────────────────────────
-// Both are a mirror of the projector: the same components, drawn at the phone's width.
-//   readOnly (?watch=CODE): inert mirror, sends nothing.
-//   remote   (?remote=CODE): the mirror drives the projector. Finger-scroll on it sends a scroll
-//   fraction; a tap on a tile or group row opens it there; everything else on the mirror is inert.
-//   The buttons live in a footer: context strip + Board / Scores / Join QR / More dock.
-const DRIVE_MS = 900   // the phone keeps driving this long after the finger lifts
+// ── Phone remote ──────────────────────────────────────────────────────────────
+// Loads at /bingo-dash/sample?remote=<code>. A controls-only panel for the demo screen: it draws no copy of
+// the screen. The board is a grid of coloured squares, every other step is a big button, and a scroll rail
+// moves the screen. State comes from the projector (RemoteState); commands go back to it. No DB writes.
+//
+// Layout: one phone-width column, centred on a laptop (a rounded "phone" with a soft backdrop around it),
+// full width on a phone. header · body (controls + scroll rail) · footer (notices, popup, dock).
 const SEND_MS = 100    // at most ~10 scroll messages a second
 
 const remoteBtn = 'inline-flex items-center justify-center gap-1.5 min-h-[48px] px-2.5 whitespace-nowrap rounded-xl border text-sm font-black transition-colors active:scale-95 disabled:opacity-40 disabled:active:scale-100 focus-visible:outline focus-visible:outline-[3px] focus-visible:outline-yellow-300'
@@ -3295,17 +3468,140 @@ const rTone = {
   primary: 'bg-purple-500 text-white border-purple-400 hover:bg-purple-400',
   gold: 'bg-yellow-400/20 text-yellow-200 border-yellow-400/40 hover:bg-yellow-400/30',
 } as const
+const bigBtn = 'w-full min-h-[60px] text-lg'
 
-function SampleController({ code, readOnly = false }: { code: string; readOnly?: boolean }) {
+/** A tall rail the presenter drags to scroll the screen. The thumb follows the screen when it scrolls on its own. */
+function ScrollRail({ frac, disabled, onFrac }: { frac: number; disabled: boolean; onFrac: (f: number) => void }) {
+  const track = useRef<HTMLDivElement>(null)
+  const [drag, setDrag] = useState<number | null>(null)
+  const last = useRef(0)
+  const fracAt = (e: React.PointerEvent) => {
+    const r = track.current?.getBoundingClientRect()
+    if (!r || r.height <= 0) return 0
+    return Math.min(1, Math.max(0, (e.clientY - r.top) / r.height))
+  }
+  const move = (e: React.PointerEvent) => {
+    const f = fracAt(e)
+    setDrag(f)
+    if (Date.now() - last.current >= SEND_MS) { last.current = Date.now(); onFrac(f) }
+  }
+  const shown = drag ?? frac
+  return (
+    <div
+      role="slider" aria-label="Scroll the screen" aria-orientation="vertical"
+      aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(shown * 100)} tabIndex={disabled ? -1 : 0}
+      onKeyDown={e => {
+        if (disabled) return
+        if (e.key === 'ArrowDown') { e.preventDefault(); onFrac(Math.min(1, shown + 0.1)) }
+        if (e.key === 'ArrowUp') { e.preventDefault(); onFrac(Math.max(0, shown - 0.1)) }
+      }}
+      onPointerDown={e => { if (disabled) return; e.currentTarget.setPointerCapture(e.pointerId); move(e) }}
+      onPointerMove={e => { if (drag !== null) move(e) }}
+      onPointerUp={e => { if (drag !== null) { onFrac(fracAt(e)); setDrag(null) } }}
+      onPointerCancel={() => setDrag(null)}
+      className={`flex-1 min-h-[96px] w-full rounded-xl bg-white/10 border border-white/15 touch-none select-none px-1.5 py-3 focus-visible:outline focus-visible:outline-[3px] focus-visible:outline-yellow-300 ${disabled ? 'opacity-40' : ''}`}
+    >
+      <div ref={track} className="relative h-full">
+        <div className="absolute left-1/2 -translate-x-1/2 top-0 bottom-0 w-1 rounded-full bg-white/20" />
+        <div className="absolute left-0 right-0 h-8 -translate-y-1/2 rounded-lg bg-purple-400 border border-purple-200 shadow" style={{ top: `${shown * 100}%` }} />
+      </div>
+    </div>
+  )
+}
+
+/** A text box on the card, mirrored on the phone. Typing goes across as it is typed; the screen's own value comes back when the box is not being used. */
+function CardText({ c, off, send }: { c: RemoteControl; off: boolean; send: (c: RemoteCommand) => void }) {
+  const [v, setV] = useState(c.value ?? '')
+  const focused = useRef(false)
+  const timer = useRef<number | undefined>(undefined)
+  useEffect(() => { if (!focused.current) setV(c.value ?? '') }, [c.value])
+  useEffect(() => () => window.clearTimeout(timer.current), [])
+  const change = (next: string) => {
+    setV(next)
+    window.clearTimeout(timer.current)
+    timer.current = window.setTimeout(() => send({ action: 'uiType', i: c.i, label: c.label, value: next }), 120)
+  }
+  return (
+    <label className="block">
+      <span className="block mb-1 text-[11px] font-black uppercase tracking-wider text-gray-300">{c.label}</span>
+      <input
+        type="text" value={v} disabled={off || c.disabled} maxLength={c.maxLen} aria-label={c.label}
+        inputMode={c.numeric ? 'numeric' : 'text'} autoComplete="off" autoCapitalize={c.maxLen && c.maxLen > 1 && c.label.toLowerCase().includes('word') ? 'characters' : 'off'}
+        onFocus={() => { focused.current = true }} onBlur={() => { focused.current = false }}
+        onChange={e => change(e.target.value)}
+        className="w-full min-h-[52px] px-3 rounded-xl bg-white/10 border-2 border-white/25 text-white text-base font-bold placeholder-white/30 focus:outline-none focus:border-yellow-300 disabled:opacity-40"
+      />
+    </label>
+  )
+}
+
+/** The picture on the card, as a pad: tap where the demo screen should be tapped. */
+function CardTap({ c, off, send }: { c: RemoteControl; off: boolean; send: (c: RemoteCommand) => void }) {
+  const [dot, setDot] = useState<{ x: number; y: number } | null>(null)
+  useEffect(() => { if (!dot) return; const t = window.setTimeout(() => setDot(null), 700); return () => window.clearTimeout(t) }, [dot])
+  return (
+    <div>
+      <span className="block mb-1 text-[11px] font-black uppercase tracking-wider text-gray-300">{c.label} <span className="normal-case tracking-normal text-gray-400">· tap the spot</span></span>
+      <button
+        type="button" disabled={off} aria-label={c.label}
+        onClick={e => {
+          const r = e.currentTarget.getBoundingClientRect()
+          const x = (e.clientX - r.left) / r.width
+          const y = (e.clientY - r.top) / r.height
+          setDot({ x, y })
+          send({ action: 'uiTap', i: c.i, label: c.label, x, y })
+        }}
+        className="relative block w-full overflow-hidden rounded-xl border-2 border-yellow-300/60 bg-black/40 cursor-crosshair disabled:opacity-40"
+        style={c.image ? undefined : { aspectRatio: String(c.ratio ?? 1.5) }}
+      >
+        {c.image && <img src={c.image} alt="" draggable={false} className="block w-full h-auto pointer-events-none select-none" />}
+        {dot && <span aria-hidden className="absolute w-8 h-8 -translate-x-1/2 -translate-y-1/2 rounded-full border-[3px] border-yellow-300 pointer-events-none" style={{ left: `${dot.x * 100}%`, top: `${dot.y * 100}%` }} />}
+      </button>
+    </div>
+  )
+}
+
+/** The open card's own controls, as the demo screen has them right now. */
+function CardControls({ controls, off, send }: { controls: RemoteControl[]; off: boolean; send: (c: RemoteCommand) => void }) {
+  if (controls.length === 0) return null
+  return (
+    <div className="flex flex-col gap-2.5 rounded-2xl p-3 bg-white/5 border border-white/15" aria-label="Controls on this card">
+      <p className="text-[11px] font-black uppercase tracking-[0.2em] text-gray-300">On this card</p>
+      {controls.map(c => {
+        const key = `${c.kind}:${c.label}:${c.i}`
+        if (c.kind === 'text') return <CardText key={key} c={c} off={off} send={send} />
+        if (c.kind === 'tap') return <CardTap key={key} c={c} off={off} send={send} />
+        if (c.kind === 'select') return (
+          <label key={key} className="block">
+            <span className="block mb-1 text-[11px] font-black uppercase tracking-wider text-gray-300">{c.label}</span>
+            <select
+              value={c.value} disabled={off || c.disabled} aria-label={c.label}
+              onChange={e => send({ action: 'uiType', i: c.i, label: c.label, value: e.target.value })}
+              className="w-full min-h-[52px] px-3 rounded-xl bg-white/10 border-2 border-white/25 text-white text-base font-bold focus:outline-none focus:border-yellow-300 disabled:opacity-40"
+            >
+              {(c.options ?? []).map(o => <option key={o} value={o} className="text-black">{o}</option>)}
+            </select>
+          </label>
+        )
+        if (c.kind === 'file') return (
+          <button key={key} disabled={off} aria-label={c.label} onClick={() => send({ action: 'uiFile', i: c.i, label: c.label })} className={`${remoteBtn} ${rTone.gold} w-full min-h-[52px]`}>📷 Add a demo photo</button>
+        )
+        const main = /^(play|start|submit|check|send|draw|deal|ready|join|roll|reveal|next round|go)\b/i.test(c.label)
+        return (
+          <button key={key} disabled={off || c.disabled} onClick={() => send({ action: 'uiClick', i: c.i, label: c.label })} className={`${remoteBtn} ${main ? rTone.go : rTone.plain} w-full min-h-[52px] whitespace-normal text-center leading-tight py-2`}>{c.label}</button>
+        )
+      })}
+    </div>
+  )
+}
+
+function SampleController({ code }: { code: string }) {
   const [sections, setSections] = useState<BingoSection[]>([])
   const [gridTasks, setGridTasks] = useState<BingoTask[]>([])
   const [state, setState] = useState<RemoteState | null>(null)
-  const stateRef = useRef<RemoteState | null>(null)
-  stateRef.current = state
 
-  // When the last state broadcast landed. The projector beats every
-  // HEARTBEAT_MS, so silence past HEARTBEAT_TIMEOUT_MS means it is gone —
-  // reloaded, closed, or off the network.
+  // When the last state broadcast landed. The projector beats every HEARTBEAT_MS, so silence past
+  // HEARTBEAT_TIMEOUT_MS means it is gone: reloaded, closed, or off the network.
   const [lastSeen, setLastSeen] = useState(0)
   const [now, setNow] = useState(() => Date.now())
   useEffect(() => {
@@ -3326,25 +3622,22 @@ function SampleController({ code, readOnly = false }: { code: string; readOnly?:
 
   const live = lastSeen > 0 && now - lastSeen < HEARTBEAT_TIMEOUT_MS
 
-  // Keep asking the projector to introduce itself whenever we are not hearing
-  // from it — on first open, and again after it drops.
+  // Keep asking the projector to introduce itself whenever we are not hearing from it: on first open,
+  // and again after it drops.
   const liveRef = useRef(live)
   liveRef.current = live
   useEffect(() => {
-    // Viewers stay silent: a read-only screen should not be able to drive the
-    // projector, and a roomful of phones polling is pointless chatter.
-    if (readOnly) return
     sendCommand({ action: 'requestState' })
     const iv = setInterval(() => {
       if (!liveRef.current) sendCommand({ action: 'requestState' })
     }, 2000)
     return () => clearInterval(iv)
-  }, [sendCommand, readOnly])
+  }, [sendCommand])
 
   const selectedId = state?.selectedId ?? null
   const ownerLabel = useOwnerLabel()
 
-  // Mirror the projector's board so tile taps map to the right tasks.
+  // The projector's board, so the colours and tile taps map to the right tasks.
   useEffect(() => {
     if (!selectedId) { setGridTasks([]); return }
     let cancelled = false
@@ -3354,8 +3647,15 @@ function SampleController({ code, readOnly = false }: { code: string; readOnly?:
 
   // Had a state at some point AND still hearing beats.
   const connected = !!state && live
+  const off = !connected
   const teamName = state?.teamName ?? null
   const pendingGroup = state?.pendingGroup ?? null
+  const screenName = state?.joinName ?? 'Player'
+  const joinNamed = state?.joinNamed ?? false
+  // What this phone has typed but the screen has not echoed back yet, so fast typing never flickers.
+  const [nameDraft, setNameDraft] = useState<string | null>(null)
+  useEffect(() => { if (nameDraft !== null && nameDraft === screenName) setNameDraft(null) }, [nameDraft, screenName])
+  const joinName = nameDraft ?? screenName
   const scanState = state?.scanState ?? {}
   const openTaskId = state?.openTaskId ?? null
   const openTaskObj = gridTasks.find(t => t.id === openTaskId) ?? null
@@ -3366,95 +3666,15 @@ function SampleController({ code, readOnly = false }: { code: string; readOnly?:
   const inviteOpen = state?.inviteOpen ?? false
   const joinQr: JoinQrMode = state?.joinQr ?? 'off'
   const quickWinRows = state?.quickWinRows ?? 0
-  // Quick BINGO lights whole rows by SLOT, not by scanState (see handleQuickWin),
-  // and the snapshot carries only the row count - so rebuild the lit slots from it.
-  const quickSlots = new Set(QUICK_WIN_STEPS.slice(0, quickWinRows).flat())
-  const watchSection = sections.find(x => x.id === selectedId) ?? null
-
-  const watchBoardRef = useRef<BoardScreenHandle>(null)
-  const watchDetailRef = useRef<SampleTaskDetailHandle>(null)
-  const [watchStep, setWatchStep] = useState<DetailStep | null>(null)
-  // Bumped to remount the detail. The handle can go forward but never back to
-  // the splash, so a mirror that ran ahead could never return without it.
-  const [watchDetailNonce, setWatchDetailNonce] = useState(0)
-  const watchScrollRef = useRef<HTMLDivElement>(null)
-
-  // ── Scroll: who is driving? ──
-  // While a finger is on the phone (and DRIVE_MS after), the phone sends its position and ignores the
-  // projector's echo; otherwise the phone follows the projector.
-  const driveUntil = useRef(0)
-  const [driving, setDriving] = useState(false)
-  const pendingFrac = useRef<number | null>(null)
-  const sendTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const lastSend = useRef(0)
-  const startDrive = () => {
-    if (readOnly) return
-    driveUntil.current = Date.now() + DRIVE_MS
-    setDriving(true)
-  }
-  useEffect(() => {
-    if (!driving) return
-    const iv = setInterval(() => { if (Date.now() >= driveUntil.current) setDriving(false) }, 150)
-    return () => clearInterval(iv)
-  }, [driving])
-  useEffect(() => () => { if (sendTimer.current) clearTimeout(sendTimer.current) }, [])
-  const flushScroll = () => {
-    sendTimer.current = null
-    if (pendingFrac.current === null) return
-    lastSend.current = Date.now()
-    sendCommand({ action: 'scrollTo', frac: pendingFrac.current })
-    pendingFrac.current = null
-  }
-  // Called by the page scroller and by the open tile's own scroller.
-  const mirrorScrolled = (frac: number) => {
-    if (readOnly || Date.now() >= driveUntil.current) return   // an echo, not the finger
-    driveUntil.current = Date.now() + DRIVE_MS
-    pendingFrac.current = frac
-    const wait = SEND_MS - (Date.now() - lastSend.current)
-    if (wait <= 0) flushScroll()
-    else if (!sendTimer.current) sendTimer.current = setTimeout(flushScroll, wait)
-  }
-
-  // Everything the presenter does that is not a board change: the message box, the invite QR, and
-  // how far the screen is scrolled. All are in the snapshot; BoardScreen/SampleTaskDetail expose handles.
-  useEffect(() => {
-    if (!state) return
-    watchBoardRef.current?.setChat(state.chatOpen)
-    watchBoardRef.current?.setInvite(state.inviteOpen)
-    if (Date.now() < driveUntil.current) return                   // the finger is in charge
-    // The open tile scrolls inside its own overlay; otherwise it is the page.
-    if (state.openTaskId) watchDetailRef.current?.scrollTo(state.scroll ?? 0)
-    else {
-      const el = watchScrollRef.current
-      if (el) {
-        const range = el.scrollHeight - el.clientHeight
-        if (range > 0) {
-          const want = (state.scroll ?? 0) * range
-          if (Math.abs(el.scrollTop - want) > 8) el.scrollTo({ top: want })
-        }
-      }
-    }
-  }, [state])
-
-  // Walk the mirror's copy of the tile detail onto the projector's step, one move per render, using the
-  // same imperative handle the projector exposes. Moves that have no handle (back to the splash) are not made.
-  useEffect(() => {
-    const target = state?.detail
-    const h = watchDetailRef.current
-    if (!target || !watchStep || !h) return
-    if (target.phase === 'splash' && watchStep.phase === 'main') { setWatchDetailNonce(n => n + 1); return }
-    if (target.phase === 'main' && watchStep.phase === 'splash') { h.start(); return }
-    if (target.pageIndex > watchStep.pageIndex) { h.nextPage(); return }
-    if (target.pageIndex < watchStep.pageIndex) { h.prevPage(); return }
-    if (target.marshalFilled && !watchStep.marshalFilled) h.fillMarshal()
-  }, [state, watchStep])
-  // A mirror cannot tap the BINGO celebration away, so clear ours when the big screen clears its own.
-  useEffect(() => {
-    if (!state?.popup) watchBoardRef.current?.dismissPopup()
-  }, [state])
   const chatOpen = state?.chatOpen ?? false
+  const waiting = state?.waiting ?? false
+  const observer = state?.observer ?? false
+  const section = sections.find(x => x.id === selectedId) ?? null
+  // Quick BINGO lights whole rows by SLOT, not by scanState (see handleQuickWin), and the snapshot carries
+  // only the row count, so rebuild the lit slots from it.
+  const quickSlots = new Set(QUICK_WIN_STEPS.slice(0, quickWinRows).flat())
+  const slots = buildBingoSlots(gridTasks)
 
-  // ── Remote-only UI state ──
   const [sheet, setSheet] = useState<'none' | 'qr' | 'more'>('none')
   const [toast, setToast] = useState<string | null>(null)
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -3464,192 +3684,145 @@ function SampleController({ code, readOnly = false }: { code: string; readOnly?:
     toastTimer.current = setTimeout(() => setToast(null), 1200)
   }
   useEffect(() => () => { if (toastTimer.current) clearTimeout(toastTimer.current) }, [])
-  const [hint, setHint] = useState(() => {
-    try { return !readOnly && !localStorage.getItem('sample-remote-hint') } catch { return false }
-  })
-  const dismissHint = () => { setHint(false); try { localStorage.setItem('sample-remote-hint', '1') } catch { /* private mode: hint shows again */ } }
   const send = (c: RemoteCommand) => { if (connected) sendCommand(c) }
 
-  // Taps on the mirror: only tiles and group rows (data-tap) go through; everything else is inert, so a stray
-  // touch can never press Start or Complete. A scroll never produces a click, so it cannot open a tile.
-  const guardClick = (e: React.SyntheticEvent) => {
-    if (readOnly) return
-    if (!(e.target as HTMLElement).closest('[data-tap]')) { e.preventDefault(); e.stopPropagation() }
-  }
-  // Typing fields in the mirror are read-only copies: no keyboard pops up when the presenter scrolls past one.
-  const mirrorRef = useRef<HTMLDivElement>(null)
-  useEffect(() => {
-    if (readOnly) return
-    mirrorRef.current?.querySelectorAll('input,textarea').forEach(el => { el.setAttribute('readonly', ''); el.setAttribute('tabindex', '-1') })
-    mirrorRef.current?.querySelectorAll('select').forEach(el => el.setAttribute('disabled', ''))
-  })
+  // ── Body: one panel per step ──
+  const panelTitle = (text: string, sub?: string) => (
+    <div className="text-center mb-4">
+      <h1 className="text-[clamp(1.35rem,6vw,1.75rem)] font-black text-white leading-tight">{text}</h1>
+      {sub && <p className="text-sm text-gray-400 font-bold mt-1">{sub}</p>}
+    </div>
+  )
+  const linkBtn = 'min-h-[44px] px-3 text-sm font-bold text-purple-300 underline underline-offset-4 disabled:opacity-40'
 
-  const mirror = (
-    <div
-      ref={mirrorRef}
-      className={`relative flex-1 min-h-0 overflow-hidden [transform:translateZ(0)] ${!readOnly && !connected ? 'opacity-55 grayscale' : ''}`}
-      onClickCapture={guardClick}
-      onPointerDownCapture={startDrive}
-      onTouchStartCapture={startDrive}
-      onWheelCapture={startDrive}
-    >
-      <div
-        ref={watchScrollRef}
-        className="h-full overflow-y-auto overscroll-contain select-none relative"
-        {...(readOnly ? { inert: true } : {})}
-        onScroll={e => {
-          const el = e.currentTarget
-          const range = el.scrollHeight - el.clientHeight
-          mirrorScrolled(range > 0 ? el.scrollTop / range : 0)
-        }}
-      >
-        {readOnly && !connected && (
-          <div className="sticky top-0 z-50 bg-red-500/90 text-white text-center text-xs font-black py-1.5">
-            Reconnecting to the screen…
-          </div>
-        )}
-        {view === 'scoreboard' ? (
-          <SampleScoreboard
-            gridTasks={gridTasks}
-            section={watchSection}
-            playedTeamName={teamName}
-            scanState={scanState}
-            quickWinSlots={quickSlots}
-          />
-        ) : !teamName ? (
-          /* Mirrors the group list and, once a group is picked, the "Enter Password" step. */
-          <JoinScreen
-            theme={normalizePlayerTheme(watchSection?.player_theme)}
-            selected={pendingGroup}
-            onSelect={g => { if (!readOnly && g) { showToast('Opening on screen…'); send({ action: 'join', teamName: g }) } }}
-            onJoin={() => {}}
-          />
-        ) : gridTasks.length > 0 ? (
-          /* Wait for the tasks before mounting the board: BoardScreen seeds its "already celebrated"
-             baseline on its first run, so an empty grid would make old lines look brand new. */
-          <BoardScreen
-            ref={watchBoardRef}
-            key={selectedId ?? 'none'}
-            teamName={teamName}
-            gridTasks={gridTasks}
-            scanState={scanState}
-            quickWinSlots={quickSlots}
-            section={watchSection}
-            glowSlots={new Set(watchSection?.glow_slots ?? [])}
-            glowMode={false}
-            onToggleGlow={() => {}}
-            onClearGlow={() => {}}
-            onToggleGlowMode={() => {}}
-            onOpenTask={t => { if (!readOnly) { showToast('Opening on screen…'); send({ action: 'openTask', taskId: t.id }) } }}
-            onSwitchTeam={() => {}}
-            onShowScoreboard={() => {}}
-            inviteUrl={`${window.location.origin}/bingo-dash/sample`}
-          />
-        ) : (
-          <div className="min-h-[70vh] flex items-center justify-center">
-            <div className="text-gray-400 text-xl font-bold animate-pulse">Loading board…</div>
-          </div>
-        )}
-      </div>
-      {openTaskObj && view === 'board' && (
-        <div className="[&>div]:!overflow-x-hidden" {...(readOnly ? { inert: true } : {})}>
-          <SampleTaskDetail
-            key={`${openTaskObj.id}:${watchDetailNonce}`}
-            ref={watchDetailRef}
-            task={openTaskObj}
-            teamName={teamName ?? 'Sample Team'}
-            marshalPassword={DEMO_MARSHAL_PASSWORD}
-            completed={scanState[openTaskObj.id] === 'completed'}
-            bonusDefaults={watchSection ?? undefined}
-            chain={{
-              prev: gridTasks.find(t => t.id === prereqResolver(gridTasks)(openTaskObj)) ?? null,
-              locked: (() => { const p = prereqResolver(gridTasks)(openTaskObj); return !!p && scanState[p] !== 'completed' })(),
-              next: gridTasks.find(t => prereqResolver(gridTasks)(t) === openTaskObj.id) ?? null,
-              trail: chainTrailOf(gridTasks, openTaskObj, scanState),
-            }}
-            onJump={() => {}}
-            onComplete={() => {}}
-            onUncomplete={() => {}}
-            onClose={() => {}}
-            onStep={setWatchStep}
-            onScrollFrac={mirrorScrolled}
-          />
-        </div>
-      )}
-      {!readOnly && toast && (
-        <div className="absolute left-1/2 -translate-x-1/2 bottom-3 z-[60] px-3 py-1.5 rounded-full bg-emerald-500 text-black text-xs font-black shadow-lg pointer-events-none">
-          {toast}
-        </div>
-      )}
-      {!readOnly && hint && connected && (
-        <button type="button" onClick={dismissHint}
-          className="absolute left-3 right-3 bottom-3 z-[60] min-h-[44px] rounded-xl bg-gray-900/95 border border-white/20 text-white text-xs font-bold px-3 py-2 text-left">
-          Scroll to move the room screen. Tap a tile to open it there. <span className="text-emerald-300 font-black">Got it</span>
-        </button>
-      )}
+  const groups = [...DEMO_GROUPS].sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }))
+
+  const joinPanel = pendingGroup ? (
+    // Password step: the sample password is already filled in on the screen, so it is one tap.
+    <div className="flex flex-col gap-3">
+      {panelTitle(`Join ${pendingGroup}`, `Password ${SAMPLE_TEAM_PASSWORD} is filled in`)}
+      <button disabled={off} onClick={() => send({ action: 'confirmJoin' })} className={`${remoteBtn} ${rTone.primary} ${bigBtn}`}>Join group →</button>
+      <button disabled={off} onClick={() => send({ action: 'cancelJoin' })} className={linkBtn}>← Pick another group</button>
+    </div>
+  ) : !joinNamed ? (
+    // Name step: "Player" is filled in, so it is one tap. Change it if you like.
+    <form className="flex flex-col gap-3" onSubmit={e => { e.preventDefault(); if (joinName.trim()) send({ action: 'joinNameNext' }) }}>
+      {panelTitle("What's your name?", 'Filled in for you. Change it if you like.')}
+      <input
+        type="text" value={joinName} maxLength={40} aria-label="Your name" autoComplete="off" enterKeyHint="next"
+        onChange={e => { setNameDraft(e.target.value); send({ action: 'setJoinName', name: e.target.value }) }}
+        className="w-full min-h-[56px] px-4 rounded-xl bg-white/10 border-2 border-white/20 focus:border-purple-400 focus:outline-none text-center text-lg font-bold text-white"
+      />
+      <button type="submit" disabled={off || !joinName.trim()} className={`${remoteBtn} ${rTone.primary} ${bigBtn}`}>Next →</button>
+    </form>
+  ) : (
+    <div className="flex flex-col gap-2">
+      {panelTitle('Pick a group', `Hi ${joinName.trim()}!`)}
+      {groups.map(g => (
+        <button key={g} disabled={off} onClick={() => { showToast('Opening on screen…'); send({ action: 'join', teamName: g }) }}
+          className={`${remoteBtn} ${rTone.plain} w-full min-h-[56px] text-base justify-start px-4`}>{g}</button>
+      ))}
+      <button disabled={off} onClick={() => send({ action: 'joinNameBack' })} className={linkBtn}>← Change name</button>
     </div>
   )
 
-  // ── Footer: context strip + dock ──
-  const off = !connected
-  const strip = (() => {
-    if (popup) return (
-      <div className="flex flex-col gap-1.5">
-        <p className="text-xs font-black text-purple-200 text-center">
-          🎉 On screen: <span className="text-white tracking-widest">{popup}!</span>{popupQueued > 0 && <span className="text-purple-300/80"> · {popupQueued} more to come</span>}
-        </p>
-        <button disabled={off} onClick={() => send({ action: 'dismissPopup' })} className={`${remoteBtn} ${rTone.primary} min-h-[56px] w-full text-base`}>▶ Tap to continue</button>
+  const swatch = (cls: string, label: string) => (
+    <span className="inline-flex items-center gap-1.5 text-[11px] font-bold text-gray-300">
+      <span className={`w-3.5 h-3.5 rounded bg-gray-500 ${cls}`} aria-hidden="true" />{label}
+    </span>
+  )
+  const boardPanel = (
+    <div className="flex flex-col gap-3">
+      <div className="grid grid-cols-5 gap-1.5 sm:gap-2" role="group" aria-label="Board">
+        {slots.map((t, i) => {
+          if (!t) return <div key={i} className="aspect-square rounded-xl border border-dashed border-white/15" aria-hidden="true" />
+          const done = scanState[t.id] === 'completed' || quickSlots.has(i)
+          const started = !done && scanState[t.id] === 'scanned'
+          return (
+            <button
+              key={i} disabled={off || !!popup}
+              aria-label={`${t.title}${done ? ', done' : started ? ', in progress' : ''}`}
+              onClick={() => { showToast('Opening on screen…'); send({ action: 'openTask', taskId: t.id }) }}
+              className={`aspect-square min-h-[44px] rounded-xl border-2 flex items-center justify-center text-xl font-black text-white [text-shadow:0_1px_3px_rgba(0,0,0,0.7)] transition-transform active:scale-95 disabled:opacity-50 disabled:active:scale-100 focus-visible:outline focus-visible:outline-[3px] focus-visible:outline-yellow-300 ${
+                done ? 'border-white ring-2 ring-emerald-300' : started ? 'border-white animate-pulse' : 'border-black/30'}`}
+              style={{ backgroundColor: t.hex_code }}
+            >{done ? '✓' : ''}</button>
+          )
+        })}
       </div>
-    )
-    if (off) return <p className="text-xs text-gray-400 font-bold text-center py-2">Taps will not land until the screen is back.</p>
-    if (!teamName && pendingGroup) return (
-      <div className="flex gap-2">
-        <button onClick={() => send({ action: 'cancelJoin' })} className={`${remoteBtn} ${rTone.plain} flex-1`}>← Groups</button>
-        <button onClick={() => send({ action: 'confirmJoin' })} className={`${remoteBtn} ${rTone.primary} flex-[2]`}>Join group · password {SAMPLE_TEAM_PASSWORD}</button>
+      <div className="flex flex-wrap justify-center gap-x-4 gap-y-1">
+        {swatch('', 'Not started')}
+        {swatch('ring-2 ring-white animate-pulse', 'In progress')}
+        {swatch('ring-2 ring-emerald-300', 'Done')}
       </div>
-    )
-    if (!teamName) return <p className="text-xs text-gray-400 font-bold text-center py-2">Tap a group in the screen above to pick it.</p>
-    if (view === 'scoreboard') return <p className="text-xs text-gray-400 font-bold text-center py-2">Scoreboard is on screen. Scroll it with your finger.</p>
-    if (openTaskObj) {
-      const done = scanState[openTaskObj.id] === 'completed'
-      const back = <button onClick={() => send({ action: 'closeTask' })} className={`${remoteBtn} ${rTone.plain} flex-1`}>← Back</button>
-      if (done) return <div className="flex gap-2">{back}<button onClick={() => send({ action: 'uncomplete', taskId: openTaskObj.id })} className={`${remoteBtn} ${rTone.plain} flex-[2]`}>↺ Undo complete</button></div>
-      if (detail?.phase === 'splash') return <div className="flex gap-2">{back}<button onClick={() => send({ action: 'startChallenge' })} className={`${remoteBtn} ${rTone.go} flex-[2]`}>▶ Start challenge</button></div>
-      const needMarshal = !!detail?.isMarshalTask && !detail.marshalFilled
-      return (
-        <div className="flex flex-col gap-2">
-          {detail?.isMarshalTask && !detail.marshalFilled && (
-            <button onClick={() => send({ action: 'fillMarshal' })} className={`${remoteBtn} ${rTone.gold} w-full`}>👮 Fill marshal {DEMO_MARSHAL_PASSWORD}</button>
-          )}
-          <div className="flex gap-2">
-            {back}
-            {detail && detail.pageCount > 1 && <>
-              <button disabled={detail.pageIndex <= 0} onClick={() => send({ action: 'prevPage' })} className={`${remoteBtn} ${rTone.plain} flex-1`}>‹ Prev</button>
-              <button disabled={detail.pageIndex >= detail.pageCount - 1} onClick={() => send({ action: 'nextPage' })} className={`${remoteBtn} ${rTone.plain} flex-1`}>Next ›</button>
-            </>}
-            <button disabled={needMarshal} onClick={() => send({ action: 'submitComplete' })} className={`${remoteBtn} ${rTone.go} flex-[1.4]`}>✓ Complete</button>
-          </div>
-        </div>
-      )
-    }
-    return (
-      <button disabled={quickWinRows >= 5} onClick={() => send({ action: 'quickWin' })} className={`${remoteBtn} ${rTone.gold} w-full`}>
+      <button disabled={off || !!popup || quickWinRows >= 5} onClick={() => send({ action: 'quickWin' })} className={`${remoteBtn} ${rTone.gold} w-full min-h-[52px]`}>
         ⚡ Quick BINGO <span className="tabular-nums">{quickWinRows}/5</span>
       </button>
-    )
-  })()
+    </div>
+  )
 
-  const tab = (label: string, icon: string, on: boolean, onClick: () => void, extra = '') => (
-    <button key={label} type="button" disabled={off} onClick={onClick} aria-pressed={on}
+  const cardDone = !!openTaskObj && scanState[openTaskObj.id] === 'completed'
+  const step = cardDone ? 'Completed'
+    : detail?.phase === 'splash' ? 'Intro screen'
+    : detail && detail.pageCount > 1 ? `Page ${detail.pageIndex + 1} of ${detail.pageCount}`
+    : 'On the card'
+  const needMarshal = !!detail?.isMarshalTask && !detail.marshalFilled
+  const cardPanel = openTaskObj ? (
+    <div className="flex flex-col gap-3">
+      <div className="rounded-2xl p-4 text-center border border-white/20" style={{ backgroundColor: openTaskObj.hex_code }}>
+        <p className="text-[11px] font-black uppercase tracking-[0.2em] text-white/80 [text-shadow:0_1px_3px_rgba(0,0,0,0.5)]">{step}</p>
+        <h1 className="mt-1 text-[clamp(1.35rem,6vw,1.75rem)] font-black text-white leading-tight [text-shadow:0_1px_6px_rgba(0,0,0,0.5)] break-words">{openTaskObj.title}</h1>
+      </div>
+      {cardDone ? (
+        <button disabled={off} onClick={() => send({ action: 'uncomplete', taskId: openTaskObj.id })} className={`${remoteBtn} ${rTone.plain} ${bigBtn}`}>↺ Undo complete</button>
+      ) : detail?.phase === 'splash' ? (
+        <button disabled={off} onClick={() => send({ action: 'startChallenge' })} className={`${remoteBtn} ${rTone.go} ${bigBtn}`}>▶ Start challenge</button>
+      ) : (
+        <>
+          {detail?.isMarshalTask && !detail.marshalFilled && (
+            <button disabled={off} onClick={() => send({ action: 'fillMarshal' })} className={`${remoteBtn} ${rTone.gold} ${bigBtn}`}>👮 Fill marshal {DEMO_MARSHAL_PASSWORD}</button>
+          )}
+          {detail && detail.pageCount > 1 && (
+            <div className="grid grid-cols-2 gap-2">
+              <button disabled={off || detail.pageIndex <= 0} onClick={() => send({ action: 'prevPage' })} className={`${remoteBtn} ${rTone.plain} min-h-[56px] text-base`}>‹ Prev</button>
+              <button disabled={off || detail.pageIndex >= detail.pageCount - 1} onClick={() => send({ action: 'nextPage' })} className={`${remoteBtn} ${rTone.plain} min-h-[56px] text-base`}>Next ›</button>
+            </div>
+          )}
+          <CardControls controls={state?.controls ?? []} off={off} send={send} />
+          {detail?.ownMechanism ? (
+            // The card's own game or answer can be played from "On this card" above; this is the shortcut that just marks it done.
+            <button disabled={off} onClick={() => send({ action: 'autoComplete' })} className={`${remoteBtn} ${rTone.go} ${bigBtn}`}>✓ Auto-complete</button>
+          ) : (
+            <button disabled={off || needMarshal} onClick={() => send({ action: 'submitComplete' })} className={`${remoteBtn} ${rTone.go} ${bigBtn}`}>✓ Complete</button>
+          )}
+        </>
+      )}
+      <button disabled={off} onClick={() => send({ action: 'closeTask' })} className={`${remoteBtn} ${rTone.plain} w-full min-h-[52px]`}>← Back to board</button>
+    </div>
+  ) : null
+
+  const scoresPanel = (
+    <div className="flex flex-col gap-3">
+      {panelTitle('Scoreboard', 'It is on the screen now.')}
+      <button disabled={off} onClick={() => send({ action: 'setView', view: 'board' })} className={`${remoteBtn} ${rTone.plain} ${bigBtn}`}>← Back to board</button>
+    </div>
+  )
+
+  const body = !teamName ? joinPanel : view === 'scoreboard' ? scoresPanel : openTaskObj ? cardPanel : boardPanel
+
+  // ── Footer: notices, celebration, dock ──
+  const tab = (label: string, icon: string, on: boolean, onClick: () => void, extra = '', blocked = false) => (
+    <button key={label} type="button" disabled={off || blocked} onClick={onClick} aria-pressed={on}
       className={`flex flex-col items-center justify-center gap-0.5 min-h-[56px] rounded-2xl text-[11px] font-black transition-colors active:scale-95 disabled:opacity-40 focus-visible:outline focus-visible:outline-[3px] focus-visible:outline-yellow-300 ${extra} ${on ? 'text-purple-200 bg-purple-500/20' : 'text-gray-300'}`}>
       <span className="text-lg leading-none" aria-hidden="true">{icon}</span>{label}
     </button>
   )
   const dock = (
-    <div className="grid grid-cols-4 gap-1 rounded-[20px] border border-white/10 backdrop-blur-xl p-1" style={{ background: 'rgba(17,20,30,.86)' }}>
+    <div className="grid grid-cols-5 gap-0.5 rounded-[20px] border border-white/10 backdrop-blur-xl p-1" style={{ background: 'rgba(17,20,30,.86)' }}>
       {tab('Board', '🎯', view === 'board', () => send({ action: 'setView', view: 'board' }))}
       {tab('Scores', '📊', view === 'scoreboard', () => send({ action: 'setView', view: 'scoreboard' }))}
       {tab(joinQr !== 'off' ? 'Close QR' : 'Join QR', '▦', joinQr !== 'off', () => (joinQr !== 'off' ? send({ action: 'setJoinQr', mode: 'off' }) : setSheet('qr')), joinQr !== 'off' ? '!text-emerald-200 !bg-emerald-500/20' : '')}
+      {tab(inviteOpen ? 'Close QR' : 'Invite', '👥', inviteOpen, () => send({ action: 'setInvite', open: !inviteOpen }), inviteOpen ? '!text-emerald-200 !bg-emerald-500/20' : '', !teamName)}
       {tab('More', '⋯', sheet === 'more', () => setSheet('more'))}
     </div>
   )
@@ -3663,7 +3836,7 @@ function SampleController({ code, readOnly = false }: { code: string; readOnly?:
         {sheet === 'qr' ? (
           <div className="grid grid-cols-2 gap-2">
             {(['player', 'observer'] as const).map(r => (
-              <button key={r} disabled={!watchSection?.slug} onClick={() => { send({ action: 'setJoinQr', mode: r }); setSheet('none') }}
+              <button key={r} disabled={!section?.slug} onClick={() => { send({ action: 'setJoinQr', mode: r }); setSheet('none') }}
                 className={`${remoteBtn} ${rTone.plain}`}>▦ {r === 'player' ? 'Player QR' : 'Observer QR'}</button>
             ))}
           </div>
@@ -3675,17 +3848,18 @@ function SampleController({ code, readOnly = false }: { code: string; readOnly?:
                 <p className="mt-1 text-white text-sm font-bold px-1 py-2">{sections.find(s => s.id === selectedId)?.name ?? 'This board'}</p>
               ) : (
                 <select value={selectedId ?? ''} onChange={e => send({ action: 'selectBoard', id: e.target.value })}
-                  className="w-full mt-1 min-h-[48px] bg-white/10 text-white text-sm font-bold rounded-xl px-3 border border-white/15 focus:outline-none focus:border-emerald-400">
+                  className="w-full mt-1 min-h-[48px] bg-white/10 text-white text-base font-bold rounded-xl px-3 border border-white/15 focus:outline-none focus:border-emerald-400">
                   {sections.length === 0 && <option value="">No boards</option>}
                   {sections.map(s => <option key={s.id} value={s.id} className="bg-gray-900">{s.name} — {ownerLabel(s)}</option>)}
                 </select>
               )}
             </div>
+            <div className="grid grid-cols-2 gap-2">
+              <button onClick={() => { send({ action: 'setWaiting', on: !waiting }); setSheet('none') }} className={`${remoteBtn} ${waiting ? rTone.go : rTone.plain}`}>⏳ {waiting ? 'End waiting' : 'Waiting screen'}</button>
+              <button onClick={() => send({ action: 'setObserver', on: !observer })} className={`${remoteBtn} ${observer ? rTone.go : rTone.plain}`}>👁 {observer ? 'End observer' : 'Observer view'}</button>
+            </div>
             {teamName && (
-              <div className="grid grid-cols-2 gap-2">
-                <button onClick={() => send({ action: 'setChat', open: !chatOpen })} className={`${remoteBtn} ${chatOpen ? rTone.go : rTone.plain}`}>{chatOpen ? '✕ Close message' : '💬 Message'}</button>
-                <button onClick={() => send({ action: 'setInvite', open: !inviteOpen })} className={`${remoteBtn} ${inviteOpen ? rTone.go : rTone.plain}`}>{inviteOpen ? '✕ Close QR' : '▦ Invite QR'}</button>
-              </div>
+              <button onClick={() => send({ action: 'setChat', open: !chatOpen })} className={`${remoteBtn} ${chatOpen ? rTone.go : rTone.plain} w-full`}>{chatOpen ? '✕ Close message' : '💬 Message'}</button>
             )}
             {teamName && (
               <button onClick={() => { send({ action: 'leave' }); setSheet('none') }} className={`${remoteBtn} ${rTone.plain} w-full`}>👥 Leave team ({teamName})</button>
@@ -3698,54 +3872,73 @@ function SampleController({ code, readOnly = false }: { code: string; readOnly?:
     </div>
   )
 
-  return (
-    <div className={`bg-gray-950 text-white flex flex-col ${readOnly ? 'min-h-screen' : 'h-[100dvh] overflow-hidden'}`}>
-      {readOnly && joinQr !== 'off' && watchSection?.slug && (
-        <JoinQrOverlay slug={watchSection.slug} boardName={watchSection.name} role={joinQr} />
-      )}
-      {/* The viewer is meant to look like the big screen, so it carries no chrome of its own. */}
-      <div className={`border-b border-emerald-500/30 px-3 items-center gap-2 h-[52px] flex-shrink-0 ${readOnly ? 'hidden' : 'flex'}`}>
-        <span className="px-2 py-1 rounded-lg bg-emerald-500 text-black text-[11px] font-black tracking-wider">📡 REMOTE</span>
-        <span className="text-[11px] text-gray-400 font-bold tracking-[0.2em]">{code}</span>
-        <span className="ml-auto flex items-center gap-1.5 text-[11px] font-bold">
-          <span className={`w-2 h-2 rounded-full ${connected ? 'bg-emerald-400' : state ? 'bg-red-400 animate-pulse' : 'bg-amber-400 animate-pulse'}`} />
-          {connected ? 'Connected' : state ? 'Reconnecting' : 'Connecting…'}
-        </span>
-      </div>
-      {!readOnly && state && (
-        <div className={`h-7 flex-shrink-0 flex items-center justify-center gap-1.5 text-[11px] font-black transition-colors motion-reduce:transition-none ${
-          !connected ? 'bg-amber-500/15 text-amber-200' : driving ? 'bg-purple-500/20 text-purple-200' : 'bg-emerald-500/10 text-emerald-200'}`}>
-          <span className={`w-1.5 h-1.5 rounded-full ${!connected ? 'bg-amber-400' : driving ? 'bg-purple-400' : 'bg-emerald-400'}`} />
-          {!connected ? 'Paused' : driving ? 'Driving the screen' : 'Following the screen'}
-        </div>
-      )}
-      {!readOnly && state && !connected && (
-        <div className="flex-shrink-0 bg-red-500/15 text-red-200 text-[11px] font-black text-center py-1">⚠ Lost the projector, reconnecting…</div>
-      )}
+  const railBtn = 'w-full min-h-[48px] rounded-xl border text-lg font-black bg-white/10 text-gray-100 border-white/15 active:scale-95 disabled:opacity-40 focus-visible:outline focus-visible:outline-[3px] focus-visible:outline-yellow-300'
 
-      {!state ? (
-        <div className="flex-1 flex flex-col items-center justify-center text-center px-6 gap-2">
-          <div className="text-4xl animate-pulse">📡</div>
-          <p className="text-gray-300 font-bold">Looking for the projector…</p>
-          <p className="text-gray-500 text-sm">
-            {readOnly
-              ? 'The presenter needs the sample screen open with Share screen on.'
-              : <>Make sure the sample screen is open and shows <span className="text-emerald-300 font-bold">Paired</span>.</>}
-          </p>
-        </div>
-      ) : readOnly ? (
-        <div className="flex-1 min-h-0 flex flex-col">{mirror}</div>
-      ) : (
-        <div className="flex-1 min-h-0 flex flex-col md:flex-row">
-          <div className="flex-1 min-h-0 flex flex-col md:flex-none md:w-[420px] md:border-r md:border-white/10">{mirror}</div>
-          <div className="flex-shrink-0 md:flex-1 md:overflow-y-auto flex flex-col gap-2 px-3 pt-2 border-t border-white/10 md:border-t-0 md:p-4 md:max-w-sm"
-            style={{ paddingBottom: 'calc(8px + env(safe-area-inset-bottom))' }}>
-            {strip}
-            {dock}
+  return (
+    // On a laptop the remote is a phone-sized card centred on a soft backdrop; on a phone it fills the screen.
+    <div className="h-[100dvh] overflow-hidden text-white flex justify-center sm:items-center sm:p-4"
+      style={{ background: 'radial-gradient(90% 70% at 50% 0%, rgba(124,58,237,.28), transparent 65%), radial-gradient(80% 60% at 50% 100%, rgba(16,185,129,.18), transparent 65%), #030712' }}>
+      <div className="flex flex-col w-full max-w-[520px] h-full sm:max-h-[860px] bg-gray-950 sm:rounded-3xl sm:border sm:border-white/15 sm:shadow-2xl overflow-hidden">
+        <div className="border-b border-emerald-500/30 px-3 flex items-center gap-2 h-[52px] flex-shrink-0">
+          <span className="px-2 py-1 rounded-lg bg-emerald-500 text-black text-[11px] font-black tracking-wider">📡 REMOTE</span>
+          <span className="hidden min-[400px]:inline text-[11px] text-gray-400 font-bold tracking-[0.2em]">{code}</span>
+          {/* Switches the language on the demo screen (it is kept per device, so the screen holds it). */}
+          <div role="group" aria-label="Screen language" translate="no" className="ml-auto flex items-center rounded-full border border-white/20 bg-white/5 p-0.5">
+            {(['en', 'ms'] as const).map(l => (
+              <button key={l} type="button" disabled={off} onClick={() => send({ action: 'setLang', lang: l })}
+                aria-pressed={(state?.lang ?? 'en') === l}
+                aria-label={l === 'en' ? 'Screen in English' : 'Screen in Bahasa Malaysia'}
+                className={`min-w-[44px] min-h-[44px] rounded-full text-xs font-black tracking-wider transition-colors active:scale-95 disabled:opacity-40 focus-visible:outline focus-visible:outline-[3px] focus-visible:outline-yellow-300 ${(state?.lang ?? 'en') === l ? 'bg-white text-gray-900' : 'text-gray-300'}`}>
+                {l === 'en' ? 'EN' : 'BM'}
+              </button>
+            ))}
           </div>
+          <span className="flex items-center gap-1.5 text-[11px] font-bold">
+            <span className={`w-2 h-2 rounded-full ${connected ? 'bg-emerald-400' : state ? 'bg-red-400 animate-pulse' : 'bg-amber-400 animate-pulse'}`} />
+            {connected ? 'Connected' : state ? 'Reconnecting' : 'Connecting…'}
+          </span>
         </div>
-      )}
-      {sheetBody}
+        {state && !connected && (
+          <div className="flex-shrink-0 bg-red-500/15 text-red-200 text-[11px] font-black text-center py-1">⚠ Lost the screen, reconnecting…</div>
+        )}
+
+        {!state ? (
+          <div className="flex-1 flex flex-col items-center justify-center text-center px-6 gap-2">
+            <div className="text-4xl animate-pulse">📡</div>
+            <p className="text-gray-300 font-bold">Looking for the screen…</p>
+            <p className="text-gray-500 text-sm">Make sure the sample screen is open and shows <span className="text-emerald-300 font-bold">Paired</span>.</p>
+          </div>
+        ) : (
+          <>
+            <div className="flex-1 min-h-0 flex gap-2 px-3 pt-3">
+              <div className="flex-1 min-w-0 overflow-y-auto overscroll-contain pb-3">{body}</div>
+              {teamName && (
+                <div className="w-14 flex-shrink-0 flex flex-col gap-2 pb-3" role="group" aria-label="Scroll the screen">
+                  <button disabled={off} onClick={() => send({ action: 'scrollTo', frac: 0 })} aria-label="Scroll to top" className={railBtn}>⤒</button>
+                  <button disabled={off} onClick={() => send({ action: 'scroll', direction: 'up' })} aria-label="Scroll up" className={railBtn}>▲</button>
+                  <ScrollRail frac={state.scroll ?? 0} disabled={off} onFrac={f => send({ action: 'scrollTo', frac: f })} />
+                  <button disabled={off} onClick={() => send({ action: 'scroll', direction: 'down' })} aria-label="Scroll down" className={railBtn}>▼</button>
+                </div>
+              )}
+            </div>
+            <div className="flex-shrink-0 flex flex-col gap-2 px-3 pt-2 border-t border-white/10"
+              style={{ paddingBottom: 'calc(8px + env(safe-area-inset-bottom))' }}>
+              {toast && <p role="status" className="rounded-xl bg-emerald-500 text-black text-xs font-black px-3 py-2 text-center">{toast}</p>}
+              {popup && (
+                <div className="flex flex-col gap-1.5">
+                  <p className="text-xs font-black text-purple-200 text-center">
+                    🎉 On screen: <span className="text-white tracking-widest">{popup}!</span>{popupQueued > 0 && <span className="text-purple-300/80"> · {popupQueued} more to come</span>}
+                  </p>
+                  <button disabled={off} onClick={() => send({ action: 'dismissPopup' })} className={`${remoteBtn} ${rTone.primary} min-h-[56px] w-full text-base`}>▶ Tap to continue</button>
+                </div>
+              )}
+              {off && <p className="text-xs text-gray-400 font-bold text-center">Taps will not land until the screen is back.</p>}
+              {dock}
+            </div>
+          </>
+        )}
+        {sheetBody}
+      </div>
     </div>
   )
 }

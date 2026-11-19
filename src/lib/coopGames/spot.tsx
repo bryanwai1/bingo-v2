@@ -90,7 +90,7 @@ const Board = ({ state, canAct, isPlayer: isPlayerProp, dispatch }: {
       </div>
 
       <div className={`relative rounded-2xl border-2 border-white/20 bg-black/40 ${zoom ? 'overflow-auto max-h-[70dvh]' : 'overflow-hidden'}`}>
-        <div ref={stage} onClick={tap} className="relative select-none"
+        <div ref={stage} onClick={tap} data-remote-tap="Tap the picture" className="relative select-none"
           style={{ width: zoom ? '250%' : '100%', touchAction: 'manipulation', cursor: isPlayer && !solved ? 'crosshair' : 'default' }}>
           <img src={pictureUrl(isPlayer ? 'player' : 'observer')} alt={isPlayer ? 'Picture A' : 'Picture B'}
             draggable={false} onError={() => setImgFailed(true)} className="block w-full h-auto pointer-events-none" />

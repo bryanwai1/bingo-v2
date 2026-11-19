@@ -15,3 +15,16 @@ export function normalizePlayerTheme(value: string | null | undefined): PlayerTh
 
 /** Grab brand green, used for accents on the Grab theme. */
 export const GRAB_GREEN = '#00B14F'
+
+// The look of the board a player last saw, so a screen that has to fetch the
+// board before it knows its theme (the scoreboard) can paint the right
+// background on its very first frame instead of flashing the default one.
+const LAST_THEME_KEY = 'bingo-dash-player-theme'
+
+export function rememberPlayerTheme(theme: PlayerTheme): void {
+  try { localStorage.setItem(LAST_THEME_KEY, theme) } catch { /* private mode: no cache, no harm */ }
+}
+
+export function lastPlayerTheme(): PlayerTheme {
+  try { return normalizePlayerTheme(localStorage.getItem(LAST_THEME_KEY)) } catch { return 'default' }
+}

@@ -462,16 +462,43 @@ export function BingoDashParticipant() {
   // A card can reveal a passcode (the box code) once the answer is right. The
   // server hands it over only for a scan whose answer_ok is true.
   const [revealedPasscode, setRevealedPasscode] = useState<string | null>(null)
+  const [revealedLabel, setRevealedLabel] = useState<string | null>(null)
   const answerOkNow = !!scanRecord?.answerOk
   const scanIdNow = scanRecord?.id
   useEffect(() => {
     if (!answerOkNow || !scanIdNow || !inputs.answer) return
     let live = true
-    supabase.rpc('get_card_passcode', { p_scan: scanIdNow }).then(({ data }) => {
-      if (live && typeof data === 'string' && data) setRevealedPasscode(data)
-    })
-    return () => { live = false }
+    let timer: ReturnType<typeof setTimeout> | undefined
+    // The answer flag is written just before this runs, so a first miss is
+    // retried a few times rather than leaving the team without its code.
+    const fetchCode = (attempt: number) => {
+      supabase.rpc('get_card_passcode', { p_scan: scanIdNow }).then(({ data }) => {
+        if (!live) return
+        if (typeof data === 'string' && data) {
+          setRevealedPasscode(data)
+          // Which box it opens ("Box 1"). Optional: without the label function the code still shows.
+          supabase.rpc('get_card_passcode_label', { p_scan: scanIdNow }).then(({ data: label, error }) => {
+            if (live && !error && typeof label === 'string' && label) setRevealedLabel(label)
+          })
+          return
+        }
+        if (attempt < 4) timer = setTimeout(() => fetchCode(attempt + 1), 1200 * (attempt + 1))
+      })
+    }
+    fetchCode(0)
+    return () => { live = false; if (timer) clearTimeout(timer) }
   }, [answerOkNow, scanIdNow, inputs.answer])
+  // Rendered above "Challenge Complete!" and, on a multi-input card, above the
+  // inputs: once the answer is right it stays for as long as the card is open.
+  const passcodePanel = revealedPasscode ? (
+    <div className="mb-5 p-6 rounded-3xl bg-green-400/20 border-[3px] border-green-400 text-center animate-pulse-border"
+      style={{ boxShadow: '0 0 32px rgba(74,222,128,0.55), inset 0 0 24px rgba(74,222,128,0.18)' }}>
+      <p className="text-green-300 text-sm font-black uppercase tracking-widest mb-2">🔑 Correct! Your passcode</p>
+      {revealedLabel && <p className="text-green-200 text-3xl font-black uppercase tracking-wide mb-2 leading-none" translate="no">{revealedLabel}</p>}
+      <p className="text-white text-6xl font-black tracking-[0.3em] pl-[0.3em] tabular-nums leading-none" translate="no">{revealedPasscode}</p>
+      <p className="text-green-200 text-sm font-bold mt-3">{revealedLabel ? `Use it to open ${revealedLabel}.` : 'Use it to open the box.'}</p>
+    </div>
+  ) : null
   /** True when every answer is right. */
   const checkBlocks = async (): Promise<boolean> => {
     if (!scanRecord || blocksBusy) return false
@@ -1448,6 +1475,7 @@ export function BingoDashParticipant() {
             </div>
           ) : scanRecord?.completed ? (
             <div className="text-center">
+              {passcodePanel}
               <div
                 className="p-6 rounded-2xl border-2"
                 style={{ backgroundColor: `${task.hex_code}25`, borderColor: `${task.hex_code}66` }}
@@ -1695,13 +1723,7 @@ export function BingoDashParticipant() {
                 </div>
               )}
 
-              {revealedPasscode && (
-                <div className="mb-6 p-5 rounded-2xl bg-green-400/15 border-2 border-green-400/60 text-center">
-                  <p className="text-green-300 text-xs font-black uppercase tracking-widest mb-1">Correct! Your passcode</p>
-                  <p className="text-white text-4xl font-black tracking-[0.35em] pl-[0.35em] tabular-nums" translate="no">{revealedPasscode}</p>
-                  <p className="text-green-300/70 text-xs font-bold mt-2">Use it to open the box.</p>
-                </div>
-              )}
+              {passcodePanel}
 
               {/* Several typed questions: one Check button for all of them. */}
               {blocksMode && (

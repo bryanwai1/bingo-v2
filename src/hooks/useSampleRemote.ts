@@ -1,5 +1,6 @@
 import { useEffect, useRef, useCallback } from 'react'
 import { supabase, isSupabaseConfigured } from '../lib/supabase'
+import type { RemoteControl } from '../lib/remoteControls'
 
 // ════════════════════════════════════════════════════════════════════════════
 // SAMPLE REMOTE — pairs two devices for the Bingo Dash demo over an ephemeral
@@ -18,6 +19,9 @@ export type RemoteCommand =
   | { action: 'join'; teamName: string } // pick a group → projector shows "Enter Password"
   | { action: 'confirmJoin' }            // submit the pre-filled password
   | { action: 'cancelJoin' }             // back to the group list
+  | { action: 'setJoinName'; name: string } // typing on the join screen's name step
+  | { action: 'joinNameNext' }           // name step → group list
+  | { action: 'joinNameBack' }           // group list → name step
   | { action: 'leave' }
   | { action: 'openTask'; taskId: string }
   | { action: 'closeTask' }
@@ -32,6 +36,7 @@ export type RemoteCommand =
   | { action: 'prevPage' }
   | { action: 'fillMarshal' }
   | { action: 'submitComplete' }
+  | { action: 'autoComplete' } // cards with their own game or answer: the demo marks them done in one tap
   | { action: 'scroll'; direction: 'up' | 'down' } // scroll the projector's viewport
   | { action: 'scrollTo'; frac: number }            // phone finger-scroll: jump to a fraction of the range
   // The BINGO celebration covering the projector. It self-clears after 4s, so
@@ -43,6 +48,16 @@ export type RemoteCommand =
   | { action: 'setInvite'; open: boolean }
   // Put the board's Join QR (players or observers) on the projector, or take it away.
   | { action: 'setJoinQr'; mode: JoinQrMode }
+  // The "waiting for the host" screen and the observer view, which the demo toolbar also toggles.
+  | { action: 'setWaiting'; on: boolean }
+  | { action: 'setObserver'; on: boolean }
+  // The language the demo screen shows (English / Bahasa Malaysia). It is kept per device, so the screen holds it.
+  | { action: 'setLang'; lang: 'en' | 'ms' }
+  // A card's own controls (Play, a text box, Submit, a photo picker, a picture to tap), found by scanning the open card.
+  | { action: 'uiClick'; i: number; label: string }
+  | { action: 'uiType'; i: number; label: string; value: string }
+  | { action: 'uiFile'; i: number; label: string }
+  | { action: 'uiTap'; i: number; label: string; x: number; y: number }
   | { action: 'requestState' } // controller → projector: "resend your state now"
 
 export type SampleView = 'board' | 'scoreboard'
@@ -55,6 +70,8 @@ export type DetailStep = {
   pageCount: number
   isMarshalTask: boolean
   marshalFilled: boolean
+  /** The card runs its own game / answer, so Complete does nothing: the remote offers auto-complete instead. */
+  ownMechanism?: boolean
 }
 
 export type RemoteState = {
@@ -64,6 +81,9 @@ export type RemoteState = {
   teamName: string | null
   /** Group picked but still on the projector's "Enter Password" step. */
   pendingGroup: string | null
+  /** The join screen's name step. Absent from an older projector = "Player", not yet confirmed. */
+  joinName?: string
+  joinNamed?: boolean
   scanState: Record<string, 'scanned' | 'completed'>
   openTaskId: string | null
   view: SampleView
@@ -85,6 +105,14 @@ export type RemoteState = {
   quickWinRows: number
   /** Whether the help-chat message box is open on the projector. */
   chatOpen: boolean
+  /** The waiting-for-host screen is showing. Absent from an older projector = off. */
+  waiting?: boolean
+  /** The observer view is on. Absent from an older projector = off. */
+  observer?: boolean
+  /** The language on the screen. Absent from an older projector = English. */
+  lang?: 'en' | 'ms'
+  /** What the open card has on screen that the phone can press, type into or tap. Absent from an older projector = none. */
+  controls?: RemoteControl[]
   /**
    * How far the big screen is scrolled, 0-1 of its scrollable range.
    *

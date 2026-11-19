@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { supabase, isSupabaseConfigured } from '../lib/supabase'
 import type { BingoTeam } from '../types/database'
+import { registerCoopMember } from '../lib/coopGames/registerMember'
 
 const TEAM_ID_KEY   = 'bingo-dash-team-id'
 const TEAM_DATA_KEY = 'bingo-dash-team-data'
@@ -50,7 +51,7 @@ export function useBingoDashTeam() {
    * Join an existing team (created by admin) by teamId + password.
    * Admin creates teams in advance; participants pick from the list and enter the password.
    */
-  const joinTeamById = async (teamId: string, password: string): Promise<BingoTeam> => {
+  const joinTeamById = async (teamId: string, password: string, memberName?: string): Promise<BingoTeam> => {
     const trimmedPwd = password.trim()
 
     const { data: found, error } = await supabase
@@ -66,6 +67,10 @@ export function useBingoDashTeam() {
       localStorage.removeItem('bingo-dash-member-id')
       localStorage.removeItem('bingo-dash-member-role')
     }
+    // A named member from the start (same record the join page makes), so a card
+    // that needs one never has to ask for the name again. Done before the team is
+    // stored: a full team stops the join here instead of half-joining.
+    if (memberName?.trim()) await registerCoopMember(found.id, memberName, 'player')
     localStorage.setItem(TEAM_ID_KEY, found.id)
     localStorage.setItem(TEAM_DATA_KEY, JSON.stringify(found))
     setTeam(found)

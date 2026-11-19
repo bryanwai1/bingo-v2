@@ -27,7 +27,7 @@ export function PageNavigator({ current, total, onPrev, onNext, hexCode }: PageN
       )}
       <div className="flex items-center justify-between mt-4">
         <button
-          onClick={onPrev}
+          onClick={onPrev} data-remote="prevPage"
           disabled={current === 0}
           className="px-6 py-3 rounded-2xl font-bold transition-all duration-200 disabled:opacity-20 disabled:cursor-not-allowed bg-gray-200 text-gray-700 hover:bg-gray-300 hover:scale-105 active:scale-95"
         >
@@ -46,7 +46,7 @@ export function PageNavigator({ current, total, onPrev, onNext, hexCode }: PageN
           ))}
         </div>
         <button
-          onClick={onNext}
+          onClick={onNext} data-remote="nextPage"
           disabled={current === total - 1}
           className="px-6 py-3 rounded-2xl font-bold a-text transition-all duration-200 disabled:opacity-20 disabled:cursor-not-allowed hover:scale-105 active:scale-95"
           style={{ backgroundColor: hexCode }}

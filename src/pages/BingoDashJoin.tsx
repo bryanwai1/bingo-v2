@@ -1,4 +1,4 @@
-import { loadCelebratedLines, saveCelebratedLines } from '../lib/bingoLines'
+import { loadCelebratedLines, saveCelebratedLines, planLineCelebrations } from '../lib/bingoLines'
 import { useEffect, useRef, useState, useMemo } from 'react'
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
@@ -589,6 +589,7 @@ function BoardScreen({
   prizeTasks,
   sectionId,
   scans,
+  scansReady,
   reviews,
   settings,
   boardNote,
@@ -611,6 +612,8 @@ function BoardScreen({
   chatSectionId?: string | null
   gridTasks: BingoTask[]
   scans: BingoScan[]
+  /** The team's scans have been fetched at least once (an empty list before that is not "no lines"). */
+  scansReady: boolean
   reviews: Record<string, ReviewFlag>
   settings: BoardTimer | null
   boardNote: string
@@ -696,6 +699,10 @@ function BoardScreen({
   // achievement gets its own announcement, even when one tile completes
   // multiple lines at once.
   useEffect(() => {
+    // The team's scans arrive after the board mounts. Taking the "already
+    // celebrated" baseline from an empty board would make every line finished
+    // earlier look new, and replay B, BI, BIN... on each reload.
+    if (!scansReady) return
     if (celebratedLinesRef.current === null) {
       // Remember across visits to the board: coming back from a card page must
       // not celebrate a line the team was already congratulated for.
@@ -706,20 +713,14 @@ function BoardScreen({
         return
       }
     }
-    const newLines: number[] = []
-    completedLineIndices.forEach(idx => {
-      if (!celebratedLinesRef.current!.has(idx)) newLines.push(idx)
-    })
-    if (newLines.length === 0) return
-    const baseSize = celebratedLinesRef.current.size
-    newLines.forEach(idx => celebratedLinesRef.current!.add(idx))
-    saveCelebratedLines(team.id, celebratedLinesRef.current)
-    const queued = newLines.map((_, i) =>
-      BINGO_WORD.slice(0, Math.min(baseSize + i + 1, 5))
-    )
-    setPopupQueue(prev => [...prev, ...queued])
+    // Each step of BINGO is shown once, ever; lines past the fifth show nothing.
+    const { next, popups } = planLineCelebrations(celebratedLinesRef.current, completedLineIndices)
+    if (next.size === celebratedLinesRef.current.size) return
+    celebratedLinesRef.current = next
+    saveCelebratedLines(team.id, next)
+    if (popups.length) setPopupQueue(prev => [...prev, ...popups])
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [completedLinesKey])
+  }, [completedLinesKey, scansReady])
 
   // Drive the popup from the queue: show each item for 4s, then advance.
   useEffect(() => {
@@ -925,6 +926,7 @@ export function BingoDashJoin() {
   const [gridTasks, setGridTasks] = useState<BingoTask[]>([])
   const [prizeTasks, setPrizeTasks] = useState<BingoTask[]>([])
   const [scans, setScans] = useState<BingoScan[]>([])
+  const [scansReady, setScansReady] = useState(false)
   const reviews = useTeamReviews(team?.id)
   const [pageState, setPageState] = useState<'loading' | 'not-found' | 'join' | 'board'>('loading')
 
@@ -1046,9 +1048,9 @@ export function BingoDashJoin() {
 
   // Load scans when team is set
   useEffect(() => {
-    if (!team) { setScans([]); return }
+    if (!team) { setScans([]); setScansReady(false); return }
     supabase.from('bingo_scans').select('*').eq('team_id', team.id)
-      .then(({ data }) => { if (data) setScans(data) })
+      .then(({ data }) => { if (data) { setScans(data); setScansReady(true) } })
   }, [team])
 
   // Live scan updates
@@ -1057,7 +1059,7 @@ export function BingoDashJoin() {
     const channel = supabase
       .channel(`bingo-join-scans-${team.id}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'bingo_scans', filter: `team_id=eq.${team.id}` }, () => {
-        supabase.from('bingo_scans').select('*').eq('team_id', team.id).then(({ data }) => { if (data) setScans(data) })
+        supabase.from('bingo_scans').select('*').eq('team_id', team.id).then(({ data }) => { if (data) { setScans(data); setScansReady(true) } })
       })
       .subscribe()
     return () => { supabase.removeChannel(channel) }
@@ -1089,7 +1091,7 @@ export function BingoDashJoin() {
       }
       if (team?.id) {
         supabase.from('bingo_scans').select('*').eq('team_id', team.id)
-          .then(({ data }) => { if (data) setScans(data) })
+          .then(({ data }) => { if (data) { setScans(data); setScansReady(true) } })
       }
     }
     document.addEventListener('visibilitychange', resync)
@@ -1118,7 +1120,7 @@ export function BingoDashJoin() {
     if (!team || !section?.game_started) return
     const id = setInterval(() => {
       supabase.from('bingo_scans').select('*').eq('team_id', team.id)
-        .then(({ data }) => { if (data) setScans(data) })
+        .then(({ data }) => { if (data) { setScans(data); setScansReady(true) } })
     }, 7000)
     return () => clearInterval(id)
   }, [team?.id, section?.game_started])
@@ -1347,6 +1349,7 @@ export function BingoDashJoin() {
           prizeTasks={prizeTasks}
           sectionId={section.id}
           scans={scans}
+          scansReady={scansReady}
           reviews={reviews}
           settings={section}
           boardNote={section.board_note ?? ''}

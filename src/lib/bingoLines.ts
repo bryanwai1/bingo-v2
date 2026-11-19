@@ -152,3 +152,27 @@ export function loadCelebratedLines(teamId: string): Set<number> | null {
 export function saveCelebratedLines(teamId: string, lines: Set<number>): void {
   try { localStorage.setItem(celebratedKey(teamId), JSON.stringify([...lines])) } catch { /* private mode */ }
 }
+
+export const BINGO_WORD = 'BINGO'
+
+/**
+ * Which celebration popups a board should show now. `celebrated` is every line
+ * this team has already been congratulated for, `completed` the lines that are
+ * complete right now. Each NEW line is one step up the word: the 1st line
+ * shows B, the 2nd BI … the 5th BINGO. A step is shown once, ever. Lines past
+ * the 5th earn no popup (there is no letter left), and a line that is undone
+ * and finished again, or a board reloaded, shows nothing. Returns the updated
+ * `celebrated` set to remember, and the popups in order.
+ */
+export function planLineCelebrations(
+  celebrated: ReadonlySet<number>,
+  completed: ReadonlySet<number>,
+): { next: Set<number>; popups: string[] } {
+  const next = new Set(celebrated)
+  const popups: string[] = []
+  for (const idx of [...completed].filter(i => !celebrated.has(i)).sort((a, b) => a - b)) {
+    next.add(idx)
+    if (next.size <= BINGO_WORD.length) popups.push(BINGO_WORD.slice(0, next.size))
+  }
+  return { next, popups }
+}
