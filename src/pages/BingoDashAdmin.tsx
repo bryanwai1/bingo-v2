@@ -4978,10 +4978,34 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
 
         <AdminSection icon="🎨" title="Scoreboard Theme"
           blurb="How the projector looks for this board — a legibility choice as much as a visual one."
-          summary={<>{getScoreboardTheme(currentBoard?.scoreboard_theme).name}</>}>
+          summary={<>{getScoreboardTheme(currentBoard?.scoreboard_theme).name}{currentBoard?.player_scoreboard_enabled === false ? ' · hidden from players' : ''}</>}>
 
-          
-          
+          {/* Player phone scoreboard on/off. The projector is not affected. */}
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-4 p-4 rounded-lg border a-border a-surface/50">
+            <div>
+              <p className="text-sm font-bold a-text">Show scoreboard to players</p>
+              <p className="text-xs a-text-3 mt-0.5">When ON, players see the Scores tab on their phone. Turn OFF to keep scores secret, then turn ON for the reveal. The projector screen always shows scores.</p>
+            </div>
+            <button
+              onClick={() => {
+                if (!currentBoard) return
+                updateBoardSettings({ player_scoreboard_enabled: currentBoard.player_scoreboard_enabled === false })
+              }}
+              role="switch"
+              aria-checked={currentBoard?.player_scoreboard_enabled !== false}
+              aria-label="Show scoreboard to players"
+              className={`relative shrink-0 w-14 h-8 rounded-full transition-colors ${
+                currentBoard?.player_scoreboard_enabled !== false ? 'bg-teal-500' : 'bg-gray-600'
+              }`}
+            >
+              <span
+                className={`absolute top-1 left-1 w-6 h-6 rounded-full a-surface shadow transition-transform ${
+                  currentBoard?.player_scoreboard_enabled !== false ? 'translate-x-6' : 'translate-x-0'
+                }`}
+              />
+            </button>
+          </div>
+
           {(() => {
             const current = getScoreboardTheme(currentBoard?.scoreboard_theme).key
             return (

@@ -12,6 +12,12 @@ test('AC-1/AC-5: player with an invite link gets Invite | Board | Scores, others
   assert.equal(barTabs(true)[1], 'board') // Board is the centre tab
 })
 
+test('admin can hide Scores: the tab disappears, Invite and Board stay', () => {
+  assert.deepEqual(barTabs(true, false), ['invite', 'board'])
+  assert.deepEqual(barTabs(false, false), ['board'])
+  assert.deepEqual(barTabs(true, true), ['invite', 'board', 'scores'])
+})
+
 test('AC-6: the spacer clears the bar, its lift and the gap', () => {
   assert.ok(BAR_SPACER_PX >= 64 + 8 + 10) // bar height + bottom gap + disc lift
 })

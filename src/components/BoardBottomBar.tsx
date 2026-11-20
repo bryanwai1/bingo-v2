@@ -27,7 +27,7 @@ const Icon = ({ d, extra, head = false }: { d: string; extra?: string; head?: bo
 
 const tabCls = 'flex flex-col items-center justify-center gap-0.5 min-h-[44px] min-w-[44px] h-full text-[11px] font-bold transition-transform duration-150 motion-reduce:transition-none active:scale-110 focus-visible:outline-[3px] focus-visible:outline-yellow-300 rounded-2xl'
 
-export function BoardBottomBar({ theme, inviteUrl, teamName, scoreboardPath, onInvite, onScores, always = false }: {
+export function BoardBottomBar({ theme, inviteUrl, teamName, scoreboardPath, onInvite, onScores, showScores = true, always = false }: {
   theme: PlayerTheme
   /** Observer link of this team. Empty/null hides the Invite tab. */
   inviteUrl: string | null
@@ -36,13 +36,15 @@ export function BoardBottomBar({ theme, inviteUrl, teamName, scoreboardPath, onI
   /** The demo board owns its QR and scoreboard, so it takes over these two taps. */
   onInvite?: () => void
   onScores?: () => void
+  /** False when the admin hides the scoreboard from players: no Scores tab. */
+  showScores?: boolean
   /** Show on every screen size (the demo page), not just phones. */
   always?: boolean
 }) {
   const t = TOKENS[theme]
   const navigate = useNavigate()
   const [qrOpen, setQrOpen] = useState(false)
-  const tabs = barTabs(!!inviteUrl)
+  const tabs = barTabs(!!inviteUrl, showScores)
 
   const toTop = () => {
     const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
@@ -77,7 +79,7 @@ export function BoardBottomBar({ theme, inviteUrl, teamName, scoreboardPath, onI
       <nav aria-label="Board navigation"
         className={(always ? 'fixed ' : 'md:hidden fixed ') + 'left-3 right-3 mx-auto max-w-[460px] h-16 z-40 rounded-[22px] backdrop-blur-xl border'}
         style={{ bottom: 'calc(8px + env(safe-area-inset-bottom))', background: t.bar, borderColor: t.border }}>
-        <div className={`grid h-full items-center ${tabs.length === 3 ? 'grid-cols-3' : 'grid-cols-2'}`}>
+        <div className={`grid h-full items-center ${tabs.length === 3 ? 'grid-cols-3' : tabs.length === 2 ? 'grid-cols-2' : 'grid-cols-1'}`}>
           {tabs.map(k => byTab[k])}
         </div>
       </nav>

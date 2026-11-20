@@ -429,6 +429,19 @@ export function BingoDashProjector() {
     </div>
   )
 
+  // The admin can hide the scoreboard from players' phones. The Scores tab is
+  // already gone; this stops a bookmarked or already-open ?view=player page.
+  if (playerView && activeSection?.player_scoreboard_enabled === false) {
+    return (
+      <div className={`h-screen flex flex-col items-center justify-center gap-5 px-6 text-center ${grabLook ? 'bg-[#0b3d22]' : theme.bg}`}>
+        <div className="text-5xl" aria-hidden="true">🙈</div>
+        <h1 className={`text-2xl font-black ${theme.heading}`}>Scoreboard is hidden</h1>
+        <p className={`text-sm max-w-xs ${theme.muted}`}>The organiser has turned the scoreboard off for now. Keep playing. Scores will be revealed later.</p>
+        <button type="button" onClick={backToBoard} className={`min-h-[44px] px-5 rounded-xl text-sm font-black bg-white/10 border border-white/10 hover:bg-white/20 ${theme.heading}`}>← Back to board</button>
+      </div>
+    )
+  }
+
   return (
     <div className={`h-screen flex flex-col relative overflow-hidden ${grabLook ? 'bg-[#0b3d22]' : theme.bg}`}>
       {/* A Grab Game Day board shows its own stadium art here too (phone and laptop versions). */}

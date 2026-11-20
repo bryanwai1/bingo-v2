@@ -552,6 +552,7 @@ function BoardScreen({
   boardNote,
   boardNoteEvery,
   tileDisplay,
+  showScoreboard = true,
   faceCountProp,
   inviteUrl,
   chatSectionId,
@@ -576,6 +577,8 @@ function BoardScreen({
   boardNote: string
   boardNoteEvery: number
   tileDisplay: TileDisplay
+  /** False when the admin hides the scoreboard from players. */
+  showScoreboard?: boolean
   /** Cube faces in play for this board; 1 keeps the classic layout. */
   faceCountProp?: number | null
   onLeave: () => void
@@ -757,12 +760,14 @@ function BoardScreen({
                 />
               </div>
             )}
-            <button
-              onClick={() => navigate('/bingo-dash/projector?view=player')}
-              className="hidden md:block text-xs font-bold text-teal-300 hover:text-teal-200 transition-colors"
-            >
-              🏆 Scoreboard
-            </button>
+            {showScoreboard && (
+              <button
+                onClick={() => navigate('/bingo-dash/projector?view=player')}
+                className="hidden md:block text-xs font-bold text-teal-300 hover:text-teal-200 transition-colors"
+              >
+                🏆 Scoreboard
+              </button>
+            )}
             {!showLeaveConfirm ? (
               <button onClick={() => setShowLeaveConfirm(true)} className="text-xs text-gray-500 hover:text-gray-300 transition-colors">
                 Switch Team
@@ -903,7 +908,7 @@ function BoardScreen({
       {/* Phone bottom bar (DESIGN-009): Invite | Board | Scores. Phone only. */}
       <BoardBarSpacer />
       <BoardBottomBar theme={theme} teamName={team.name} inviteUrl={inviteUrl ?? null}
-        scoreboardPath="/bingo-dash/projector?view=player" />
+        scoreboardPath="/bingo-dash/projector?view=player" showScores={showScoreboard} />
     </div>
   )
 }
@@ -1123,6 +1128,7 @@ export function BingoDashHome() {
         boardNote={boardNote}
         boardNoteEvery={boardNoteEvery}
         tileDisplay={normalizeTileDisplay(section?.tile_display)}
+        showScoreboard={section?.player_scoreboard_enabled !== false}
         faceCountProp={section?.face_count}
         onLeave={leaveTeam}
       />

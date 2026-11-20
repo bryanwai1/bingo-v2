@@ -595,6 +595,7 @@ function BoardScreen({
   boardNote,
   boardNoteEvery,
   tileDisplay,
+  showScoreboard = true,
   theme,
   onLeave,
 }: {
@@ -619,6 +620,8 @@ function BoardScreen({
   boardNote: string
   boardNoteEvery: number
   tileDisplay: TileDisplay
+  /** False when the admin hides the scoreboard from players. */
+  showScoreboard?: boolean
   onLeave: () => void
 }) {
   // One colour per category on the board, whatever each card row carries.
@@ -788,12 +791,14 @@ function BoardScreen({
                 />
               </div>
             )}
-            <button
-              onClick={() => navigate(`/bingo-dash/projector/${sectionSlug}?view=player`)}
-              className="hidden md:block text-xs font-bold text-teal-300 hover:text-teal-200 transition-colors"
-            >
-              🏆 Scoreboard
-            </button>
+            {showScoreboard && (
+              <button
+                onClick={() => navigate(`/bingo-dash/projector/${sectionSlug}?view=player`)}
+                className="hidden md:block text-xs font-bold text-teal-300 hover:text-teal-200 transition-colors"
+              >
+                🏆 Scoreboard
+              </button>
+            )}
             {!showLeaveConfirm ? (
               <button onClick={() => setShowLeaveConfirm(true)} className="text-xs text-gray-500 hover:text-gray-300 transition-colors">
                 Switch Team
@@ -903,7 +908,7 @@ function BoardScreen({
       <BoardBarSpacer />
       <BoardBottomBar theme={theme} teamName={team.name}
         inviteUrl={memberRole === 'player' && teamPassword ? observerInviteUrl : null}
-        scoreboardPath={`/bingo-dash/projector/${sectionSlug}?view=player`} />
+        scoreboardPath={`/bingo-dash/projector/${sectionSlug}?view=player`} showScores={showScoreboard} />
     </div>
   )
 }
@@ -1355,6 +1360,7 @@ export function BingoDashJoin() {
           boardNote={section.board_note ?? ''}
           boardNoteEvery={section.board_note_every ?? 0}
           tileDisplay={normalizeTileDisplay(section.tile_display)}
+          showScoreboard={section.player_scoreboard_enabled !== false}
           theme={theme}
           onLeave={leaveTeam}
         />

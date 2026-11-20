@@ -104,6 +104,8 @@ export interface BingoSection extends BoardTimer {
   default_bonus_timer_minutes?: number | null
   /** midnight | arena | daylight — see src/lib/scoreboardThemes.ts */
   scoreboard_theme?: string | null
+  /** false hides the scoreboard from players' phones; missing/null means shown. See supabase/core-tables/20261120_player_scoreboard.sql */
+  player_scoreboard_enabled?: boolean | null
   /** default | grab — see src/lib/playerThemes.ts */
   player_theme?: string | null
   id: string
