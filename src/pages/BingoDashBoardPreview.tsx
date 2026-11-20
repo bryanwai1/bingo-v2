@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
+import { useBingoAuth } from '../hooks/useBingoAuth'
 import { fetchBoardTasks, fetchPrizeTasks } from '../lib/boardCards'
 import { withCategoryColors, prereqResolver } from '../lib/bingoTileDisplay'
 import { effectiveInputs, inputKinds } from '../lib/completionInputs'
@@ -28,12 +29,34 @@ function submitMethod(t: BingoTask): string {
 
 export function BingoDashBoardPreview() {
   const { sectionId = '' } = useParams()
+  // The page is public (shareable link). Only a signed-in admin sees the
+  // editor link and the prize reveal text, which RLS keeps away from anon.
+  const { session } = useBingoAuth()
+  const isAdmin = !!session
   const [section, setSection] = useState<BingoSection | null>(null)
   const [tasks, setTasks] = useState<BingoTask[]>([])
   const [prize, setPrize] = useState<BingoTask[]>([])
   const [idx, setIdx] = useState(0)
   const [loaded, setLoaded] = useState(false)
   const [listOpen, setListOpen] = useState(false)
+  const [copied, setCopied] = useState<'ok' | 'fail' | null>(null)
+
+  // Copies this page's link so it can be pasted straight into a chat.
+  const copyLink = async () => {
+    const url = window.location.href
+    let ok = false
+    try { await navigator.clipboard.writeText(url); ok = true } catch {
+      // Older browsers / non-secure contexts: fall back to a hidden textarea.
+      try {
+        const ta = document.createElement('textarea')
+        ta.value = url; ta.style.position = 'fixed'; ta.style.opacity = '0'
+        document.body.appendChild(ta); ta.select()
+        ok = document.execCommand('copy'); ta.remove()
+      } catch { /* leave ok false */ }
+    }
+    setCopied(ok ? 'ok' : 'fail')
+    window.setTimeout(() => setCopied(null), 2000)
+  }
   const [secret, setSecret] = useState<{ id: string; row: Record<string, string> | null } | null>(null)
 
   useEffect(() => {
@@ -70,11 +93,11 @@ export function BingoDashBoardPreview() {
   const curId = cur?.id
   const curIsPrize = !!cur?.is_prize
   useEffect(() => {
-    if (!curId || !curIsPrize) return
+    if (!curId || !curIsPrize || !isAdmin) return
     let live = true
     supabase.from('bingo_prize_secrets').select('*').eq('task_id', curId).maybeSingle().then(({ data }) => { if (live) setSecret({ id: curId, row: data as Record<string, string> | null }) })
     return () => { live = false }
-  }, [curId, curIsPrize])
+  }, [curId, curIsPrize, isAdmin])
   const reveal = secret && secret.id === curId ? secret.row : null
 
   const resolver = useMemo(() => prereqResolver(tasks), [tasks])
@@ -94,12 +117,18 @@ export function BingoDashBoardPreview() {
   return (
     <div className="fixed inset-0 bg-gray-900 flex flex-col text-white">
       <header className="shrink-0 border-b border-white/10 bg-gray-950 px-4 py-2 flex flex-wrap items-center gap-x-3 gap-y-1">
-        <Link to="/bingo-dash/admin" className="text-sm text-teal-400 hover:underline min-h-11 flex items-center">← Board Editor</Link>
+        {isAdmin
+          ? <Link to="/bingo-dash/admin" className="text-sm text-teal-400 hover:underline min-h-11 flex items-center">← Board Editor</Link>
+          : <span className="text-sm font-bold text-white min-h-11 flex items-center [overflow-wrap:anywhere]">{section?.name ?? 'Board preview'}</span>}
+        <button type="button" onClick={() => void copyLink()} aria-live="polite"
+          className={`ml-auto px-3 h-11 rounded-lg text-sm font-bold ${copied === 'ok' ? 'bg-teal-600' : copied === 'fail' ? 'bg-red-600' : 'bg-white/10'}`}>
+          {copied === 'ok' ? '✓ Link copied' : copied === 'fail' ? 'Copy failed' : '🔗 Share link'}
+        </button>
         {/* Phone: the card list opens from the counter. Laptop: the list is always on the left. */}
-        <button type="button" onClick={() => setListOpen(o => !o)} className="md:hidden ml-auto px-3 h-11 rounded-lg bg-white/10 text-sm font-bold">
+        <button type="button" onClick={() => setListOpen(o => !o)} className="md:hidden px-3 h-11 rounded-lg bg-white/10 text-sm font-bold">
           {idx + 1} / {slides.length} ▾
         </button>
-        <span className="hidden md:inline ml-auto text-sm text-gray-300">{idx + 1} / {slides.length}</span>
+        <span className="hidden md:inline text-sm text-gray-300">{idx + 1} / {slides.length}</span>
         <span className="hidden md:flex gap-2">{prev}{next}</span>
         <div className="basis-full text-xs text-gray-300 flex flex-wrap gap-x-3">
           <span className="font-bold text-white [overflow-wrap:anywhere]">{cur.title}</span>
@@ -124,7 +153,7 @@ export function BingoDashBoardPreview() {
               <p className="text-sm text-gray-300">What teams see on the board:</p>
               <PrizeStrip state={{ kind: 'locked', count: 12, threshold: cur.prize_threshold ?? 20 }} theme="default" busy={false} message={null} title={cur.title} hint={cur.completion_warning} onClaim={() => {}} onOpen={() => {}} />
               <PrizeStrip state={{ kind: 'claimable', canClaim: true }} theme="default" busy={false} message={null} title={cur.title} onClaim={() => {}} onOpen={() => {}} />
-              <div className="rounded-xl border border-white/10 p-3 text-sm space-y-1">
+              {isAdmin && <div className="rounded-xl border border-white/10 p-3 text-sm space-y-1">
                 <p className="font-bold">Reveal text the winner sees</p>
                 {reveal ? (
                   <>
@@ -134,7 +163,7 @@ export function BingoDashBoardPreview() {
                     {reveal.maps_url && <a className="text-teal-400 underline [overflow-wrap:anywhere]" href={reveal.maps_url} target="_blank" rel="noopener noreferrer">{reveal.maps_label || 'Open in Google Maps'}</a>}
                   </>
                 ) : <p className="text-gray-400">Nothing saved yet.</p>}
-              </div>
+              </div>}
             </div>
           ) : (
             <SampleTaskDetail

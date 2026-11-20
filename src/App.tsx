@@ -60,7 +60,11 @@ export default function App() {
           <Route element={<BingoAuthProvider><Outlet /></BingoAuthProvider>}>
             <Route path="/bingo-dash/admin" element={<RequireBingoAdmin game="bingo"><BingoDashAdmin /></RequireBingoAdmin>} />
             <Route path="/bingo-dash/admin/task/:taskId" element={<RequireBingoAdmin game="bingo"><BingoDashTaskEdit /></RequireBingoAdmin>} />
-            <Route path="/bingo-dash/admin/board-preview/:sectionId" element={<RequireBingoAdmin game="bingo"><BingoDashBoardPreview /></RequireBingoAdmin>} />
+            {/* Deliberately NOT gated: the board walkthrough is a shareable link.
+                It only reads data that is already public (cards, sections) and
+                hides the admin-only parts when signed out. It stays inside the
+                provider so a signed-in admin still gets the Board Editor link. */}
+            <Route path="/bingo-dash/admin/board-preview/:sectionId" element={<BingoDashBoardPreview />} />
             <Route path="/bingo-dash/accounts" element={<RequireBingoAdmin ownerOnly><BingoDashAccounts /></RequireBingoAdmin>} />
             <Route path="/bingo-dash/crew" element={<RequireBingoAdmin><BingoDashCrew /></RequireBingoAdmin>} />
             <Route path="/bingo-dash/account" element={<RequireBingoAdmin><BingoDashAccount /></RequireBingoAdmin>} />
