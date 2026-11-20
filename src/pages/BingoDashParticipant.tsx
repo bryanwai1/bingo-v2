@@ -115,14 +115,14 @@ export function BingoDashParticipant() {
   const { pages, loading: pagesLoading } = useBingoTaskPages(taskId)
   const { photos, loading: photosLoading } = useBingoTaskPhotos(taskId)
   const { links } = useTaskLinks(taskId, 'bingo_task_links')
-  const { recordScan, toggleComplete, saveWords, saveSteps } = useBingoScans()
+  const { recordScan, findScan, toggleComplete, saveWords, saveSteps } = useBingoScans()
   // A card can define its own draw slots; otherwise the module keeps its
   // hardcoded shape.
   const { config: drawConfig } = useCardDrawConfig(taskId)
 
   const [task, setTask] = useState<BingoTask | null>(null)
   const [showSplash, setShowSplash] = useState(!isSnakeLadder)
-  const [scanRecord, setScanRecord] = useState<{ id: string; completed: boolean; answerOk: boolean; words: string[]; stepsDone: number[]; scannedAt: string; completedAt: string | null } | null>(null)
+  const [scanRecord, setScanRecord] = useState<{ id: string; completed: boolean; answerOk: boolean; words: string[]; stepsDone: number[]; scannedAt: string; timerStartedAt: string | null; completedAt: string | null } | null>(null)
   // The board's default bonus window, for cards that do not set their own.
   const [bonusDefaults, setBonusDefaults] = useState<BonusDefaults | null>(null)
   // Elapsed time at the last tick, so the timer can freeze on completion.
@@ -543,19 +543,77 @@ export function BingoDashParticipant() {
     }
   }
 
+  // The scan row's scanned_at is the card timer's start, so only the PLAYER
+  // pressing Start Challenge creates it. Observers never write: they pick up
+  // the scan once the player has made it (the 2s poll below), and see no timer
+  // until then.
+  const applyScan = useCallback((scan: BingoScan) => {
+    setScanRecord({
+      id: scan.id, completed: scan.completed, answerOk: scan.answer_ok ?? false,
+      words: scan.words ?? [], stepsDone: scan.steps_done ?? [], scannedAt: scan.scanned_at,
+      timerStartedAt: scan.timer_started_at ?? null, completedAt: scan.completed_at ?? null,
+    })
+  }, [])
+
+  // Station cards: the inner timer and the card itself stay locked until the
+  // station marshal presses Start (timer_started_at). Anyone without a scan yet
+  // (an observer waiting on the player) counts as locked too.
+  const stationLocked = !!task?.is_station && !scanRecord?.timerStartedAt
+
+  // The marshal's Start. Only writes if nobody has started it yet, so two
+  // phones tapping together cannot move the start time.
+  const startStationTimer = async () => {
+    if (!scanRecord || scanRecord.timerStartedAt) return
+    const { data, error } = await supabase.from('bingo_scans')
+      .update({ timer_started_at: new Date().toISOString() })
+      .eq('id', scanRecord.id).is('timer_started_at', null)
+      .select('timer_started_at').maybeSingle()
+    if (error) { alert('Could not start the timer. Please try again.'); return }
+    const startedAt = data?.timer_started_at
+      ?? (team && taskId ? (await findScan(team.id, taskId, boardCardId).catch(() => null))?.timer_started_at : null)
+      ?? null
+    if (startedAt) setScanRecord(prev => (prev ? { ...prev, timerStartedAt: startedAt } : prev))
+  }
+
+  // Everyone else on the card (observers, teammates' phones) picks the start up
+  // from the shared scan row.
+  const waitingForStart = !!task?.is_station && !!scanRecord && !scanRecord.timerStartedAt
   useEffect(() => {
-    if (isSnakeLadder) return
+    if (!waitingForStart || !team || !taskId) return
+    let cancelled = false
+    const t = setInterval(() => {
+      findScan(team.id, taskId, boardCardId)
+        .then((scan) => {
+          const startedAt = scan?.timer_started_at
+          if (!cancelled && startedAt) setScanRecord(prev => (prev ? { ...prev, timerStartedAt: startedAt } : prev))
+        })
+        .catch(() => { /* try again on the next tick */ })
+    }, 2000)
+    return () => { cancelled = true; clearInterval(t) }
+  }, [waitingForStart, team, taskId, boardCardId, findScan])
+
+  useEffect(() => {
+    if (isSnakeLadder || isObserver || showSplash) return
     if (team && taskId && !scanRecorded) {
       recordScan(team.id, taskId, boardCardId).then((scan) => {
         setScanRecorded(true)
-        if (scan) setScanRecord({
-          id: scan.id, completed: scan.completed, answerOk: scan.answer_ok ?? false,
-          words: scan.words ?? [], stepsDone: scan.steps_done ?? [], scannedAt: scan.scanned_at,
-          completedAt: scan.completed_at ?? null,
-        })
+        if (scan) applyScan(scan)
       })
     }
-  }, [isSnakeLadder, team, taskId, boardCardId, scanRecorded, recordScan])
+  }, [isSnakeLadder, isObserver, showSplash, team, taskId, boardCardId, scanRecorded, recordScan, applyScan])
+
+  useEffect(() => {
+    if (isSnakeLadder || !isObserver || !team || !taskId || scanRecord) return
+    let cancelled = false
+    const look = () => {
+      findScan(team.id, taskId, boardCardId)
+        .then((scan) => { if (!cancelled && scan) applyScan(scan) })
+        .catch((err) => console.warn('Could not look up the team scan:', err))
+    }
+    look()
+    const t = setInterval(look, 2000)
+    return () => { cancelled = true; clearInterval(t) }
+  }, [isSnakeLadder, isObserver, team, taskId, boardCardId, scanRecord, findScan, applyScan])
 
   // The bonus timer counts up live from the moment the card was opened.
   useEffect(() => {
@@ -1188,9 +1246,19 @@ export function BingoDashParticipant() {
           </div>
         )}
 
-        {/* Bonus timer — every card, from the moment the team opens it. */}
-        {scanRecord && !chainLocked && (() => {
-          const opened = new Date(scanRecord.scannedAt).getTime()
+        {/* Bonus timer — every card, from the moment the team opens it. A station
+            card instead waits for the marshal's Start (timerStartedAt). */}
+        {/* An observer sees the player's timer mirrored: held at 0 until the
+            player presses Start Challenge, then following the same scan row. */}
+        {!scanRecord && isObserver && !chainLocked && (
+          <CardBonusTimer elapsedMs={0} window={resolveBonusWindow(task, bonusDefaults)} basePoints={task.points ?? 0} completed={false} waiting="player" />
+        )}
+        {scanRecord && !chainLocked && stationLocked && (
+          <CardBonusTimer elapsedMs={0} window={resolveBonusWindow(task, bonusDefaults)} basePoints={task.points ?? 0} completed={false}
+            waiting="marshal" onStart={isObserver ? undefined : () => void startStationTimer()} />
+        )}
+        {scanRecord && !chainLocked && !stationLocked && (() => {
+          const opened = new Date((task.is_station ? scanRecord.timerStartedAt : null) ?? scanRecord.scannedAt).getTime()
           // Board pauses are taken off, so the clock stands still while the
           // admin has the board countdown paused.
           if (!scanRecord.completed) lastElapsed.current = activeElapsedMs(opened, now, bonusDefaults)
@@ -1208,7 +1276,7 @@ export function BingoDashParticipant() {
 
         {/* Cooperative game (PRD-004): Play button on game cards only; opens the lobby and
             game in place of the instruction cards. Everything else on the card is unchanged. */}
-        {scanRecord && !chainLocked && coopGameKey && (
+        {scanRecord && !chainLocked && !stationLocked && coopGameKey && (
           <CoopPlay
             memberId={coopMember.id}
             memberLoading={coopMember.loading}
@@ -1282,7 +1350,7 @@ export function BingoDashParticipant() {
             to every AITB activity whether or not it carries a module. */}
         {/* The draw is driven by the card's own configuration, so a card
             outside AI Team Building can carry one too. */}
-        {drawConfig && scanRecord && (
+        {drawConfig && scanRecord && !stationLocked && (
           <div className="mb-8 mt-8 animate-slide-up">
             <AitbMissionModule activity={aitbActivity} color={task.hex_code} storeId={task.id}
               drawConfig={drawConfig} savedWords={scanRecord.words}
@@ -1300,7 +1368,7 @@ export function BingoDashParticipant() {
         <CardSample title={task.title} color={task.hex_code} taskId={task.id} />
 
 
-        {aitbActivity && scanRecord && (
+        {aitbActivity && scanRecord && !stationLocked && (
           <div className="mb-8 mt-8 animate-slide-up">
             {/* Speed Edit Showdown works from a fixed set of target pictures. */}
             {aitbActivity.name === 'Speed Edit Showdown' && (
@@ -1397,8 +1465,15 @@ export function BingoDashParticipant() {
           </div>
         )}
 
+        {/* Station card, marshal has not pressed Start yet: no way to answer or complete. */}
+        {!isObserver && stationLocked && (
+          <div className="mt-8 p-5 rounded-3xl border-2 border-amber-400/50 bg-amber-400/10 text-center">
+            <p className="text-amber-300 font-black">🔒 Locked until the station marshal starts the timer</p>
+          </div>
+        )}
+
         {/* Complete Activity */}
-        {!isObserver && <div className="mt-8 animate-slide-up">
+        {!isObserver && !stationLocked && <div className="mt-8 animate-slide-up">
           {/* A bundle tile is a whole activity set, so it replaces the normal
               completion flow the same way a contest card does. */}
           {chainLocked && chain.prev ? (

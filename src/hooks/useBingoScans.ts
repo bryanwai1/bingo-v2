@@ -38,6 +38,17 @@ export function useBingoScans() {
     return data
   }, [])
 
+  // Read-only: returns the team's scan for this card/box, or null if nobody has
+  // started it yet. Observers use this instead of recordScan so that opening a
+  // card never creates the scan row (whose scanned_at is the timer's start).
+  const findScan = useCallback(async (teamId: string, taskId: string, boardCardId?: string | null): Promise<BingoScan | null> => {
+    let query = supabase.from('bingo_scans').select('*').eq('team_id', teamId).eq('task_id', taskId)
+    query = boardCardId ? query.eq('board_card_id', boardCardId) : query.is('board_card_id', null)
+    const { data, error } = await query.limit(1).maybeSingle()
+    if (error) throw error
+    return data
+  }, [])
+
   const toggleComplete = useCallback(async (scanId: string, completed: boolean) => {
     const { error } = await supabase
       .from('bingo_scans')
@@ -63,5 +74,5 @@ export function useBingoScans() {
     if (error) throw error
   }, [])
 
-  return { recordScan, toggleComplete, saveWords, saveSteps }
+  return { recordScan, findScan, toggleComplete, saveWords, saveSteps }
 }

@@ -1685,7 +1685,7 @@ export const SampleTaskDetail = forwardRef<SampleTaskDetailHandle, {
         {/* People needed and where to play: under the hero image, above the instructions. */}
         <CardNeeds task={needs} hexCode={task.hex_code} mapsHref={task.maps_url ? normalizeUrl(task.maps_url) : null} />
         {needsIsDemo && hasNeeds(needs) && (
-          <p className="-mt-3 mb-5 text-center text-[10px] font-bold text-white/40">Example values. Set your own with the People & place tool on the card edit page.</p>
+          <p className="-mt-3 mb-5 text-center text-[10px] font-bold text-white/40">Example values. Set your own with the Station tool on the card edit page.</p>
         )}
 
         {/* Maps button */}

@@ -227,7 +227,10 @@ export interface BingoTask {
   contest_bonus: number
   maps_url: string | null
   maps_label: string | null
-  /** Optional "People & place" component. Null/false/empty = not used. */
+  /** Station game: the inner timer waits for the station marshal's Start button
+   *  (bingo_scans.timer_started_at) instead of starting when the card opens. */
+  is_station?: boolean
+  /** Optional people-needed / place fields of the Station tool. Null/false/empty = not used. */
   players_min?: number | null
   players_max?: number | null
   players_whole_team?: boolean
@@ -337,6 +340,8 @@ export interface BingoScan {
    *  supabase/scan-completion/20260910_scan_board_card_id.sql. */
   board_card_id: string | null
   scanned_at: string
+  /** Station cards only: when the marshal pressed Start. Null until then. */
+  timer_started_at?: string | null
   completed: boolean
   completed_at: string | null
   // AI Team Building cards only: the result slots this team drew or typed

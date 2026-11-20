@@ -1,7 +1,7 @@
 /** Optional card components, in rail order. Core fields (title, category, points, type, photos, instructions) stay on the page. */
 export const RAIL_ITEMS = [
   { key: 'unlock', icon: '🔒', label: 'Unlocks & warning' },
-  { key: 'needs', icon: '👥', label: 'People & place' },
+  { key: 'needs', icon: '👥', label: 'Station' },
   { key: 'maps', icon: '📍', label: 'Google Maps link' },
   { key: 'links', icon: '🔗', label: 'Helpful links' },
   { key: 'draw', icon: '🎲', label: 'Draw' },

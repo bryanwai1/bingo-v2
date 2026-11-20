@@ -2330,6 +2330,7 @@ export function BingoDashAdmin() {
       maps_url: task.maps_url, maps_label: task.maps_label,
       players_min: task.players_min ?? null, players_max: task.players_max ?? null,
       players_whole_team: task.players_whole_team ?? false, play_location: task.play_location ?? null,
+      is_station: task.is_station ?? false,
       // Contending settings travel with the card — a copied contest card that
       // silently reverted to a solo task would be a nasty surprise mid-event.
       is_contest: task.is_contest, contest_game: task.contest_game,

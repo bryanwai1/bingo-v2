@@ -32,11 +32,17 @@ const pctColor = (pct: number) =>
  * `elapsedMs` is the live clock while the card is open, or the finished time
  * once `completed` — the bar then stops and shows what was earned.
  */
-export function CardBonusTimer({ elapsedMs, window, basePoints, completed }: {
+export function CardBonusTimer({ elapsedMs, window, basePoints, completed, waiting = false, onStart }: {
   elapsedMs: number
   window: BonusWindow
   basePoints: number
   completed: boolean
+  /** The clock is held at 0 and nothing animates. 'player': an observer before
+   *  the player has pressed Start Challenge. 'marshal': a station card waiting
+   *  for the station marshal's Start. It starts on its own once that happens. */
+  waiting?: false | 'player' | 'marshal'
+  /** Station cards, waiting === 'marshal': shows the marshal's Start button. */
+  onStart?: () => void
 }) {
   const fmtPts = (n: number) => n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
   const points = (pct: number) => fmtPts(round2(basePoints * pct / 100))
@@ -59,7 +65,7 @@ export function CardBonusTimer({ elapsedMs, window, basePoints, completed }: {
     <div className="rounded-2xl px-4 py-3 mb-4" style={{ background: 'rgba(255,255,255,0.05)', border: '2px solid rgba(255,255,255,0.1)' }}>
       <div className="flex items-center justify-between mb-2">
         <div>
-          <div className="text-gray-400 text-xs font-bold uppercase tracking-wider">{completed ? 'Finished in' : '⏱ Your team timer'}</div>
+          <div className="text-gray-400 text-xs font-bold uppercase tracking-wider">{completed ? 'Finished in' : waiting === 'player' ? '⏱ Waiting for your player' : waiting === 'marshal' ? '⏱ Station timer' : '⏱ Your team timer'}</div>
           <div className="font-black text-3xl tabular-nums text-white">{fmtElapsed(elapsedMs)}</div>
         </div>
         <div className="text-right">
@@ -80,7 +86,7 @@ export function CardBonusTimer({ elapsedMs, window, basePoints, completed }: {
         ))}
         <div className="absolute left-0 top-0 bottom-0 rounded-full transition-all duration-1000 ease-linear"
           style={{ width: `${frac * 100}%`, background: `linear-gradient(90deg, ${color}55, ${color})`, minWidth: 10 }} />
-        {!completed && !timeUp && (
+        {!completed && !timeUp && !waiting && (
           <div className="absolute top-1/2" style={{ left: `${frac * 100}%`, color }}>
             <div className="aitb-tip absolute -translate-x-1/2 -translate-y-1/2 rounded-full"
               style={{ width: 14, height: 14, background: `radial-gradient(circle, #fff 15%, ${color} 60%)` }} />
@@ -109,11 +115,22 @@ export function CardBonusTimer({ elapsedMs, window, basePoints, completed }: {
 
       {!completed && (
         <div className="text-gray-500 text-xs font-bold mt-1">
-          {timeUp
+          {waiting === 'player'
+            ? '⏱ The timer starts when your player presses Start Challenge.'
+            : waiting === 'marshal'
+            ? '⏱ The timer starts when the station marshal presses Start.'
+            : timeUp
             ? '⏱ Timer is out — you still earn full base points. Keep going!'
             : pct >= 150 ? '⚡ Full bonus — finish before the clock leaves the gold zone!'
             : '⚡ The bonus drops every second — finish before the bar hits the end!'}
         </div>
+      )}
+
+      {waiting === 'marshal' && onStart && (
+        <button onClick={onStart}
+          className="mt-3 w-full py-3 rounded-xl bg-emerald-500 hover:bg-emerald-400 active:scale-95 text-white text-base font-black uppercase tracking-wider transition-all">
+          ▶ Start timer (station marshal)
+        </button>
       )}
     </div>
   )

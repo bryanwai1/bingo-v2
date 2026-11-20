@@ -177,7 +177,9 @@ export function BingoDashTaskEdit() {
   const setPreviewPage = pagesAuto.go
   const carouselIdx = heroAuto.idx
   const setCarouselIdx = heroAuto.go
-  // People & place component fields (strings so the inputs can be empty).
+  // Station component: the station-game switch plus people / place fields
+  // (strings so the inputs can be empty).
+  const [isStation, setIsStation] = useState(false)
   const [needsMin, setNeedsMin] = useState('')
   const [needsMax, setNeedsMax] = useState('')
   const [needsWhole, setNeedsWhole] = useState(false)
@@ -186,7 +188,7 @@ export function BingoDashTaskEdit() {
   // A component the card already uses always has its icon; "+" only adds ones it does not.
   const railInUse: Partial<Record<RailKey, boolean>> = {
     unlock: !!(prereqId || completionWarning.trim()),
-    needs: !!task && hasNeeds(task),
+    needs: !!task && (hasNeeds(task) || !!task.is_station),
     maps: !!mapsUrl.trim(),
     links: links.length > 0,
     draw: !!drawConfig,
@@ -230,6 +232,7 @@ export function BingoDashTaskEdit() {
         setNeedsMax(data.players_max ? String(data.players_max) : '')
         setNeedsWhole(!!data.players_whole_team)
         setNeedsPlace(data.play_location ?? '')
+        setIsStation(!!data.is_station)
       }
     })
   // eslint-disable-next-line react-hooks/exhaustive-deps -- isNew is fixed for the page's lifetime
@@ -1109,10 +1112,15 @@ export function BingoDashTaskEdit() {
           </RailDrawer>
         )}
         {drawer === 'needs' && (
-          <RailDrawer title="People & place" onClose={() => setDrawer(null)}>
+          <RailDrawer title="Station" onClose={() => setDrawer(null)}>
         <div className="bg-white rounded-xl border border-gray-200 p-6 mt-6">
-          <h2 className="text-lg font-bold text-gray-900 mb-1">People &amp; place</h2>
-          <p className="text-xs text-gray-400 mb-4">Players see this in your card colour under the hero image, above the instructions. Fill in either one or both; leave blank to hide it.</p>
+          <h2 className="text-lg font-bold text-gray-900 mb-1">Station</h2>
+          <label className="flex items-start gap-2 mb-1 text-sm font-bold text-gray-700">
+            <input type="checkbox" checked={isStation} onChange={e => setIsStation(e.target.checked)} className="w-4 h-4 mt-0.5" />
+            <span>This is a station game</span>
+          </label>
+          <p className="text-xs text-gray-400 mb-5 ml-6">Opening the card or pressing Start Challenge does not start the inner timer. The station marshal presses a Start button on the card to start it, and the team can only answer or complete the card after that.</p>
+          <p className="text-xs text-gray-400 mb-4">People needed and where to play show in your card colour under the hero image, above the instructions. Fill in either one or both; leave blank to hide it.</p>
           <label className="flex items-center gap-2 mb-3 text-sm font-bold text-gray-700">
             <input type="checkbox" checked={needsWhole} onChange={e => setNeedsWhole(e.target.checked)} className="w-4 h-4" />
             Whole team plays together
@@ -1147,10 +1155,11 @@ export function BingoDashTaskEdit() {
                     players_min: needsWhole || !min ? null : min,
                     players_max: needsWhole || !min || !max ? null : max,
                     play_location: needsPlace.trim() || null,
+                    is_station: isStation,
                   })}
                   className="mt-3 px-6 py-2.5 bg-violet-600 text-white rounded-lg hover:bg-violet-700 text-sm font-bold transition-colors disabled:opacity-50"
                 >
-                  Apply people &amp; place
+                  Apply station
                 </button>
               </>
             )
