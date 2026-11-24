@@ -187,7 +187,7 @@ export function BingoAdminPhotoUpload({ taskId, defaultPhotoUrl }: BingoAdminPho
             <div className="flex items-center justify-between mb-3">
               <div>
                 <h4 className="font-bold text-gray-900">Adjust Crop Position</h4>
-                <p className="text-xs text-gray-400 mt-0.5">Drag to set the focal point</p>
+                <p className="text-xs text-gray-400 mt-0.5">Drag to set the focal point. Only the small thumbnails use this; players always see the whole photo.</p>
               </div>
               <button onClick={() => setEditing(null)} className="w-8 h-8 rounded-full bg-gray-100 text-gray-500 hover:bg-gray-200 flex items-center justify-center font-bold">✕</button>
             </div>

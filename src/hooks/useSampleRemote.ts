@@ -70,6 +70,8 @@ export type DetailStep = {
   pageCount: number
   isMarshalTask: boolean
   marshalFilled: boolean
+  /** A station card: its splash button reads "Open Card" and the timer waits for the marshal's Start. */
+  isStation?: boolean
   /** The card runs its own game / answer, so Complete does nothing: the remote offers auto-complete instead. */
   ownMechanism?: boolean
 }

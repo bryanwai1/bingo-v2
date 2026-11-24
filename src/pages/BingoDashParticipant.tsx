@@ -43,6 +43,7 @@ import { aitbByName, aitbToolUrl, aitbToolCaption, AITB_POINTS } from '../lib/ai
 import { normalizeUrl } from '../lib/normalizeUrl'
 import { useAutoAdvance, HERO_ROTATE_MS, INSTRUCTION_ROTATE_MS } from '../lib/useAutoAdvance'
 import { CardNeeds } from '../components/CardNeeds'
+import { HeroCarousel } from '../components/HeroCarousel'
 import { isGridSlot } from '../lib/prizeCard/logic'
 import type { BingoScan, BingoTask } from '../types/database'
 
@@ -1100,9 +1101,9 @@ export function BingoDashParticipant() {
           style={{ animationDelay: '0.4s' }}
           onClick={(e) => { e.stopPropagation(); setShowSplash(false) }}
         >
-          Start Challenge
+          {task.is_station ? 'Open Card' : 'Start Challenge'}
         </button>
-        <p className="relative z-10 mt-4 text-sm opacity-50 animate-pulse">Tap anywhere to begin</p>
+        <p className="relative z-10 mt-4 text-sm opacity-50 animate-pulse">{task.is_station ? 'Tap anywhere to open' : 'Tap anywhere to begin'}</p>
       </div>
       {timeUpOverlay}
       </>
@@ -1190,44 +1191,8 @@ export function BingoDashParticipant() {
       </header>
 
       <main className={`${containerMaxW} mx-auto px-6 py-8 relative z-10`}>
-        {/* Photo carousel */}
-        {photos.length > 0 && (
-          <div className="rounded-2xl overflow-hidden mb-6 shadow-xl animate-slide-up bg-black/20">
-            <div className="relative">
-              <img
-                src={photos[carouselIdx]?.photo_url}
-                alt={`${task.title} ${carouselIdx + 1}`}
-                className="w-full max-h-[min(46vh,520px)] object-contain"
-              />
-              {photos.length > 1 && (
-                <>
-                  <button
-                    onClick={() => setCarouselIdx(i => (i - 1 + photos.length) % photos.length)}
-                    className="absolute left-2 top-1/2 -translate-y-1/2 w-8 h-8 rounded-full bg-black/50 text-white flex items-center justify-center text-lg font-bold backdrop-blur-sm active:scale-90 transition-transform"
-                  >‹</button>
-                  <button
-                    onClick={() => setCarouselIdx(i => (i + 1) % photos.length)}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 w-8 h-8 rounded-full bg-black/50 text-white flex items-center justify-center text-lg font-bold backdrop-blur-sm active:scale-90 transition-transform"
-                  >›</button>
-                  <div className="absolute bottom-2 left-1/2 -translate-x-1/2 flex gap-1.5">
-                    {photos.map((_, i) => (
-                      <button
-                        key={i}
-                        onClick={() => setCarouselIdx(i)}
-                        className={`w-2 h-2 rounded-full transition-all ${i === carouselIdx ? 'bg-white scale-125' : 'bg-white/50'}`}
-                      />
-                    ))}
-                  </div>
-                </>
-              )}
-            </div>
-            {photos[carouselIdx]?.caption && (
-              <div className="px-4 py-2 text-xs text-white/70 font-medium" style={{ backgroundColor: `${task.hex_code}cc` }}>
-                {photos[carouselIdx].caption}
-              </div>
-            )}
-          </div>
-        )}
+        {/* Hero photos: current one centred, neighbours peeking in. */}
+        <HeroCarousel photos={photos} index={carouselIdx} onGo={setCarouselIdx} hexCode={task.hex_code} title={task.title} />
 
         {/* People needed and where to play: under the hero image, above the instructions. */}
         <CardNeeds task={task} hexCode={task.hex_code} mapsHref={task.maps_url ? normalizeUrl(task.maps_url) : null} />

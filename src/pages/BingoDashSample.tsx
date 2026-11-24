@@ -50,7 +50,7 @@ import { normalizeTileDisplay, withCategoryColors, chainInfoFn, prereqResolver, 
 import { normalizeUrl } from '../lib/normalizeUrl'
 import { useAutoAdvance, HERO_ROTATE_MS, INSTRUCTION_ROTATE_MS } from '../lib/useAutoAdvance'
 import { CardNeeds } from '../components/CardNeeds'
-import { hasNeeds } from '../lib/cardNeeds'
+import { HeroCarousel } from '../components/HeroCarousel'
 import { getPuzzle } from '../lib/coopGames/registry'
 import { gameKeyForTitle } from '../lib/coopGames/gameCards'
 import type { BingoSection, BingoTask } from '../types/database'
@@ -1191,19 +1191,6 @@ function SampleCoopPlay({ gameKey, color, observer, completed, onSolved, onOpenC
   )
 }
 
-const DEMO_NEEDS: Pick<BingoTask, 'players_min' | 'players_max' | 'players_whole_team' | 'play_location'>[] = [
-  { players_min: 2, players_max: 4, players_whole_team: false, play_location: 'Main lobby' },
-  { players_min: null, players_max: null, players_whole_team: true, play_location: 'Anywhere in the venue' },
-  { players_min: 1, players_max: null, players_whole_team: false, play_location: 'Outdoor garden' },
-  { players_min: 3, players_max: null, players_whole_team: false, play_location: null },
-]
-/** Stable example per card, so a card shows the same thing each time it opens. */
-function demoNeeds(id: string) {
-  let h = 0
-  for (let i = 0; i < id.length; i++) h = (h + id.charCodeAt(i)) % 997
-  return DEMO_NEEDS[h % DEMO_NEEDS.length]
-}
-
 function SampleWaiting({ theme, boardName, teamName, onBack }: { theme: PlayerTheme; boardName: string; teamName: string; onBack: () => void }) {
   return (
     <div className="relative overflow-hidden flex flex-col items-center justify-end" style={{ minHeight: '80dvh' }}>
@@ -1316,9 +1303,9 @@ export const SampleTaskDetail = forwardRef<SampleTaskDetailHandle, {
   const coopGameKey = gameKeyForTitle(task.title)
   const [coopOpen, setCoopOpen] = useState(false)
   const heroAuto = useAutoAdvance(photos.length, HERO_ROTATE_MS)
-  // A card that sets no people/place still shows an example, so the demo shows the component.
-  const needsIsDemo = !hasNeeds(task)
-  const needs = needsIsDemo ? demoNeeds(task.id) : task
+  // Station cards: the timer waits for the station marshal's Start, as on the player's phone.
+  const [stationStartedAt, setStationStartedAt] = useState<number | null>(null)
+  const stationLocked = !!task.is_station && stationStartedAt === null
   const carouselIdx = heroAuto.idx
   const setCarouselIdx = heroAuto.go
   const [marshalInput, setMarshalInput] = useState('')
@@ -1558,8 +1545,9 @@ export const SampleTaskDetail = forwardRef<SampleTaskDetailHandle, {
       isMarshalTask,
       marshalFilled,
       ownMechanism,
+      isStation: !!task.is_station,
     })
-  }, [onStep, showSplash, currentPage, pages.length, isMarshalTask, marshalFilled, ownMechanism])
+  }, [onStep, showSplash, currentPage, pages.length, isMarshalTask, marshalFilled, ownMechanism, task.is_station])
 
   // ── Splash ──
   if (showSplash) {
@@ -1596,9 +1584,9 @@ export const SampleTaskDetail = forwardRef<SampleTaskDetailHandle, {
           style={{ animationDelay: '0.4s' }}
           onClick={(e) => { e.stopPropagation(); setShowSplash(false) }}
         >
-          Start Challenge
+          {task.is_station ? 'Open Card' : 'Start Challenge'}
         </button>
-        <p className="relative z-10 mt-4 text-sm opacity-50 animate-pulse">Tap anywhere to begin</p>
+        <p className="relative z-10 mt-4 text-sm opacity-50 animate-pulse">{task.is_station ? 'Tap anywhere to open' : 'Tap anywhere to begin'}</p>
       </div>
     )
   }
@@ -1653,40 +1641,11 @@ export const SampleTaskDetail = forwardRef<SampleTaskDetailHandle, {
       </header>
 
       <main className={`${containerMaxW} mx-auto px-6 py-8 relative z-10`}>
-        {/* Photo carousel */}
-        {photos.length > 0 && (
-          <div className="rounded-2xl overflow-hidden mb-6 shadow-xl animate-slide-up bg-black/20">
-            <div className="relative">
-              <img
-                src={photos[carouselIdx]?.photo_url}
-                alt={`${task.title} ${carouselIdx + 1}`}
-                className="w-full max-h-[min(46vh,520px)] object-contain"
-              />
-              {photos.length > 1 && (
-                <>
-                  <button onClick={() => setCarouselIdx(i => (i - 1 + photos.length) % photos.length)} className="absolute left-2 top-1/2 -translate-y-1/2 w-8 h-8 rounded-full bg-black/50 text-white flex items-center justify-center text-lg font-bold backdrop-blur-sm active:scale-90 transition-transform">‹</button>
-                  <button onClick={() => setCarouselIdx(i => (i + 1) % photos.length)} className="absolute right-2 top-1/2 -translate-y-1/2 w-8 h-8 rounded-full bg-black/50 text-white flex items-center justify-center text-lg font-bold backdrop-blur-sm active:scale-90 transition-transform">›</button>
-                  <div className="absolute bottom-2 left-1/2 -translate-x-1/2 flex gap-1.5">
-                    {photos.map((_, i) => (
-                      <button key={i} onClick={() => setCarouselIdx(i)} className={`w-2 h-2 rounded-full transition-all ${i === carouselIdx ? 'bg-white scale-125' : 'bg-white/50'}`} />
-                    ))}
-                  </div>
-                </>
-              )}
-            </div>
-            {photos[carouselIdx]?.caption && (
-              <div className="px-4 py-2 text-xs text-white/70 font-medium" style={{ backgroundColor: `${task.hex_code}cc` }}>
-                {photos[carouselIdx].caption}
-              </div>
-            )}
-          </div>
-        )}
+        {/* Hero photos: current one centred, neighbours peeking in. */}
+        <HeroCarousel photos={photos} index={carouselIdx} onGo={setCarouselIdx} hexCode={task.hex_code} title={task.title} />
 
         {/* People needed and where to play: under the hero image, above the instructions. */}
-        <CardNeeds task={needs} hexCode={task.hex_code} mapsHref={task.maps_url ? normalizeUrl(task.maps_url) : null} />
-        {needsIsDemo && hasNeeds(needs) && (
-          <p className="-mt-3 mb-5 text-center text-[10px] font-bold text-white/40">Example values. Set your own with the Station tool on the card edit page.</p>
-        )}
+        <CardNeeds task={task} hexCode={task.hex_code} mapsHref={task.maps_url ? normalizeUrl(task.maps_url) : null} />
 
         {/* Maps button */}
         {task.maps_url && (
@@ -1698,9 +1657,13 @@ export const SampleTaskDetail = forwardRef<SampleTaskDetailHandle, {
         )}
 
         {/* Bonus timer — every card, from the moment the team opens it. */}
-        {!chain.locked && (
+        {!chain.locked && stationLocked && (
+          <CardBonusTimer elapsedMs={0} window={resolveBonusWindow(task, bonusDefaults)} basePoints={task.points ?? 0} completed={false}
+            waiting="marshal" onStart={observer ? undefined : () => setStationStartedAt(Date.now())} />
+        )}
+        {!chain.locked && !stationLocked && (
           <CardBonusTimer
-            elapsedMs={Math.max(0, (completed ? (finishedAt.current ?? now) : now) - openedAt)}
+            elapsedMs={Math.max(0, (completed ? (finishedAt.current ?? now) : now) - (stationStartedAt ?? openedAt))}
             window={resolveBonusWindow(task, bonusDefaults)}
             basePoints={task.points ?? 0}
             completed={completed}
@@ -1710,7 +1673,7 @@ export const SampleTaskDetail = forwardRef<SampleTaskDetailHandle, {
         {/* AI Team Building brief — a live bonus bar, the real description
             + skill tag, then the module and a tickable mission checklist
             instead of swipeable instruction pages. */}
-        {!chain.locked && coopGameKey && (
+        {!chain.locked && !stationLocked && coopGameKey && (
           <SampleCoopPlay gameKey={coopGameKey} color={task.hex_code} observer={observer} completed={completed}
             onSolved={onComplete} onOpenChange={setCoopOpen} />
         )}
@@ -1855,7 +1818,7 @@ export const SampleTaskDetail = forwardRef<SampleTaskDetailHandle, {
         )}
 
         {/* Complete Activity */}
-        {!observer && <div className="mt-8 animate-slide-up">
+        {!observer && !stationLocked && <div className="mt-8 animate-slide-up">
           {chain.locked && chain.prev ? (
             <>
               <div className="p-5 rounded-3xl border-2 border-amber-400/50 bg-amber-400/10 text-center">
@@ -3776,7 +3739,7 @@ function SampleController({ code }: { code: string }) {
       {cardDone ? (
         <button disabled={off} onClick={() => send({ action: 'uncomplete', taskId: openTaskObj.id })} className={`${remoteBtn} ${rTone.plain} ${bigBtn}`}>↺ Undo complete</button>
       ) : detail?.phase === 'splash' ? (
-        <button disabled={off} onClick={() => send({ action: 'startChallenge' })} className={`${remoteBtn} ${rTone.go} ${bigBtn}`}>▶ Start challenge</button>
+        <button disabled={off} onClick={() => send({ action: 'startChallenge' })} className={`${remoteBtn} ${rTone.go} ${bigBtn}`}>{detail.isStation ? '▶ Open card' : '▶ Start challenge'}</button>
       ) : (
         <>
           {detail?.isMarshalTask && !detail.marshalFilled && (

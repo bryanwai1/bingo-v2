@@ -1,6 +1,6 @@
 import type { BingoTask } from '../types/database'
 
-export type Needs = Pick<BingoTask, 'players_min' | 'players_max' | 'players_whole_team' | 'play_location'>
+export type Needs = Pick<BingoTask, 'players_min' | 'players_max' | 'players_whole_team' | 'play_location' | 'is_station'>
 
 /** "2", "2–4", "Whole team", or null when the card does not say. */
 export function peopleLabel(t: Needs): string | null {

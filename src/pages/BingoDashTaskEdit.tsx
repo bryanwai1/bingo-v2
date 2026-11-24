@@ -15,6 +15,7 @@ import { CardRail, RailDrawer } from '../components/CardRail'
 import { type RailKey } from '../lib/cardRail'
 import { useAutoAdvance, HERO_ROTATE_MS, INSTRUCTION_ROTATE_MS } from '../lib/useAutoAdvance'
 import { CardNeeds } from '../components/CardNeeds'
+import { HeroCarousel } from '../components/HeroCarousel'
 import { hasNeeds } from '../lib/cardNeeds'
 import { normalizeUrl } from '../lib/normalizeUrl'
 import { SignSpliceAdminPanel } from '../components/SignSpliceAdminPanel'
@@ -188,7 +189,8 @@ export function BingoDashTaskEdit() {
   // A component the card already uses always has its icon; "+" only adds ones it does not.
   const railInUse: Partial<Record<RailKey, boolean>> = {
     unlock: !!(prereqId || completionWarning.trim()),
-    needs: !!task && (hasNeeds(task) || !!task.is_station),
+    station: !!task?.is_station,
+    needs: !!task && hasNeeds(task),
     maps: !!mapsUrl.trim(),
     links: links.length > 0,
     draw: !!drawConfig,
@@ -494,46 +496,8 @@ export function BingoDashTaskEdit() {
         </header>
 
         <main className={`${previewActivity ? 'max-w-lg sm:max-w-2xl lg:max-w-4xl' : 'max-w-lg'} mx-auto px-6 py-8 relative z-10`}>
-          {/* Photo carousel — mirrors the participant page */}
-          {photos.length > 0 && (
-            <div className="rounded-2xl overflow-hidden mb-6 shadow-xl animate-slide-up">
-              <div className="relative">
-                <img
-                  src={photos[carouselIdx]?.photo_url}
-                  alt={`${task.title} ${carouselIdx + 1}`}
-                  className="w-full max-h-72 object-cover"
-                  style={{ objectPosition: `${photos[carouselIdx]?.position_x ?? 50}% ${photos[carouselIdx]?.position_y ?? 50}%` }}
-                />
-                {photos.length > 1 && (
-                  <>
-                    <button
-                      onClick={() => setCarouselIdx(i => (i - 1 + photos.length) % photos.length)}
-                      className="absolute left-2 top-1/2 -translate-y-1/2 w-8 h-8 rounded-full bg-black/50 text-white flex items-center justify-center text-lg font-bold backdrop-blur-sm active:scale-90 transition-transform"
-                    >‹</button>
-                    <button
-                      onClick={() => setCarouselIdx(i => (i + 1) % photos.length)}
-                      className="absolute right-2 top-1/2 -translate-y-1/2 w-8 h-8 rounded-full bg-black/50 text-white flex items-center justify-center text-lg font-bold backdrop-blur-sm active:scale-90 transition-transform"
-                    >›</button>
-                    <div className="absolute bottom-2 left-1/2 -translate-x-1/2 flex gap-1.5">
-                      {photos.map((_, i) => (
-                        <button
-                          key={i}
-                          onClick={() => setCarouselIdx(i)}
-                          className={`w-2 h-2 rounded-full transition-all ${i === carouselIdx ? 'bg-white scale-125' : 'bg-white/50'}`}
-                        />
-                      ))}
-                    </div>
-                  </>
-                )}
-              </div>
-              {photos[carouselIdx]?.caption && (
-                <div className="px-4 py-2 text-xs text-white/70 font-medium" style={{ backgroundColor: `${task.hex_code}cc` }}>
-                  {photos[carouselIdx].caption}
-                </div>
-              )}
-            </div>
-          )}
-
+          {/* Hero photos: current one centred, neighbours peeking in. */}
+          <HeroCarousel photos={photos} index={carouselIdx} onGo={setCarouselIdx} hexCode={task.hex_code} title={task.title} />
           <CardNeeds task={task} hexCode={task.hex_code} mapsHref={task.maps_url ? normalizeUrl(task.maps_url) : null} />
 
           {previewActivity ? (
@@ -1111,7 +1075,7 @@ export function BingoDashTaskEdit() {
         </div>
           </RailDrawer>
         )}
-        {drawer === 'needs' && (
+        {drawer === 'station' && (
           <RailDrawer title="Station" onClose={() => setDrawer(null)}>
         <div className="bg-white rounded-xl border border-gray-200 p-6 mt-6">
           <h2 className="text-lg font-bold text-gray-900 mb-1">Station</h2>
@@ -1119,8 +1083,21 @@ export function BingoDashTaskEdit() {
             <input type="checkbox" checked={isStation} onChange={e => setIsStation(e.target.checked)} className="w-4 h-4 mt-0.5" />
             <span>This is a station game</span>
           </label>
-          <p className="text-xs text-gray-400 mb-5 ml-6">Opening the card or pressing Start Challenge does not start the inner timer. The station marshal presses a Start button on the card to start it, and the team can only answer or complete the card after that.</p>
-          <p className="text-xs text-gray-400 mb-4">People needed and where to play show in your card colour under the hero image, above the instructions. Fill in either one or both; leave blank to hide it.</p>
+          <p className="text-xs text-gray-400 mb-4 ml-6">The player opens the card with "Open Card", but the inner timer does not start. The station marshal presses a Start button on the card to start it, and the team can only answer or complete the card after that.</p>
+          <button
+            onClick={() => stage({ is_station: isStation })}
+            className="px-6 py-2.5 bg-violet-600 text-white rounded-lg hover:bg-violet-700 text-sm font-bold transition-colors"
+          >
+            Apply station
+          </button>
+        </div>
+          </RailDrawer>
+        )}
+        {drawer === 'needs' && (
+          <RailDrawer title="People & place" onClose={() => setDrawer(null)}>
+        <div className="bg-white rounded-xl border border-gray-200 p-6 mt-6">
+          <h2 className="text-lg font-bold text-gray-900 mb-1">People &amp; place</h2>
+          <p className="text-xs text-gray-400 mb-4">Works on any card, station or not. People needed and where to play show in your card colour under the hero image, above the instructions. Fill in either one or both; leave blank to hide it.</p>
           <label className="flex items-center gap-2 mb-3 text-sm font-bold text-gray-700">
             <input type="checkbox" checked={needsWhole} onChange={e => setNeedsWhole(e.target.checked)} className="w-4 h-4" />
             Whole team plays together
@@ -1155,11 +1132,10 @@ export function BingoDashTaskEdit() {
                     players_min: needsWhole || !min ? null : min,
                     players_max: needsWhole || !min || !max ? null : max,
                     play_location: needsPlace.trim() || null,
-                    is_station: isStation,
                   })}
                   className="mt-3 px-6 py-2.5 bg-violet-600 text-white rounded-lg hover:bg-violet-700 text-sm font-bold transition-colors disabled:opacity-50"
                 >
-                  Apply station
+                  Apply people &amp; place
                 </button>
               </>
             )

@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import type { TaskPage } from '../types/database'
 import { T } from './T'
+import { ImageViewer } from './ImageViewer'
 
 interface InstructionPageProps {
   page: TaskPage
@@ -27,6 +28,7 @@ export function InstructionPage({ page, hexCode }: InstructionPageProps) {
     .filter((p) => p.text)
 
   const [openExample, setOpenExample] = useState<number | null>(null)
+  const [viewing, setViewing] = useState<{ src: string; alt: string } | null>(null)
 
   return (
     <div className="flex flex-col gap-5">
@@ -39,11 +41,13 @@ export function InstructionPage({ page, hexCode }: InstructionPageProps) {
               className="w-full max-h-[min(46vh,520px)] object-contain"
             />
           ) : (
-            <img
-              src={page.media_url}
-              alt="Instruction"
-              className="w-full max-h-[min(46vh,520px)] object-contain"
-            />
+            <button type="button" aria-label="Enlarge picture" onClick={() => setViewing({ src: page.media_url!, alt: 'Instruction' })} className="block w-full cursor-zoom-in">
+              <img
+                src={page.media_url}
+                alt="Instruction"
+                className="w-full max-h-[min(46vh,520px)] object-contain"
+              />
+            </button>
           )}
         </div>
       )}
@@ -124,11 +128,13 @@ export function InstructionPage({ page, hexCode }: InstructionPageProps) {
                 {/* Example image expandable */}
                 {example && openExample === index && (
                   <div className="relative mt-3 rounded-xl overflow-hidden bg-gray-100 animate-slide-up">
-                    <img
-                      src={example}
-                      alt={`Example for step ${index + 1}`}
-                      className="w-full max-h-[min(40vh,440px)] object-contain"
-                    />
+                    <button type="button" aria-label="Enlarge example" onClick={() => setViewing({ src: example, alt: `Example for step ${index + 1}` })} className="block w-full cursor-zoom-in">
+                      <img
+                        src={example}
+                        alt={`Example for step ${index + 1}`}
+                        className="w-full max-h-[min(40vh,440px)] object-contain"
+                      />
+                    </button>
                   </div>
                 )}
               </div>
@@ -136,6 +142,7 @@ export function InstructionPage({ page, hexCode }: InstructionPageProps) {
           </div>
         ))}
       </div>
+      {viewing && <ImageViewer images={[viewing]} onClose={() => setViewing(null)} />}
     </div>
   )
 }
