@@ -1,3 +1,6 @@
+import { ScheduleLockOverlay, ScheduleBanner } from '../components/ScheduleBits'
+import { useCardSchedules } from '../hooks/useCardSchedules'
+import type { ScheduleStatus } from '../lib/cardSchedule'
 import { loadCelebratedLines, saveCelebratedLines, planLineCelebrations } from '../lib/bingoLines'
 import { useEffect, useRef, useState, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
@@ -315,7 +318,7 @@ function BingoTile({
   isInBingoLine,
   display,
   autoContrast,
-  onClick,
+  onClick, sched,
 }: {
   task: BingoTask
   status: TileStatus
@@ -330,6 +333,7 @@ function BingoTile({
   display: TileDisplay
   autoContrast?: boolean
   onClick: () => void
+  sched?: ScheduleStatus | null
 }) {
   return (
     <button
@@ -348,7 +352,7 @@ function BingoTile({
           : `0 3px 10px ${task.hex_code}55`,
         // Grab: the art behind must not show through, so dim with a filter, not opacity
         opacity: status === 'locked' && !autoContrast ? 0.72 : 1,
-        filter: chained ? 'grayscale(0.85) brightness(0.8)' : status === 'locked' && autoContrast ? 'brightness(0.82)' : undefined,
+        filter: chained || sched?.locked ? 'grayscale(0.85) brightness(0.8)' : status === 'locked' && autoContrast ? 'brightness(0.82)' : undefined,
       }}
     >
       {/* Spotlight from the presenter (Sample page): lights while the team
@@ -375,10 +379,11 @@ function BingoTile({
         </>
       )}
       {/* Chain lock */}
+      <ScheduleLockOverlay sched={sched} small={false} />
       {chained && (
         <div className="absolute inset-0 bg-black/35 flex items-center justify-center z-10 pointer-events-none">
           <div className="bg-white/85 rounded-full w-7 h-7 flex items-center justify-center shadow">
-            {chain?.role === 'end' ? <img src="/grab/icons/treasure.png" alt="" draggable={false} className="w-[80%] h-[80%] object-contain" /> : <span className="text-sm leading-none">🔒</span>}
+            {chain?.role === 'end' && task.tile_icon === 'treasure' ? <img src="/grab/icons/treasure.png" alt="" draggable={false} className="w-[80%] h-[80%] object-contain" /> : <span className="text-sm leading-none">🔒</span>}
           </div>
         </div>
       )}
@@ -421,7 +426,7 @@ function BingoTile({
       )}
 
       {/* Icon or words — whichever this board is set to in the admin */}
-      <TileFace task={chain?.role === 'end' ? { ...task, tile_icon: 'treasure' } : task} display={display} autoContrast={autoContrast} chip={(task.points ?? 0) > 0 ? 'br' : null} />
+      <TileFace task={task} display={display} autoContrast={autoContrast} chip={(task.points ?? 0) > 0 ? 'br' : null} />
 
       {/* Points badge */}
       {(task.points ?? 0) > 0 && (
@@ -585,6 +590,7 @@ function BoardScreen({
 }) {
   // One colour per category on the board, whatever each card row carries.
   const gridTasks = useMemo(() => withCategoryColors(gridTasksProp), [gridTasksProp])
+  const { statusOf: schedOf, alerts: schedAlerts, dismiss: dismissSched } = useCardSchedules(chatSectionId, gridTasks)
   const navigate = useNavigate()
   const [showLeaveConfirm, setShowLeaveConfirm] = useState(false)
   const [popupLetters, setPopupLetters] = useState<string | null>(null)
@@ -799,6 +805,7 @@ function BoardScreen({
       </header>
 
       {/* 5×5 Grid with BINGO side letters */}
+      <ScheduleBanner alerts={schedAlerts} onDismiss={dismissSched} />
       <main className="relative z-10 px-3 pb-8">
         <div className="board-col">
           {/* Face tabs. Only rendered on a cube board, so a normal game is
@@ -844,6 +851,7 @@ function BoardScreen({
                     task={task}
                     status={getStatus(task)}
                     chained={isChainLocked(task)}
+                    sched={schedOf(task)}
                     chain={chainInfoOf(task)}
                     glowing={glowSet.has(i)}
                     review={reviews[task.id]}

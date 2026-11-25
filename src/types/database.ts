@@ -113,6 +113,10 @@ export interface BingoSection extends BoardTimer {
   slug: string
   sort_order: number
   game_started: boolean
+  /** First time the admin pressed Start (card schedules count from here). */
+  game_start_at?: string | null
+  /** Emergency contacts + pinned message for the help chat. See src/lib/helpInfo.ts */
+  help_info?: unknown
   board_note: string
   board_note_every: number
   marshal_password: string
@@ -239,6 +243,18 @@ export interface BingoTask {
   is_prize?: boolean
   /** Completed grid cards a team needs before it can claim the prize. */
   prize_threshold?: number
+  /** Cards that must be done (they count toward prize_threshold). Task ids; a board copy matches via cloned_from. */
+  prize_required_task_ids?: string[]
+  /** Total prizes available; null/undefined = unlimited. */
+  prize_stock?: number | null
+  /** How many of the prizes one team may claim. */
+  prize_per_team?: number
+  prize_min_points?: number | null
+  prize_min_lines?: number | null
+  prize_open_at?: string | null
+  prize_close_at?: string | null
+  /** When teams can open this card (see lib/cardSchedule.ts). Null = always. */
+  schedule?: import('../lib/cardSchedule').CardSchedule | null
   owner_id: string | null
   cloned_from: string | null
   created_at: string

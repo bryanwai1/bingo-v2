@@ -139,7 +139,7 @@ const SLIDES: SlideKind[] = [
 ]
 
 /** One card of the board's unlock chain, in the order teams open them. */
-type ChainStep = { id: string; title: string; hex: string; points: number }
+type ChainStep = { id: string; title: string; hex: string; points: number; icon: string | null }
 
 /**
  * The board's unlock chain, start card first and the treasure last. Read from
@@ -156,7 +156,7 @@ async function loadUnlockChain(sectionId: string): Promise<ChainStep[]> {
   const byId = new Map(tasks.map(t => [t.id, t]))
   const steps: ChainStep[] = []
   for (let cur: typeof end | undefined = end, g = 0; cur && g < 100; g++) {
-    steps.unshift({ id: cur.id, title: cur.title, hex: cur.hex_code, points: cur.points ?? 0 })
+    steps.unshift({ id: cur.id, title: cur.title, hex: cur.hex_code, points: cur.points ?? 0, icon: cur.tile_icon ?? null })
     const p = prereqOf(cur)
     cur = p ? byId.get(p) : undefined
   }
@@ -1005,6 +1005,8 @@ function UnlockChainSlide({ slideIdx, steps }: { slideIdx: number; steps: ChainS
   const total = steps.length
   const lockedCount = total - 1
   const treasure = steps[total - 1]
+  const isTreasure = treasure.icon === 'treasure' // the admin picks the Treasure icon when they want it
+  const goal = isTreasure ? 'treasure' : 'final card'
   const size = total <= 6 ? 104 : total <= 9 ? 84 : 68
   const period = Math.max(6, total * 1.2) // seconds for the highlight to walk the whole chain
   const info = [
@@ -1012,13 +1014,13 @@ function UnlockChainSlide({ slideIdx, steps }: { slideIdx: number; steps: ChainS
       body: 'Do the task and submit it, just like any other tile.' },
     { icon: '🎬', title: 'Tap “Next card”', tint: '#fbbf24',
       body: 'The button appears under the task once you submit. The next card opens on its own when your answer is approved.' },
-    { icon: '🏆', title: 'Reach the treasure', tint: '#f472b6',
+    { icon: '🏆', title: `Reach the ${goal}`, tint: '#f472b6',
       body: treasure.points > 0
-        ? `Keep going, card by card. The last one is the treasure — worth ${treasure.points} points.`
-        : 'Keep going, card by card. The last one is the treasure.' },
+        ? `Keep going, card by card. The last one is the ${goal} — worth ${treasure.points} points.`
+        : `Keep going, card by card. The last one is the ${goal}.` },
   ]
   return (
-    <ContentShell slideIdx={slideIdx} pretitle={`Unlock Cards · ${total} Steps`} title="Chase the Treasure" beam="#fcd34d">
+    <ContentShell slideIdx={slideIdx} pretitle={`Unlock Cards · ${total} Steps`} title={isTreasure ? 'Chase the Treasure' : 'Reach the Final Card'} beam="#fcd34d">
       <div className="relative z-10 flex flex-col items-center gap-7 max-w-6xl w-full mx-auto">
         {/* The chain itself: 1 open START card, then the locked ones, treasure last */}
         <div className="flex flex-wrap items-start justify-center gap-y-4 px-4 py-5 rounded-3xl border-2 border-white/10 bg-black/30"
@@ -1050,7 +1052,7 @@ function UnlockChainSlide({ slideIdx, steps }: { slideIdx: number; steps: ChainS
                             style={sans}>
                         {isStart ? 'START' : `${i + 1}/${total}`}
                       </span>
-                      {isEnd
+                      {isEnd && isTreasure
                         ? <img src="/grab/icons/treasure.png" alt="" draggable={false} className="w-[70%] h-[70%] object-contain" />
                         : <span style={{ fontSize: size * 0.36, lineHeight: 1 }}>{isStart ? '🔓' : '🔒'}</span>}
                     </div>

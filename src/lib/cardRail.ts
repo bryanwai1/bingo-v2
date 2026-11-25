@@ -6,6 +6,7 @@ export const RAIL_ITEMS = [
   { key: 'maps', icon: '📍', label: 'Google Maps link' },
   { key: 'links', icon: '🔗', label: 'Helpful links' },
   { key: 'draw', icon: '🎲', label: 'Draw' },
+  { key: 'schedule', icon: '🗓️', label: 'Schedule' },
 ] as const
 
 export type RailKey = (typeof RAIL_ITEMS)[number]['key']

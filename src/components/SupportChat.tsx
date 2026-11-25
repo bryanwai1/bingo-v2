@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { supabase } from '../lib/supabase'
+import { normalizeHelp, hasHelp, usableContacts, telHref, waHref, type HelpInfo } from '../lib/helpInfo'
 
 /* ============================================================================
    SupportChat — the floating bubble a team taps to reach the facilitator.
@@ -24,6 +25,13 @@ type Msg = {
 }
 
 const POS_KEY = 'bingo-chat-pos-v2'
+const SEEN_KEY = 'bingo-help-pin-seen:'
+// Sample board: shown when the demo board has no real contacts of its own.
+const DEMO_HELP: HelpInfo = normalizeHelp({
+  contacts: [{ label: 'Marshal', name: 'Ahmad', phone: '012-345 6789', whatsapp: true }],
+  pin: 'Regroup at the fountain at 3:00 pm. Stay with your team.',
+  pinAt: '2000-01-01T00:00:00Z',
+})
 const DRAG_THRESHOLD = 6
 // Bubble diameter used for clamping (the phone size; desktop is a touch
 // bigger but the margin below absorbs it).
@@ -70,6 +78,11 @@ export function SupportChat({
   const [draft, setDraft] = useState('')
   const [sending, setSending] = useState(false)
   const [unread, setUnread] = useState(0)
+  const [help, setHelp] = useState<HelpInfo>(() => normalizeHelp(null))
+  const [seenPin, setSeenPin] = useState(() => {
+    try { return localStorage.getItem(SEEN_KEY + sectionId) ?? '' } catch { return '' }
+  })
+  const [copied, setCopied] = useState('')
 
   // Position is remembered as a FRACTION of the viewport, so a spot chosen
   // on a phone in portrait is still on screen after rotating, and a desktop
@@ -138,6 +151,37 @@ export function SupportChat({
       .subscribe()
     return () => { void supabase.removeChannel(ch) }
   }, [teamId, load, demo])
+
+  // Emergency contacts + pinned message live on the board (section) row.
+  useEffect(() => {
+    if (sectionId === 'demo') return
+    let cancelled = false
+    void supabase.from('bingo_sections').select('help_info').eq('id', sectionId).maybeSingle()
+      .then(({ data }) => { if (!cancelled && data) setHelp(normalizeHelp((data as { help_info?: unknown }).help_info)) })
+    const ch = supabase.channel(`help-${sectionId}-${teamId}`)
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'bingo_sections', filter: `id=eq.${sectionId}` },
+        payload => setHelp(normalizeHelp((payload.new as { help_info?: unknown }).help_info)))
+      .subscribe()
+    return () => { cancelled = true; void supabase.removeChannel(ch) }
+  }, [sectionId, teamId])
+
+  const shownHelp = demo && !hasHelp(help) ? DEMO_HELP : help
+  const showStrip = hasHelp(shownHelp)
+  const pinIsNew = !!shownHelp.pin && !!shownHelp.pinAt && shownHelp.pinAt !== seenPin
+  // Opening the chat is what counts as reading the pin.
+  useEffect(() => {
+    if (!open || !pinIsNew || !shownHelp.pinAt) return
+    const at = shownHelp.pinAt
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- opening the chat is the external event that marks the pin read
+    setSeenPin(at)
+    try { localStorage.setItem(SEEN_KEY + sectionId, at) } catch { /* private mode */ }
+  }, [open, pinIsNew, shownHelp.pinAt, sectionId])
+  const copyNumber = (phone: string) => {
+    void navigator.clipboard?.writeText(phone).then(() => {
+      setCopied(phone)
+      window.setTimeout(() => setCopied(c => (c === phone ? '' : c)), 1500)
+    }).catch(() => { /* clipboard blocked: the Call button still works */ })
+  }
 
   // Mark the facilitator's replies read once the panel is actually open —
   // opening is the only reliable signal that a human saw them.
@@ -250,8 +294,48 @@ export function SupportChat({
                       className="text-white/50 hover:text-white text-xl leading-none px-1">×</button>
             </div>
 
+            {showStrip && (
+              <div className="px-2.5 py-2 space-y-1.5 overflow-y-auto" style={{ maxHeight: '32vh', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
+                {shownHelp.pin && (
+                  <div className="flex items-start gap-2 rounded-lg px-2.5 py-1.5" style={{ background: 'rgba(251,191,36,0.12)', border: '1px solid rgba(251,191,36,0.3)' }}>
+                    <svg className="mt-0.5 shrink-0" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#fcd34d" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-label="Pinned">
+                      <path d="M12 17v5" /><path d="M9 3h6l-1 6 3 3v2H7v-2l3-3z" />
+                    </svg>
+                    <p className="text-white/90 text-xs leading-snug whitespace-pre-wrap [overflow-wrap:anywhere]">{shownHelp.pin}</p>
+                  </div>
+                )}
+                {usableContacts(shownHelp).map((c, i) => (
+                  <div key={i} className="flex items-center gap-2 rounded-lg pl-2.5 pr-1.5 py-1.5" style={{ background: 'rgba(239,68,68,0.10)', border: '1px solid rgba(239,68,68,0.3)' }}>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-white text-[13px] font-bold leading-tight truncate">
+                        <span className="text-red-300 text-[10px] font-black uppercase tracking-wider mr-1.5">{c.label || 'Emergency'}</span>{c.name}
+                      </p>
+                      <button type="button" onClick={() => copyNumber(c.phone)}
+                        className="text-white/60 text-[11px] tabular-nums underline decoration-dotted">
+                        {copied === c.phone ? 'Copied' : c.phone}
+                      </button>
+                    </div>
+                    <a href={telHref(c.phone)} aria-label={`Call ${c.name}`} title="Call"
+                      className="w-9 h-9 shrink-0 rounded-full bg-red-500 grid place-items-center">
+                      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1 1 .4 1.9.7 2.8a2 2 0 0 1-.5 2.1L8.1 9.9a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.4c.9.3 1.8.6 2.8.7a2 2 0 0 1 1.7 2z" />
+                      </svg>
+                    </a>
+                    {c.whatsapp && (
+                      <a href={waHref(c.phone)} target="_blank" rel="noopener noreferrer" aria-label={`WhatsApp ${c.name}`} title="WhatsApp"
+                        className="w-9 h-9 shrink-0 rounded-full bg-[#25D366] grid place-items-center">
+                        <svg width="19" height="19" viewBox="0 0 24 24" fill="#fff">
+                          <path d="M17.5 14.4c-.3-.1-1.7-.8-2-.9-.3-.1-.5-.1-.7.1-.2.3-.8.9-.9 1.1-.2.2-.3.2-.6.1-.3-.1-1.2-.4-2.3-1.4-.9-.8-1.4-1.7-1.6-2-.2-.3 0-.4.1-.6l.4-.5c.1-.1.2-.3.3-.5.1-.2 0-.4 0-.5-.1-.1-.7-1.6-.9-2.2-.2-.6-.5-.5-.7-.5h-.6c-.2 0-.5.1-.8.4-.3.3-1 1-1 2.5s1.1 2.9 1.2 3.1c.1.2 2.1 3.2 5.1 4.5.7.3 1.3.5 1.7.6.7.2 1.4.2 1.9.1.6-.1 1.7-.7 2-1.4.2-.7.2-1.3.2-1.4-.1-.2-.3-.3-.6-.4zM12 2a10 10 0 0 0-8.6 15.1L2 22l5-1.3A10 10 0 1 0 12 2zm0 18.2c-1.5 0-2.9-.4-4.1-1.2l-.3-.2-3 .8.8-2.9-.2-.3A8.2 8.2 0 1 1 12 20.2z" />
+                        </svg>
+                      </a>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+
             <div ref={listRef} className="px-3 py-3 space-y-2 overflow-y-auto"
-                 style={{ maxHeight: 'min(45vh, 320px)' }}>
+                 style={{ maxHeight: showStrip ? 'min(34vh, 240px)' : 'min(45vh, 320px)' }}>
               {msgs.length === 0 && (
                 <p className="text-white/35 text-xs text-center py-6">
                   Stuck, lost, or something broken? Send a message.
@@ -306,6 +390,9 @@ export function SupportChat({
               ? <><path d="M18 6 6 18" /><path d="m6 6 12 12" /></>
               : <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" />}
           </svg>
+          {unread === 0 && !open && pinIsNew && (
+            <span aria-label="New pinned message" className="absolute -top-0.5 -right-0.5 w-4 h-4 rounded-full bg-amber-400 border-2 border-gray-950" />
+          )}
           {unread > 0 && !open && (
             <span className="absolute -top-1 -right-1 min-w-[22px] h-[22px] px-1 rounded-full bg-red-500 text-white text-[11px] font-black grid place-items-center border-2 border-gray-950">
               {unread > 9 ? '9+' : unread}

@@ -1,3 +1,6 @@
+import { ScheduleLockOverlay, ScheduleBanner } from '../components/ScheduleBits'
+import { useCardSchedules } from '../hooks/useCardSchedules'
+import type { ScheduleStatus } from '../lib/cardSchedule'
 import { loadCelebratedLines, saveCelebratedLines, planLineCelebrations } from '../lib/bingoLines'
 import { useEffect, useRef, useState, useMemo } from 'react'
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
@@ -387,12 +390,13 @@ function JoinScreen({
 /* ── Bingo Tile ──────────────────────────────────────────────────────────────── */
 
 function BingoTile({
-  task, status, chained, chain, glowing, review, isInBingoLine, display, autoContrast, onClick,
+  task, status, chained, chain, glowing, review, isInBingoLine, display, autoContrast, onClick, sched,
 }: {
   review?: ReviewFlag
   // chained: a card whose prerequisite this team has not finished — still
   // tappable, but greyed with a padlock.
   task: BingoTask; status: TileStatus; chained: boolean; chain?: ChainInfo | null; glowing?: boolean; isInBingoLine: boolean; display: TileDisplay; autoContrast?: boolean; onClick: () => void
+  sched?: ScheduleStatus | null
 }) {
   return (
     <button
@@ -409,7 +413,7 @@ function BingoTile({
           : 'none',
         // Grab: the art behind must not show through, so dim with a filter, not opacity
         opacity: status === 'locked' && !autoContrast ? 0.65 : 1,
-        filter: chained ? 'grayscale(0.85) brightness(0.8)' : status === 'locked' && autoContrast ? 'brightness(0.82)' : undefined,
+        filter: chained || sched?.locked ? 'grayscale(0.85) brightness(0.8)' : status === 'locked' && autoContrast ? 'brightness(0.82)' : undefined,
       }}
     >
       {/* Spotlight from the presenter (Sample page): lights while the team
@@ -435,10 +439,11 @@ function BingoTile({
           </div>
         </>
       )}
+      <ScheduleLockOverlay sched={sched} small={true} />
       {chained && (
         <div className="absolute inset-0 bg-black/35 flex items-center justify-center z-10 pointer-events-none">
           <div className="bg-white/85 rounded-full w-5 h-5 flex items-center justify-center">
-            {chain?.role === 'end' ? <img src="/grab/icons/treasure.png" alt="" draggable={false} className="w-[80%] h-[80%] object-contain" /> : <span className="text-[11px] leading-none">🔒</span>}
+            {chain?.role === 'end' && task.tile_icon === 'treasure' ? <img src="/grab/icons/treasure.png" alt="" draggable={false} className="w-[80%] h-[80%] object-contain" /> : <span className="text-[11px] leading-none">🔒</span>}
           </div>
         </div>
       )}
@@ -475,7 +480,7 @@ function BingoTile({
         <div className="absolute top-1 right-1 z-10 w-2 h-2 rounded-full border-2 border-white/80" />
       )}
       {/* Icon or words — whichever this board is set to in the admin */}
-      <TileFace task={chain?.role === 'end' ? { ...task, tile_icon: 'treasure' } : task} display={display} size="sm" autoContrast={autoContrast} />
+      <TileFace task={task} display={display} size="sm" autoContrast={autoContrast} />
     </button>
   )
 }
@@ -626,6 +631,7 @@ function BoardScreen({
 }) {
   // One colour per category on the board, whatever each card row carries.
   const gridTasks = useMemo(() => withCategoryColors(gridTasksProp), [gridTasksProp])
+  const { statusOf: schedOf, alerts: schedAlerts, dismiss: dismissSched } = useCardSchedules(chatSectionId, gridTasks)
   const navigate = useNavigate()
   const [showLeaveConfirm, setShowLeaveConfirm] = useState(false)
   const [popupLetters, setPopupLetters] = useState<string | null>(null)
@@ -828,6 +834,7 @@ function BoardScreen({
         </div>
       </header>
 
+      <ScheduleBanner alerts={schedAlerts} onDismiss={dismissSched} />
       <main className="relative z-10 px-3 pb-8">
         <div className="max-w-md mx-auto">
           {gridTasks.length === 0 ? (
@@ -845,6 +852,7 @@ function BoardScreen({
                     task={task}
                     status={getStatus(task)}
                     chained={isChainLocked(task)}
+                    sched={schedOf(task)}
                     chain={chainInfoOf(task)}
                     glowing={glowSet.has(i)}
                     review={reviews[task.id]}

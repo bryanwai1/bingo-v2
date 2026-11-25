@@ -12,6 +12,8 @@ import { BingoAdminPhotoUpload } from '../components/BingoAdminPhotoUpload'
 import { prizeFlagLocked } from '../lib/prizeCard/logic'
 import { PrizeCardAdmin } from '../components/PrizeCardAdmin'
 import { CardRail, RailDrawer } from '../components/CardRail'
+import { CardScheduleEditor } from '../components/CardScheduleEditor'
+import { hasSchedule } from '../lib/cardSchedule'
 import { type RailKey } from '../lib/cardRail'
 import { useAutoAdvance, HERO_ROTATE_MS, INSTRUCTION_ROTATE_MS } from '../lib/useAutoAdvance'
 import { CardNeeds } from '../components/CardNeeds'
@@ -194,6 +196,7 @@ export function BingoDashTaskEdit() {
     maps: !!mapsUrl.trim(),
     links: links.length > 0,
     draw: !!drawConfig,
+    schedule: hasSchedule(task?.schedule),
   }
 
   useEffect(() => {
@@ -619,7 +622,7 @@ export function BingoDashTaskEdit() {
   return (
     <div className="min-h-screen bg-gray-50">
       <header className="bg-white border-b border-gray-200 px-3 sm:px-6 py-3 sm:py-4">
-        <div className="max-w-4xl mx-auto flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
+        <div className={`${task?.is_prize ? 'max-w-6xl' : 'max-w-4xl'} mx-auto flex flex-wrap items-center justify-between gap-x-3 gap-y-2`}>
           <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
             <button onClick={handleBack} className="text-gray-400 hover:text-gray-600 transition-colors shrink-0 min-h-11 pr-1">
               ← Back
@@ -673,13 +676,13 @@ export function BingoDashTaskEdit() {
           </div>
         </div>
         {saveError && (
-          <div className="max-w-4xl mx-auto mt-2 px-3 py-2 rounded-lg bg-red-50 border border-red-200 text-xs font-bold text-red-700">
+          <div className={`${task?.is_prize ? 'max-w-6xl' : 'max-w-4xl'} mx-auto mt-2 px-3 py-2 rounded-lg bg-red-50 border border-red-200 text-xs font-bold text-red-700`}>
             {saveError}
           </div>
         )}
       </header>
 
-      <main className="max-w-4xl mx-auto px-3 sm:px-6 py-5 sm:py-8">
+      <main className={`${task?.is_prize ? 'max-w-6xl' : 'max-w-4xl'} mx-auto px-3 sm:px-6 py-5 sm:py-8`}>
         {isNew && (
           <div className="mb-6 px-4 py-3 rounded-xl bg-violet-50 border border-violet-200 text-sm text-violet-800">
             <span className="font-bold">New challenge</span> — give it a name, pick a category, points and card type, then add instructions and photos below. Press <span className="font-bold">Save</span> when you are done; instructions, photos and links apply straight away.
@@ -1091,6 +1094,11 @@ export function BingoDashTaskEdit() {
             Apply station
           </button>
         </div>
+          </RailDrawer>
+        )}
+        {drawer === 'schedule' && task && (
+          <RailDrawer title="Schedule" onClose={() => setDrawer(null)}>
+            <CardScheduleEditor task={task} stage={stage} />
           </RailDrawer>
         )}
         {drawer === 'needs' && (

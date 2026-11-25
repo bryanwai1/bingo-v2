@@ -1,3 +1,5 @@
+import { HelpInfoEditor } from '../components/HelpInfoEditor'
+import { hasHelp, normalizeHelp, type HelpInfo } from '../lib/helpInfo'
 import { useEffect, useState, useCallback, useMemo, useRef } from 'react'
 import { isComplete, effectiveInputs, usesInputs } from '../lib/completionInputs'
 import { useNavigate, useSearchParams } from 'react-router-dom'
@@ -7,6 +9,7 @@ import { supabase } from '../lib/supabase'
 import { CategoryIcon } from '../components/BingoTileFace'
 import { useBingoAuth } from '../hooks/useBingoAuth'
 import { announceBoardReset } from '../hooks/useBoardReset'
+import { SchedulePreview } from '../components/SchedulePreview'
 import { timerPatchForGame } from '../lib/gameClock'
 import type { BingoTask, BingoTeam, BingoScan, BingoSettings, BingoSection, BingoCategory, BingoChallengeSection, BingoMember, BingoPhotoSubmission, BingoBoardCard, BingoDuel, BonusItem, PauseSpan } from '../types/database'
 import { BINGO_LINES, buildBingoSlots, completedBingoLines, scoreWithBingoLines } from '../lib/bingoLines'
@@ -2030,6 +2033,16 @@ export function BingoDashAdmin() {
     if (error) alert('Failed to save note — has the board_note migration been run in Supabase?')
   }
 
+  // Emergency contacts + pinned message for the help chat (this board, or every board of the tenant).
+  const saveHelpInfo = async (help: HelpInfo | null, allBoards: boolean): Promise<string | null> => {
+    const ids = allBoards ? myBoards.map(b => b.id) : currentSectionId ? [currentSectionId] : []
+    if (ids.length === 0) return 'No board selected'
+    const { data, error } = await supabase.from('bingo_sections').update({ help_info: help }).in('id', ids).select('id')
+    if (error || !data?.length) return boardWriteFailureMessage(error?.message)
+    setSections(prev => prev.map(s => (ids.includes(s.id) ? { ...s, help_info: help } : s)))
+    return null
+  }
+
   // Card clocks always follow the game, not just the countdown: Pause on the timer OR
   // stopping the game (players see the waiting screen) opens an entry in
   // card_pauses. Scoring and the player's bonus bar subtract it, so points are
@@ -2340,7 +2353,12 @@ export function BingoDashAdmin() {
       completion_inputs: task.completion_inputs, photo_multiple: task.photo_multiple,
       prerequisite_task_id: task.prerequisite_task_id ?? null,
       // A prize card stays a prize card in the board's copy, with its target.
+      ...(task.schedule ? { schedule: task.schedule } : {}),
       is_prize: task.is_prize ?? false, prize_threshold: task.prize_threshold ?? 20,
+      prize_required_task_ids: task.prize_required_task_ids ?? [], prize_stock: task.prize_stock ?? null,
+      prize_per_team: task.prize_per_team ?? 1, prize_min_points: task.prize_min_points ?? null,
+      prize_min_lines: task.prize_min_lines ?? null, prize_open_at: task.prize_open_at ?? null,
+      prize_close_at: task.prize_close_at ?? null,
       sort_order: Math.max(25, tasks.filter(t => t.section_id === opts.sectionId).length + 25),
     }).select().single()
     if (error || !created) throw new Error(error?.message ?? 'Failed to copy card')
@@ -2920,6 +2938,8 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
       // The award slides go back to the built-in defaults for the next event.
       const { error } = await supabase.from('bingo_award_configs').delete().eq('section_id', currentSectionId)
       if (error) alert('Teams were removed, but the award slides could not be reset: ' + error.message)
+      // The next game counts its schedules from its own Start press.
+      await supabase.from('bingo_sections').update({ game_start_at: null }).eq('id', currentSectionId)
       await announceBoardReset(currentSectionId)
     } finally {
       setResettingGame(false)
@@ -3750,6 +3770,16 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
             </div>
           </div>
         </section>
+
+        <SchedulePreview tasks={gridTasks as (BingoTask & { sort_order: number })[]} board={currentBoard}
+          onOverride={async (t, override) => {
+            // Open now / Lock now beats the schedule; pressing the active one again hands control back to it.
+            const next = { ...(t.schedule ?? {}), override }
+            if (!override) delete next.override
+            const { error } = await supabase.from('bingo_tasks').update({ schedule: next }).eq('id', t.id)
+            if (error) { alert('Could not change the card: ' + error.message); return }
+            setTasks(prev => prev.map(x => x.id === t.id ? { ...x, schedule: next } : x))
+          }} />
 
         {/* ── Scoreboard Theme ──────────────────────────────────────────────── */}
         
@@ -5132,6 +5162,14 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
             )
           })()}
         
+        </AdminSection>
+
+        {/* ── Help info: emergency contacts + pinned message in the chat ───── */}
+        <AdminSection icon="🚨" title="Emergency & Pinned Message"
+          blurb="Shown at the top of the help chat on every team's phone and on the sample board."
+          summary={<>{hasHelp(normalizeHelp(currentBoard?.help_info)) ? 'Set' : 'Off'}</>}>
+          <HelpInfoEditor key={currentSectionId ?? 'none'} value={currentBoard?.help_info}
+            onSave={saveHelpInfo} boardCount={myBoards.length} />
         </AdminSection>
 
         {/* ── Player Look (join / waiting / board backdrop) ─────────────────── */}

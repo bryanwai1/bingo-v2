@@ -73,8 +73,9 @@ export interface Claim { id: string; board_card_id: string; team_id: string; tea
 export type StripState =
   | { kind: 'locked'; count: number; threshold: number }
   | { kind: 'claimable'; canClaim: boolean }
-  | { kind: 'won'; winner: string }
-  | { kind: 'lost'; winner: string }
+  | { kind: 'won'; winner: string; more?: boolean }
+  | { kind: 'lost'; winner: string; text?: string }
+  | { kind: 'unavailable'; text: string }
 
 export function stripState(a: {
   count: number; threshold: number; claim: Claim | null | undefined; teamId: string; role: 'player' | 'observer'
@@ -116,4 +117,120 @@ export function bandState(claims: Claim[], seenAt: Record<string, number | null>
     else if (now >= start) popup = c
   }
   return { popup, lines }
+}
+
+// ── Unlock conditions (required cards, score, lines, window, stock) ──────────
+export interface PrizeRule {
+  prize_threshold?: number
+  prize_required_task_ids?: string[] | null
+  prize_stock?: number | null
+  prize_per_team?: number | null
+  prize_min_points?: number | null
+  prize_min_lines?: number | null
+  prize_open_at?: string | null
+  prize_close_at?: string | null
+}
+
+/** A grid card as the prize card needs it: enough to draw a copy of it. */
+export interface PrizeGridCard {
+  id: string
+  placement_id?: string | null
+  cloned_from?: string | null
+  title: string
+  hex_code: string
+  tile_icon?: string | null
+  category_icon?: string | null
+  category?: string | null
+}
+
+/** One grey-then-coloured copy of a required card, shown on the prize card. */
+export interface PrizeSlot { key: string; title: string; hex: string; iconKey: string | null; category: string; done: boolean }
+
+export interface PrizeView {
+  state: StripState
+  slots: PrizeSlot[]
+  /** Combined progress for the bar: required cards plus the other cards still needed. */
+  done: number
+  total: number
+  /** Short condition lines under the bar, e.g. "Score 320 / 500". */
+  notes: { text: string; ok: boolean }[]
+  /** Prizes left, when the prize has a stock. */
+  stockLeft: number | null
+}
+
+/** The cards on this board that a prize requires (an id may name the copy or its library original). */
+export function requiredCards<T extends { id: string; cloned_from?: string | null }>(grid: T[], requiredIds: string[] | null | undefined): T[] {
+  const want = new Set(requiredIds ?? [])
+  if (want.size === 0) return []
+  return grid.filter(t => want.has(t.id) || (!!t.cloned_from && want.has(t.cloned_from)))
+}
+
+const hhmm = (iso: string) => new Date(iso).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+
+/**
+ * Everything the prize card shows, from the card's rule and the team's progress.
+ * `isDone(card)` says whether the team completed that grid box. Display only: the
+ * server (claim_prize) re-checks every condition.
+ */
+export function prizeView(a: {
+  rule: PrizeRule
+  grid: PrizeGridCard[]
+  isDone: (card: PrizeGridCard) => boolean
+  points: number
+  lines: number
+  claims: Claim[]
+  teamId: string
+  role: 'player' | 'observer'
+  now?: number
+}): PrizeView {
+  const { rule, grid, isDone } = a
+  const now = a.now ?? Date.now()
+  const threshold = Math.max(1, rule.prize_threshold ?? 20)
+  const req = requiredCards(grid, rule.prize_required_task_ids)
+  const count = grid.filter(isDone).length
+  const reqDone = req.filter(isDone).length
+  const otherNeeded = Math.max(0, threshold - req.length)
+  const otherDone = count - reqDone
+  const total = req.length + otherNeeded
+  const done = reqDone + Math.min(otherDone, otherNeeded)
+  const cardsMet = reqDone === req.length && otherDone >= otherNeeded
+  const pointsOk = rule.prize_min_points == null || a.points >= rule.prize_min_points
+  const linesOk = rule.prize_min_lines == null || a.lines >= rule.prize_min_lines
+
+  const early = !!rule.prize_open_at && now < Date.parse(rule.prize_open_at)
+  const closed = !!rule.prize_close_at && now > Date.parse(rule.prize_close_at)
+
+  const stock = rule.prize_stock ?? null
+  const perTeam = Math.max(1, rule.prize_per_team ?? 1)
+  const stockLeft = stock == null ? null : Math.max(0, stock - a.claims.length)
+  const mine = a.claims.filter(c => c.team_id === a.teamId)
+  const eligible = cardsMet && pointsOk && linesOk && !early && !closed
+
+  const notes: PrizeView['notes'] = []
+  if (rule.prize_min_points != null) notes.push({ text: `Score ${Math.floor(a.points)} / ${rule.prize_min_points}`, ok: pointsOk })
+  if (rule.prize_min_lines != null) notes.push({ text: `Bingo lines ${a.lines} / ${rule.prize_min_lines}`, ok: linesOk })
+  if (rule.prize_open_at && early) notes.push({ text: `Opens ${hhmm(rule.prize_open_at)}`, ok: false })
+  if (rule.prize_close_at && !closed) notes.push({ text: `Closes ${hhmm(rule.prize_close_at)}`, ok: true })
+  if (stock != null && stock > 1 && stockLeft != null) notes.push({ text: `${stockLeft} of ${stock} prizes left`, ok: stockLeft > 0 })
+
+  let state: StripState
+  if (mine.length > 0) {
+    state = { kind: 'won', winner: mine[0].team_name,
+      more: a.role === 'player' && eligible && mine.length < perTeam && stockLeft !== 0 }
+  } else if (stockLeft === 0) {
+    const first = [...a.claims].sort((x, y) => x.claimed_at.localeCompare(y.claimed_at))[0]
+    state = { kind: 'lost', winner: first?.team_name ?? 'Another group', text: stock != null && stock > 1 ? `All ${stock} prizes have been claimed` : undefined }
+  } else if (closed) {
+    state = { kind: 'unavailable', text: 'The claim window has closed' }
+  } else if (!eligible) {
+    state = { kind: 'locked', count: done, threshold: total }
+  } else {
+    state = { kind: 'claimable', canClaim: a.role === 'player' }
+  }
+
+  const slots = req.map(c => ({
+    key: c.placement_id ?? c.id, title: c.title, hex: c.hex_code,
+    iconKey: c.tile_icon ?? c.category_icon ?? null, category: c.category ?? '', done: isDone(c),
+  }))
+  return { state, slots, done, total, notes, stockLeft }
 }

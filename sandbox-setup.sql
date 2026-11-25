@@ -3235,3 +3235,274 @@ $$;
 
 grant execute on function public.claim_prize(uuid, uuid) to anon, authenticated;
 grant execute on function public.get_prize_reveal(uuid, uuid) to anon, authenticated;
+
+-- ===== supabase/prize-card/20261125_prize_conditions.sql =====
+-- Prize card unlock conditions. NOT RUN against any database yet.
+-- Run after 20261117_prize_card.sql. Safe to re-run.
+--
+-- A prize card can now require, on top of "complete N cards":
+--   * specific cards (prize_required_task_ids) - they count toward the N
+--   * a minimum score and/or a minimum number of bingo lines
+--   * a claim window (open/close time)
+-- and it can have more than one prize: prize_stock total prizes (null =
+-- unlimited), prize_per_team how many one team may claim.
+--
+-- "Only approved cards count" needs no column: a scan is completed = true only
+-- after approval, and every count below already uses completed scans.
+
+alter table public.bingo_tasks
+  add column if not exists prize_required_task_ids uuid[] not null default '{}',
+  add column if not exists prize_stock int,
+  add column if not exists prize_per_team int not null default 1,
+  add column if not exists prize_min_points numeric,
+  add column if not exists prize_min_lines int,
+  add column if not exists prize_open_at timestamptz,
+  add column if not exists prize_close_at timestamptz;
+alter table public.bingo_tasks drop constraint if exists bingo_tasks_prize_stock_check;
+alter table public.bingo_tasks add constraint bingo_tasks_prize_stock_check check (prize_stock is null or prize_stock >= 1);
+alter table public.bingo_tasks drop constraint if exists bingo_tasks_prize_per_team_check;
+alter table public.bingo_tasks add constraint bingo_tasks_prize_per_team_check check (prize_per_team >= 1);
+
+-- A placement may now be claimed more than once (stock > 1): drop the
+-- one-winner unique index. claim_prize serialises claims with an advisory lock.
+alter table public.bingo_prize_claims drop constraint if exists bingo_prize_claims_board_card_id_key;
+create index if not exists bingo_prize_claims_card_idx on public.bingo_prize_claims(board_card_id);
+
+create or replace function public.claim_prize(p_member uuid, p_board_card uuid)
+returns json language plpgsql security definer set search_path = public as $$
+declare
+  m  bingo_members%rowtype;
+  tm bingo_teams%rowtype;
+  bc bingo_board_cards%rowtype;
+  t  bingo_tasks%rowtype;
+  n  int;
+  v_missing int;
+  v_total int;
+  v_mine int;
+  v_score record;
+begin
+  select * into m  from bingo_members where id = p_member;
+  select * into bc from bingo_board_cards where id = p_board_card;
+  if m.id is null or bc.id is null then return json_build_object('ok', false, 'reason', 'not_eligible'); end if;
+  select * into tm from bingo_teams where id = m.team_id;
+  select * into t  from bingo_tasks where id = bc.task_id;
+  if tm.id is null or tm.section_id <> bc.section_id or m.role <> 'player' or not coalesce(t.is_prize, false) then
+    return json_build_object('ok', false, 'reason', 'not_eligible');
+  end if;
+
+  -- Claim window.
+  if (t.prize_open_at is not null and now() < t.prize_open_at)
+     or (t.prize_close_at is not null and now() > t.prize_close_at) then
+    return json_build_object('ok', false, 'reason', 'not_eligible');
+  end if;
+
+  -- Completed grid boxes (same predicate as the scoreboard).
+  select count(*) into n
+    from bingo_board_cards g
+   where g.section_id = bc.section_id and g.slot < 200
+     and exists (select 1 from bingo_scans sc
+                  where sc.team_id = tm.id and sc.completed
+                    and (sc.board_card_id = g.id or (sc.board_card_id is null and sc.task_id = g.task_id)));
+  if n < t.prize_threshold then return json_build_object('ok', false, 'reason', 'not_eligible'); end if;
+
+  -- Required cards: every one must be on this board and completed. A required id
+  -- may name the board copy or the library original it was cloned from.
+  if coalesce(array_length(t.prize_required_task_ids, 1), 0) > 0 then
+    select count(*) into v_missing
+      from unnest(t.prize_required_task_ids) r(task_id)
+     where not exists (
+       select 1 from bingo_board_cards g
+         join bingo_tasks gt on gt.id = g.task_id
+        where g.section_id = bc.section_id and g.slot < 200
+          and (gt.id = r.task_id or gt.cloned_from = r.task_id)
+          and exists (select 1 from bingo_scans sc
+                       where sc.team_id = tm.id and sc.completed
+                         and (sc.board_card_id = g.id or (sc.board_card_id is null and sc.task_id = g.task_id))));
+    if v_missing > 0 then return json_build_object('ok', false, 'reason', 'not_eligible'); end if;
+  end if;
+
+  -- Minimum score / bingo lines (the scoreboard's own function).
+  if t.prize_min_points is not null or t.prize_min_lines is not null then
+    select * into v_score from public.bingo_team_board_score(tm.id, bc.section_id);
+    if t.prize_min_points is not null and coalesce(v_score.scaled_points, 0) < t.prize_min_points then
+      return json_build_object('ok', false, 'reason', 'not_eligible');
+    end if;
+    if t.prize_min_lines is not null and coalesce(v_score.bingo_lines, 0) < t.prize_min_lines then
+      return json_build_object('ok', false, 'reason', 'not_eligible');
+    end if;
+  end if;
+
+  -- One claim at a time per placement, so stock and the per-team limit hold.
+  perform pg_advisory_xact_lock(hashtext(bc.id::text));
+  select count(*) into v_mine  from bingo_prize_claims where board_card_id = bc.id and team_id = tm.id;
+  select count(*) into v_total from bingo_prize_claims where board_card_id = bc.id;
+  -- already holds its share: not "too late", it has it
+  if v_mine >= t.prize_per_team then return json_build_object('ok', true); end if;
+  if t.prize_stock is not null and v_total >= t.prize_stock then
+    return json_build_object('ok', false, 'reason', 'taken',
+      'winner', (select team_name from bingo_prize_claims where board_card_id = bc.id order by claimed_at limit 1));
+  end if;
+
+  insert into bingo_prize_claims (section_id, board_card_id, team_id, team_name)
+  values (bc.section_id, bc.id, tm.id, tm.name);
+  return json_build_object('ok', true);
+end $$;
+
+-- get_prize_reveal joined one claim row; with several claims per card it still
+-- returns the caller's own team's earliest claim (limit 1).
+create or replace function public.get_prize_reveal(p_member uuid, p_board_card uuid)
+returns json language sql stable security definer set search_path = public as $$
+  select json_build_object(
+           'title', t.title, 'message', k.message, 'marshal_name', k.marshal_name,
+           'location_text', k.location_text, 'maps_url', k.maps_url, 'maps_label', k.maps_label,
+           'task_id', t.id, 'team_name', c.team_name, 'claimed_at', c.claimed_at)
+    from bingo_members m
+    join bingo_prize_claims c on c.team_id = m.team_id and c.board_card_id = p_board_card
+    join bingo_board_cards bc on bc.id = c.board_card_id
+    join bingo_tasks t on t.id = bc.task_id
+    left join bingo_prize_secrets k on k.task_id = t.id
+   where m.id = p_member
+   order by c.claimed_at
+   limit 1;
+$$;
+
+grant execute on function public.claim_prize(uuid, uuid) to anon, authenticated;
+grant execute on function public.get_prize_reveal(uuid, uuid) to anon, authenticated;
+
+-- ===== supabase/card-schedule/20261126_card_schedule.sql =====
+-- Card schedule: lock / unlock a card by time. NOT RUN against any database yet.
+-- Safe to re-run.
+--
+--  * bingo_tasks.schedule (jsonb, null = no schedule). Shape (see src/lib/cardSchedule.ts):
+--      { open:  {type:'after_start', minutes:30} | {type:'at', at:'<iso>'},
+--        close: same,
+--        lastMinutes: 15,            -- open only in the last N minutes of the board timer
+--        label, notifyOpen, notifyCloseMinutes, notifyText,
+--        override: 'open' | 'locked' }
+--    Whole-row clone/sync copy it with the card, so nothing else needs editing there.
+--  * bingo_sections.game_start_at: set the first time the admin presses Start.
+--    "N minutes after start" counts play time: card_pauses are skipped.
+--  * A trigger on bingo_scans stops a PLAYER from opening a closed or not-yet-open
+--    card. A team that already has a scan for the card may keep going ("finish what
+--    you started"), and the facilitator's own writes are never blocked.
+
+alter table public.bingo_tasks    add column if not exists schedule jsonb;
+alter table public.bingo_sections add column if not exists game_start_at timestamptz;
+
+-- Stamp the first Start press (and nothing else).
+create or replace function public.bingo_stamp_game_start()
+returns trigger language plpgsql as $$
+begin
+  if new.game_started and not coalesce(old.game_started, false) and new.game_start_at is null then
+    new.game_start_at := now();
+  end if;
+  return new;
+end $$;
+drop trigger if exists bingo_stamp_game_start on public.bingo_sections;
+create trigger bingo_stamp_game_start before update on public.bingo_sections
+  for each row execute function public.bingo_stamp_game_start();
+
+-- Play time between two instants: wall time minus the logged pauses.
+create or replace function public.bingo_active_elapsed_ms(p_from timestamptz, p_to timestamptz, p_pauses jsonb)
+returns numeric language plpgsql immutable as $$
+declare
+  f numeric := extract(epoch from p_from) * 1000;
+  t numeric := extract(epoch from p_to) * 1000;
+  tot numeric := 0; p jsonb; s numeric; e numeric;
+begin
+  for p in select * from jsonb_array_elements(coalesce(p_pauses, '[]'::jsonb)) loop
+    s := greatest((p->>'start')::numeric, f);
+    e := least(coalesce((p->>'end')::numeric, t), t);
+    if e > s then tot := tot + (e - s); end if;
+  end loop;
+  return greatest(0, t - f - tot);
+end $$;
+
+-- Has this rule been reached? null = no such rule.
+create or replace function public.bingo_schedule_rule_reached(p_rule jsonb, p_game_start timestamptz, p_pauses jsonb)
+returns boolean language plpgsql stable as $$
+begin
+  if p_rule is null or jsonb_typeof(p_rule) <> 'object' then return null; end if;
+  if p_rule->>'type' = 'at' then
+    return now() >= (p_rule->>'at')::timestamptz;
+  elsif p_rule->>'type' = 'after_start' then
+    if p_game_start is null then return false; end if;
+    return public.bingo_active_elapsed_ms(p_game_start, now(), p_pauses) >= (p_rule->>'minutes')::numeric * 60000;
+  end if;
+  return null;
+end $$;
+
+-- Can a team open this card right now?
+create or replace function public.bingo_card_open_now(p_schedule jsonb, p_section uuid)
+returns boolean language plpgsql stable security definer set search_path = public as $$
+declare
+  sec bingo_sections%rowtype;
+  r boolean;
+  last_min numeric;
+begin
+  if p_schedule is null or jsonb_typeof(p_schedule) <> 'object' then return true; end if;
+  if p_schedule->>'override' = 'open' then return true; end if;
+  if p_schedule->>'override' = 'locked' then return false; end if;
+  select * into sec from bingo_sections where id = p_section;
+  if not found then return true; end if;
+
+  r := public.bingo_schedule_rule_reached(p_schedule->'close', sec.game_start_at, sec.card_pauses);
+  if r is true then return false; end if;
+
+  r := public.bingo_schedule_rule_reached(p_schedule->'open', sec.game_start_at, sec.card_pauses);
+  if r is false then return false; end if;
+
+  last_min := nullif(p_schedule->>'lastMinutes', '')::numeric;
+  if last_min is not null and last_min > 0 then
+    if sec.timer_end_at is null then return false; end if;
+    if extract(epoch from (sec.timer_end_at - now())) * 1000 > last_min * 60000 then return false; end if;
+  end if;
+  return true;
+end $$;
+
+grant execute on function public.bingo_card_open_now(jsonb, uuid) to anon, authenticated;
+
+-- Guard: a player cannot open a card that is closed or not open yet.
+create or replace function public.bingo_scan_schedule_guard()
+returns trigger language plpgsql security definer set search_path = public as $$
+declare
+  tm bingo_teams%rowtype;
+  sec bingo_sections%rowtype;
+  sched jsonb;
+begin
+  select schedule into sched from bingo_tasks where id = new.task_id;
+  if sched is null then return new; end if;
+  select * into tm from bingo_teams where id = new.team_id;
+  if not found then return new; end if;
+  select * into sec from bingo_sections where id = tm.section_id;
+  -- the facilitator's own writes (marking a card done for a team) are never blocked
+  if public.is_bingo_owner() or public.bingo_can_write(sec.owner_id) then return new; end if;
+  -- finish what was started: a team that already opened this card keeps access
+  if exists (select 1 from bingo_scans s
+              where s.team_id = new.team_id and s.task_id = new.task_id
+                and s.board_card_id is not distinct from new.board_card_id) then
+    return new;
+  end if;
+  if not public.bingo_card_open_now(sched, tm.section_id) then
+    raise exception 'CARD_LOCKED';
+  end if;
+  return new;
+end $$;
+drop trigger if exists bingo_scan_schedule_guard on public.bingo_scans;
+create trigger bingo_scan_schedule_guard before insert on public.bingo_scans
+  for each row execute function public.bingo_scan_schedule_guard();
+
+-- A game that is already running when this is applied counts from now, so its
+-- relative rules do not wait forever for a Start press that already happened.
+update public.bingo_sections set game_start_at = now() where game_started and game_start_at is null;
+
+-- ===== help-info/20261127_help_info.sql =====
+-- Emergency contacts + pinned message shown in the help chat. Safe to re-run.
+--
+--  bingo_sections.help_info (jsonb, null = nothing shown). Shape (src/lib/helpInfo.ts):
+--    { show: true,
+--      contacts: [{ label, name, phone, whatsapp }],   -- up to 3
+--      pin: 'text', pinAt: '<iso>' }                   -- pinAt lets the chat flag a new pin
+-- Players already read their board's section row, so no policy change is needed.
+
+alter table public.bingo_sections add column if not exists help_info jsonb;

@@ -176,3 +176,58 @@ test('AC-14: the message reads "<Group> claimed the prize"', async () => {
   const { projectorText } = await import('./logic.ts')
   assert.equal(projectorText('Team Pelandok'), 'Team Pelandok claimed the prize')
 })
+
+// ── prizeView: required cards, score, lines, window, stock ───────────────────
+import { prizeView, requiredCards, type PrizeGridCard } from './logic.ts'
+
+const card = (id: string, extra: Partial<PrizeGridCard> = {}): PrizeGridCard => ({ id, placement_id: `p-${id}`, title: id, hex_code: '#123456', ...extra })
+const grid = ['a', 'b', 'c', 'd', 'e'].map(id => card(id))
+const base = { grid, points: 0, lines: 0, claims: [], teamId: 'T', role: 'player' as const }
+const doneSet = (...ids: string[]) => (c: PrizeGridCard) => ids.includes(c.id)
+
+test('prizeView: required cards count toward the total and fill the slots', () => {
+  const rule = { prize_threshold: 4, prize_required_task_ids: ['a', 'b'] }
+  const v = prizeView({ ...base, rule, isDone: doneSet('a', 'c') })
+  assert.equal(v.total, 4)
+  assert.equal(v.done, 2)
+  assert.deepEqual(v.slots.map(s => s.done), [true, false])
+  assert.equal(v.state.kind, 'locked')
+  const ok = prizeView({ ...base, rule, isDone: doneSet('a', 'b', 'c', 'd') })
+  assert.equal(ok.state.kind, 'claimable')
+})
+
+test('prizeView: the right number of cards is not enough without the required ones', () => {
+  const v = prizeView({ ...base, rule: { prize_threshold: 3, prize_required_task_ids: ['a'] }, isDone: doneSet('b', 'c', 'd') })
+  assert.equal(v.state.kind, 'locked')
+  assert.equal(v.done, 2) // two of the other cards still needed; a is missing
+})
+
+test('prizeView: a required id matches the board copy via cloned_from', () => {
+  assert.deepEqual(requiredCards([card('copy', { cloned_from: 'orig' })], ['orig']).map(c => c.id), ['copy'])
+})
+
+test('prizeView: min score and min lines keep it locked', () => {
+  const rule = { prize_threshold: 1, prize_min_points: 500, prize_min_lines: 1 }
+  assert.equal(prizeView({ ...base, rule, isDone: doneSet('a'), points: 499, lines: 1 }).state.kind, 'locked')
+  assert.equal(prizeView({ ...base, rule, isDone: doneSet('a'), points: 500, lines: 0 }).state.kind, 'locked')
+  assert.equal(prizeView({ ...base, rule, isDone: doneSet('a'), points: 500, lines: 1 }).state.kind, 'claimable')
+})
+
+test('prizeView: claim window', () => {
+  const now = Date.parse('2026-11-25T12:00:00Z')
+  const rule = (o: string | null, c: string | null) => ({ prize_threshold: 1, prize_open_at: o, prize_close_at: c })
+  assert.equal(prizeView({ ...base, now, rule: rule('2026-11-25T13:00:00Z', null), isDone: doneSet('a') }).state.kind, 'locked')
+  assert.equal(prizeView({ ...base, now, rule: rule(null, '2026-11-25T11:00:00Z'), isDone: doneSet('a') }).state.kind, 'unavailable')
+  assert.equal(prizeView({ ...base, now, rule: rule('2026-11-25T11:00:00Z', '2026-11-25T13:00:00Z'), isDone: doneSet('a') }).state.kind, 'claimable')
+})
+
+test('prizeView: stock runs out, per-team limit, claim another', () => {
+  const claim = (team: string, i: number) => ({ id: `c${i}`, board_card_id: 'p', team_id: team, team_name: team, claimed_at: `2026-01-0${i + 1}` })
+  const rule = { prize_threshold: 1, prize_stock: 2, prize_per_team: 2 }
+  assert.equal(prizeView({ ...base, rule, isDone: doneSet('a'), claims: [claim('X', 0), claim('Y', 1)] }).state.kind, 'lost')
+  const mine = prizeView({ ...base, rule, isDone: doneSet('a'), claims: [claim('T', 0)] })
+  assert.deepEqual(mine.state, { kind: 'won', winner: 'T', more: true })
+  assert.equal(mine.stockLeft, 1)
+  const capped = prizeView({ ...base, rule: { ...rule, prize_per_team: 1 }, isDone: doneSet('a'), claims: [claim('T', 0)] })
+  assert.deepEqual(capped.state, { kind: 'won', winner: 'T', more: false })
+})

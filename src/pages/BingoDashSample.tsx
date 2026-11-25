@@ -1,3 +1,7 @@
+import { ScheduleLockOverlay, ScheduleBanner } from '../components/ScheduleBits'
+import { useCardSchedules } from '../hooks/useCardSchedules'
+import type { ScheduleStatus } from '../lib/cardSchedule'
+import { CategoryIcon } from '../components/BingoTileFace'
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { createPortal } from 'react-dom'
@@ -5,10 +9,10 @@ import { QRCodeSVG } from 'qrcode.react'
 import { supabase } from '../lib/supabase'
 import { fetchBoardTasks, fetchPrizeTasks, tasksForFace } from '../lib/boardCards'
 import { PrizeStrip } from '../lib/prizeCard/PrizeStrip'
-import { stripState } from '../lib/prizeCard/logic'
+import { prizeView } from '../lib/prizeCard/logic'
 import { hasOwnMechanism, effectiveInputs, inputKinds, isCompulsory, fileAccept, fileEmoji, fileHeading, fileNoun } from '../lib/completionInputs'
 import { activeFaces, faceName, faceColor, normaliseFaceCount } from '../lib/cubeFaces'
-import { buildBingoSlots, completedBingoLines, scoreWithBingoLines, planLineCelebrations } from '../lib/bingoLines'
+import { buildBingoSlots, completedBingoLines, scoreWithBingoLines, planLineCelebrations, bingoLineBonus } from '../lib/bingoLines'
 import { scanControls, controlRing, pressControl, typeControl, giveFile, tapControl, type RemoteControl } from '../lib/remoteControls'
 import { useSampleRemote, makeRemoteCode, HEARTBEAT_MS, HEARTBEAT_TIMEOUT_MS, type RemoteCommand, type RemoteState, type SampleView, type DetailStep, type JoinQrMode } from '../hooks/useSampleRemote'
 import { useBingoTaskPages } from '../hooks/useBingoTaskPages'
@@ -531,7 +535,7 @@ function JoinScreen({ selected, onSelect, onJoin, theme, name, named, onName, on
 // ── Bingo Tile ────────────────────────────────────────────────────────────────
 
 function BingoTile({
-  task, status, chained, chain, isInBingoLine, display, glowing, autoContrast, onClick,
+  task, status, chained, chain, isInBingoLine, display, glowing, autoContrast, onClick, sched,
 }: {
   autoContrast?: boolean
   task: BingoTask
@@ -545,6 +549,7 @@ function BingoTile({
   /** Demo only — a tile the presenter has lit up to draw the room's eye. */
   glowing: boolean
   onClick: () => void
+  sched?: ScheduleStatus | null
 }) {
   return (
     <button
@@ -564,7 +569,7 @@ function BingoTile({
           : `0 3px 10px ${task.hex_code}55`,
         // Grab: the art behind must not show through, so dim with a filter, not opacity
         opacity: status === 'locked' && !autoContrast ? 0.72 : 1,
-        filter: chained ? 'grayscale(0.85) brightness(0.8)' : status === 'locked' && autoContrast ? 'brightness(0.82)' : undefined,
+        filter: chained || sched?.locked ? 'grayscale(0.85) brightness(0.8)' : status === 'locked' && autoContrast ? 'brightness(0.82)' : undefined,
       }}
     >
       {/* Chained card: its step in the chain, and a pulsing ring on the one
@@ -579,10 +584,11 @@ function BingoTile({
           </div>
         </>
       )}
+      <ScheduleLockOverlay sched={sched} small={false} />
       {chained && (
         <div className="absolute inset-0 bg-black/35 flex items-center justify-center z-10 pointer-events-none">
           <div className="bg-white/85 rounded-full w-7 h-7 flex items-center justify-center shadow">
-            {chain?.role === 'end' ? <img src="/grab/icons/treasure.png" alt="" draggable={false} className="w-[80%] h-[80%] object-contain" /> : <span className="text-sm leading-none">🔒</span>}
+            {chain?.role === 'end' && task.tile_icon === 'treasure' ? <img src="/grab/icons/treasure.png" alt="" draggable={false} className="w-[80%] h-[80%] object-contain" /> : <span className="text-sm leading-none">🔒</span>}
           </div>
         </div>
       )}
@@ -620,7 +626,7 @@ function BingoTile({
       )}
 
       {/* Icon or words — whichever this board is set to in the admin */}
-      <TileFace task={chain?.role === 'end' ? { ...task, tile_icon: 'treasure' } : task} display={display} autoContrast={autoContrast} chip={(task.points ?? 0) > 0 ? 'tl' : null} />
+      <TileFace task={task} display={display} autoContrast={autoContrast} chip={(task.points ?? 0) > 0 ? 'tl' : null} />
 
       {/* Points chip — top-left corner, clear of the title and the top-right scanned ring */}
       {(task.points ?? 0) > 0 && (
@@ -775,6 +781,7 @@ const BoardScreen = forwardRef<BoardScreenHandle, {
 }, ref) {
   // One colour per category on the board, whatever each card row carries.
   const gridTasks = useMemo(() => withCategoryColors(gridTasksProp), [gridTasksProp])
+  const { statusOf: schedOf, alerts: schedAlerts, dismiss: dismissSched } = useCardSchedules(section?.id, gridTasks)
   const [showLeaveConfirm, setShowLeaveConfirm] = useState(false)
   const [popupLetters, setPopupLetters] = useState<string | null>(null)
   const [inviteOpen, setInviteOpen] = useState(false)
@@ -1001,6 +1008,7 @@ const BoardScreen = forwardRef<BoardScreenHandle, {
         </div>
       </header>
 
+      <ScheduleBanner alerts={schedAlerts} onDismiss={dismissSched} />
       <main className="relative z-10 px-3 pb-8">
         <div className="board-col">
           {/* Face tabs. Only rendered on a cube board, so a normal game is
@@ -1045,6 +1053,7 @@ const BoardScreen = forwardRef<BoardScreenHandle, {
                     task={task}
                     status={getStatusAt(task.id, i)}
                     chained={isChainLocked(task)}
+                    sched={schedOf(task)}
                     chain={chainInfoOf(task)}
                     isInBingoLine={bingoSlots.has(i)}
                     display={tileDisplay}
@@ -1062,21 +1071,28 @@ const BoardScreen = forwardRef<BoardScreenHandle, {
             </div>
           )}
           {/* Prize card preview: a local sandbox claim, nothing is written. */}
-          {visibleTasks.length > 0 && prizeTasks.map(t => (
-            <div key={t.placement_id ?? t.id} className="mt-3">
-              <PrizeStrip
-                state={stripState({
-                  count: completedCount, threshold: t.prize_threshold ?? 20, teamId: 'sample', role: observer ? 'observer' : 'player',
-                  claim: sandboxClaims.includes(t.id)
-                    ? { id: t.id, board_card_id: t.placement_id ?? t.id, team_id: 'sample', team_name: teamName, claimed_at: new Date().toISOString() }
-                    : null,
-                })}
-                theme={theme} busy={false} message={null} title={t.title} hint={t.completion_warning}
-                onClaim={() => setSandboxClaims(c => [...c, t.id])}
-                onOpen={() => setRevealTask(t)}
-              />
-            </div>
-          ))}
+          {visibleTasks.length > 0 && prizeTasks.map(t => {
+            const doneTasks = gridTasks.filter(c => getStatus(c.id) === 'completed')
+            const lineCount = completedLineIndices.size
+            let points = doneTasks.reduce((n, c) => n + (c.points ?? 0), 0)
+            for (let k = 1; k <= Math.min(lineCount, 5); k++) points += bingoLineBonus(k)
+            const view = prizeView({
+              rule: t, grid: gridTasks, isDone: c => getStatus(c.id) === 'completed',
+              teamId: 'sample', role: observer ? 'observer' : 'player', points, lines: lineCount,
+              claims: sandboxClaims.filter(id => id === t.id).map((id, i) => (
+                { id: `${id}-${i}`, board_card_id: t.placement_id ?? t.id, team_id: 'sample', team_name: teamName, claimed_at: new Date(i).toISOString() })),
+            })
+            return (
+              <div key={t.placement_id ?? t.id} className="mt-3">
+                <PrizeStrip
+                  state={view.state} slots={view.slots} notes={view.notes} slotIcon={sl => <CategoryIcon category={sl.category} iconKey={sl.iconKey} className="w-5 h-5" />}
+                  theme={theme} busy={false} message={null} title={t.title} hint={t.completion_warning}
+                  onClaim={() => setSandboxClaims(c => [...c, t.id])}
+                  onOpen={() => setRevealTask(t)}
+                />
+              </div>
+            )
+          })}
         </div>
       </main>
 

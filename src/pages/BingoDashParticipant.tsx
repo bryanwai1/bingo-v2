@@ -45,6 +45,8 @@ import { useAutoAdvance, HERO_ROTATE_MS, INSTRUCTION_ROTATE_MS } from '../lib/us
 import { CardNeeds } from '../components/CardNeeds'
 import { HeroCarousel } from '../components/HeroCarousel'
 import { isGridSlot } from '../lib/prizeCard/logic'
+import { hasSchedule, scheduleStatus } from '../lib/cardSchedule'
+import { useScheduleClock } from '../hooks/useScheduleClock'
 import type { BingoScan, BingoTask } from '../types/database'
 
 async function compressToJpeg(file: File, maxDim = 1920, quality = 0.85): Promise<Blob> {
@@ -361,6 +363,12 @@ export function BingoDashParticipant() {
 
   // Load the board's marshal password + photo-submissions toggle, subscribe to live changes
   const sectionId = team?.section_id ?? null
+  // Card schedule: a card that is closed or not open yet cannot be opened. A team
+  // that already opened it keeps going ("finish what you started").
+  const schedClock = useScheduleClock(sectionId, hasSchedule(task?.schedule))
+  const sched = scheduleStatus(task?.schedule, schedClock)
+  const schedLocked = !!sched?.locked
+  const [schedProbed, setSchedProbed] = useState(false)
   // Grab Game Day boards keep their stadium art behind every card page too.
   const [playerTheme, setPlayerTheme] = useState<PlayerTheme>('default')
   useEffect(() => {
@@ -594,14 +602,27 @@ export function BingoDashParticipant() {
   }, [waitingForStart, team, taskId, boardCardId, findScan])
 
   useEffect(() => {
-    if (isSnakeLadder || isObserver || showSplash) return
+    if (isSnakeLadder || isObserver || showSplash || schedLocked) return
     if (team && taskId && !scanRecorded) {
       recordScan(team.id, taskId, boardCardId).then((scan) => {
         setScanRecorded(true)
         if (scan) applyScan(scan)
       })
     }
-  }, [isSnakeLadder, isObserver, showSplash, team, taskId, boardCardId, scanRecorded, recordScan, applyScan])
+  }, [isSnakeLadder, isObserver, showSplash, schedLocked, team, taskId, boardCardId, scanRecorded, recordScan, applyScan])
+
+  // While the card is locked, look for a scan the team already made. Finding one
+  // lets them carry on; finding none leaves the lock screen up.
+  useEffect(() => {
+    if (!schedLocked || scanRecord || schedProbed || isSnakeLadder || !team || !taskId) return
+    let cancelled = false
+    findScan(team.id, taskId, boardCardId)
+      .then(scan => { if (!cancelled && scan) applyScan(scan) })
+      .catch(() => { /* stay locked */ })
+      .finally(() => { if (!cancelled) setSchedProbed(true) })
+    return () => { cancelled = true }
+  }, [schedLocked, scanRecord, schedProbed, isSnakeLadder, team, taskId, boardCardId, findScan, applyScan])
+  const schedBlocked = schedLocked && !scanRecord
 
   useEffect(() => {
     if (isSnakeLadder || !isObserver || !team || !taskId || scanRecord) return
@@ -1035,6 +1056,35 @@ export function BingoDashParticipant() {
               style={{ backgroundColor: '#a855f7', boxShadow: '0 8px 24px #a855f744' }}
             >
               Go to Join Page →
+            </button>
+          </div>
+        </div>
+        {timeUpOverlay}
+      </>
+    )
+  }
+
+  // ── Closed or not open yet (card schedule) ─────────────────────────
+  if (schedBlocked && sched) {
+    return (
+      <>
+        <div className="min-h-screen flex flex-col items-center justify-center bg-gray-950 text-center px-6" data-schedule-locked>
+          <ParticleBackground />
+          <div className="relative z-10 max-w-sm w-full">
+            <div className="text-6xl mb-4">🔒</div>
+            <h2 className="text-white text-2xl font-black mb-2 [overflow-wrap:anywhere]">{task.title}</h2>
+            <p className="text-amber-200 font-black text-lg leading-snug">{sched.text}</p>
+            {sched.state === 'before' && sched.opensInMs != null && (
+              <p className="mt-3 text-5xl font-black text-white tabular-nums">{sched.short}</p>
+            )}
+            <p className="text-white/50 text-xs font-bold mt-3">
+              {sched.state === 'before' ? 'This card opens on its own. Keep this page open.' : 'Teams that already started it can still finish.'}
+            </p>
+            <button
+              onClick={() => void goBack()}
+              className="mt-6 w-full py-3 rounded-2xl text-white/80 font-bold border border-white/15 hover:bg-white/5 transition-colors"
+            >
+              ← Back to Board
             </button>
           </div>
         </div>
