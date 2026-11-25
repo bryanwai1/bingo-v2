@@ -3774,7 +3774,7 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
         <SchedulePreview tasks={gridTasks as (BingoTask & { sort_order: number })[]} board={currentBoard}
           onOverride={async (t, override) => {
             // Open now / Lock now beats the schedule; pressing the active one again hands control back to it.
-            const next = { ...(t.schedule ?? {}), override }
+            const next: NonNullable<BingoTask['schedule']> = { ...(t.schedule ?? {}), override }
             if (!override) delete next.override
             const { error } = await supabase.from('bingo_tasks').update({ schedule: next }).eq('id', t.id)
             if (error) { alert('Could not change the card: ' + error.message); return }

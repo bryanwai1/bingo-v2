@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { hasSchedule, ruleWallTime, scheduleStatus, type ScheduleClock } from '../lib/cardSchedule'
+import { hasSchedule, ruleWallTime, scheduleStatus, type ScheduleClock, type SchedRule } from '../lib/cardSchedule'
 import type { BingoSection, BingoTask } from '../types/database'
 
 const when = (ms: number | null, fallback: string) =>
@@ -37,7 +37,7 @@ export function SchedulePreview({ tasks, board, onOverride }: {
   }
   const clock: ScheduleClock = { now, ...base }
 
-  const rule = (r: BingoTask['schedule'] extends infer S ? (S extends { open?: infer R } ? R : never) : never) => {
+  const rule = (r: SchedRule | null | undefined) => {
     if (!r) return '—'
     const wall = ruleWallTime(r, base)
     if (r.type === 'at') return when(wall, '—')
