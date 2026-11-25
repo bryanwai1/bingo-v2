@@ -37,7 +37,7 @@ function OneStrip({ task, view, memberId, theme, onClaim, onOpen }: {
       setMessage('Could not reach the server. Check your connection and try again.')
     } finally { setBusy(false) }
   }
-  return <PrizeStrip state={state} theme={theme} busy={busy} message={state.kind === 'won' || state.kind === 'lost' ? null : message} failed={failed} title={task.title} hint={task.completion_warning} onClaim={() => void press()} onOpen={onOpen} slots={view.slots} notes={view.notes} slotIcon={sl => <CategoryIcon category={sl.category} iconKey={sl.iconKey} className="w-5 h-5" />} />
+  return <PrizeStrip state={state} theme={theme} busy={busy} message={state.kind === 'won' || state.kind === 'lost' ? null : message} failed={failed} title={task.title} hint={task.completion_warning} onClaim={() => void press()} onOpen={onOpen} slots={view.slots} notes={view.notes} slotIcon={sl => <CategoryIcon category={sl.category} iconKey={sl.iconKey} className="w-7 h-7" />} />
 }
 
 /** One strip per prize card under the grid (AC-13). Renders nothing when the board has none. */

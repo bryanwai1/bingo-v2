@@ -1247,19 +1247,6 @@ export function BingoDashParticipant() {
         {/* People needed and where to play: under the hero image, above the instructions. */}
         <CardNeeds task={task} hexCode={task.hex_code} mapsHref={task.maps_url ? normalizeUrl(task.maps_url) : null} />
 
-        {/* Maps button */}
-        {task.maps_url && (
-          <div className="mb-5 animate-slide-up">
-            <a
-              href={normalizeUrl(task.maps_url)}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex items-center justify-center gap-2 w-full py-3 rounded-2xl font-black text-sm text-white border-2 border-white/30 bg-white/10 hover:bg-white/20 active:scale-95 transition-all"
-            >
-              📍 {task.maps_label?.trim() || 'Open in Maps'}
-            </a>
-          </div>
-        )}
 
         {/* Bonus timer — every card, from the moment the team opens it. A station
             card instead waits for the marshal's Start (timerStartedAt). */}
@@ -1457,7 +1444,7 @@ export function BingoDashParticipant() {
           </div>
         )}
 
-        <ChainTrail steps={trail} currentId={task.id} onOpen={id => navigate(`/bingo-dash/task/${id}`)} />
+        <ChainTrail hex={task.hex_code} steps={trail} currentId={task.id} onOpen={id => navigate(`/bingo-dash/task/${id}`)} />
 
         {/* The hand-off to the next card sits under the whole trail, so the
             team reads where they are first and the way forward last. */}
@@ -1501,12 +1488,6 @@ export function BingoDashParticipant() {
                   {task.completion_warning || `Only teams that have completed ${chain.prev.title} can unlock ${task.title}.`}
                 </p>
                 <p className="text-white/50 text-xs font-bold mt-2">This card opens on its own once that one is approved.</p>
-              </div>
-              {/* The way to the card that opens this one, right under the reason it is shut. */}
-              <div className="mt-4">
-                <TaskLinkButtons hexCode={task.hex_code} heading="Do this card first"
-                  links={[{ id: 'chain-prev', label: chain.prev.title, url: '', to: `/bingo-dash/task/${chain.prev.id}`,
-                    icon: '🔒', sub: 'Complete this card first' }]} />
               </div>
               <button
                 onClick={() => void goBack()}

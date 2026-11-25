@@ -52,13 +52,13 @@ function Medal({ filled, children }: { filled: boolean; children: React.ReactNod
 function SlotRow({ slots, icon }: { slots: PrizeSlot[]; icon?: (slot: PrizeSlot) => React.ReactNode }) {
   if (slots.length === 0) return null
   return (
-    <span className="col-span-2 flex flex-wrap gap-1.5" data-prize-slots>
+    <span className="col-span-2 flex flex-wrap justify-center gap-2.5 pb-1" data-prize-slots>
       {slots.map(sl => (
         <span key={sl.key} title={`${sl.title}${sl.done ? ' (done)' : ''}`}
-          className="w-9 h-9 rounded-lg flex items-center justify-center border transition-colors duration-500"
+          className="w-14 h-14 rounded-xl flex items-center justify-center border-2 transition-colors duration-500"
           style={sl.done
             ? { background: sl.hex, borderColor: 'rgba(255,255,255,.55)', color: '#fff', boxShadow: `0 0 8px ${sl.hex}` }
-            : { background: 'rgba(120,125,135,.35)', borderColor: 'rgba(255,255,255,.12)', color: 'rgba(255,255,255,.35)' }}>
+            : { background: 'rgba(120,125,135,.4)', borderColor: 'rgba(255,255,255,.35)', borderStyle: 'dashed', color: 'rgba(255,255,255,.6)' }}>
           {icon?.(sl)}
         </span>
       ))}
@@ -131,6 +131,7 @@ export function PrizeStrip({ state, theme, busy, message, failed, title, hint, o
     const pct = state.threshold > 0 ? Math.min(100, (state.count / state.threshold) * 100) : 0
     return (
       <div className={box} style={{ ...root, ...boxStyle(true) }} aria-live="polite">
+        <SlotRow slots={slots} icon={slotIcon} />
         <Medal filled>?</Medal>
         <span className="min-w-0">
           <span className="flex items-center gap-1.5 text-xs font-black uppercase tracking-widest" style={{ color: 'var(--pz-accent-text)' }}><LockIcon size={14} />{name}</span>
@@ -145,7 +146,6 @@ export function PrizeStrip({ state, theme, busy, message, failed, title, hint, o
           </span>
           {message && <span role="status" className="mt-1.5 block text-sm font-bold [overflow-wrap:anywhere]">{message}</span>}
         </span>
-        <SlotRow slots={slots} icon={slotIcon} />
         <NoteRow notes={notes} />
       </div>
     )
@@ -154,12 +154,12 @@ export function PrizeStrip({ state, theme, busy, message, failed, title, hint, o
   // claimable
   return (
     <div className={box} style={{ ...root, ...boxStyle(true) }} aria-live="polite">
+      <SlotRow slots={slots} icon={slotIcon} />
       <Medal filled>?</Medal>
       <span className="min-w-0">
         <span className="block text-xs font-black uppercase tracking-widest" style={{ color: 'var(--pz-accent-text)' }}>{name}</span>
         <span className="block text-base font-bold">{state.canClaim ? 'You reached the target' : 'Your group can claim this card'}</span>
       </span>
-      <SlotRow slots={slots} icon={slotIcon} />
       <NoteRow notes={notes} />
       {state.canClaim ? (
         <button

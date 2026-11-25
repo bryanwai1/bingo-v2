@@ -39,7 +39,7 @@ export function CardNeeds({ task, hexCode, mapsHref }: { task: Needs; hexCode: s
   const peopleCount = task.players_whole_team ? null : (task.players_max ?? task.players_min ?? 1)
 
   return (
-    <div data-testid="card-needs" className={`mb-5 grid gap-3 ${people && place ? 'grid-cols-1 sm:grid-cols-2' : 'grid-cols-1'} animate-slide-up`}>
+    <div data-testid="card-needs" className={`mb-5 grid gap-3 ${people && place ? (mapsHref ? 'grid-cols-1 md:grid-cols-2' : 'grid-cols-1 sm:grid-cols-2') : 'grid-cols-1'} animate-slide-up`}>
       {people && (
         <div className={tile} style={style}>
           <PeopleIcon />
@@ -53,14 +53,21 @@ export function CardNeeds({ task, hexCode, mapsHref }: { task: Needs; hexCode: s
         const body = (
           <>
             <PinIcon />
-            <div className="min-w-0">
-              <p className={small}><T>Where to play</T>{mapsHref ? <span aria-hidden> ↗</span> : null}</p>
+            <div className="min-w-0 flex-1">
+              <p className={small}><T>Where to play</T></p>
               <p className="text-xl font-black leading-tight [overflow-wrap:anywhere]"><T>{place}</T></p>
             </div>
+            {mapsHref && (
+              // A filled round button in the card's ink colour: reads as "press me" on any card colour.
+              <span aria-hidden className="shrink-0 w-11 h-11 rounded-full grid place-items-center transition-transform group-hover:translate-x-0.5"
+                style={{ backgroundColor: ink, color: hexCode }}>
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M7 17 17 7" /><path d="M8 7h9v9" /></svg>
+              </span>
+            )}
           </>
         )
         return mapsHref
-          ? <a href={mapsHref} target="_blank" rel="noopener noreferrer" className={`${tile} active:scale-95 transition-transform`} style={style}>{body}</a>
+          ? <a href={mapsHref} target="_blank" aria-label={`${place}: open in maps`} rel="noopener noreferrer" className={`group ${tile} active:scale-95 transition-transform`} style={style}>{body}</a>
           : <div className={tile} style={style}>{body}</div>
       })()}
     </div>

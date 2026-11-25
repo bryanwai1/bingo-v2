@@ -1085,7 +1085,7 @@ const BoardScreen = forwardRef<BoardScreenHandle, {
             return (
               <div key={t.placement_id ?? t.id} className="mt-3">
                 <PrizeStrip
-                  state={view.state} slots={view.slots} notes={view.notes} slotIcon={sl => <CategoryIcon category={sl.category} iconKey={sl.iconKey} className="w-5 h-5" />}
+                  state={view.state} slots={view.slots} notes={view.notes} slotIcon={sl => <CategoryIcon category={sl.category} iconKey={sl.iconKey} className="w-7 h-7" />}
                   theme={theme} busy={false} message={null} title={t.title} hint={t.completion_warning}
                   onClaim={() => setSandboxClaims(c => [...c, t.id])}
                   onOpen={() => setRevealTask(t)}
@@ -1663,14 +1663,6 @@ export const SampleTaskDetail = forwardRef<SampleTaskDetailHandle, {
         {/* People needed and where to play: under the hero image, above the instructions. */}
         <CardNeeds task={task} hexCode={task.hex_code} mapsHref={task.maps_url ? normalizeUrl(task.maps_url) : null} />
 
-        {/* Maps button */}
-        {task.maps_url && (
-          <div className="mb-5 animate-slide-up">
-            <a href={normalizeUrl(task.maps_url)} target="_blank" rel="noopener noreferrer" className="flex items-center justify-center gap-2 w-full py-3 rounded-2xl font-black text-sm text-white border-2 border-white/30 bg-white/10 hover:bg-white/20 active:scale-95 transition-all">
-              📍 {task.maps_label?.trim() || 'Open in Maps'}
-            </a>
-          </div>
-        )}
 
         {/* Bonus timer — every card, from the moment the team opens it. */}
         {!chain.locked && stationLocked && (
@@ -1806,7 +1798,7 @@ export const SampleTaskDetail = forwardRef<SampleTaskDetailHandle, {
         {/* Whatever this card deals the team — colours, a riddle,
             checkpoints. Sits after the instructions and before the AI
             tool links, so it reads in the order the team acts. */}
-        <ChainTrail steps={chain.trail ?? []} currentId={task.id} onOpen={id => { const t = chain.trail?.find(x => x.id === id); if (t) onJump(t.task) }} />
+        <ChainTrail hex={task.hex_code} steps={chain.trail ?? []} currentId={task.id} onOpen={id => { const t = chain.trail?.find(x => x.id === id); if (t) onJump(t.task) }} />
 
         {/* Helpful links — plus the chain's neighbours, as on the player
             view. In-app hops go through onJump so the demo swaps cards
@@ -1843,12 +1835,6 @@ export const SampleTaskDetail = forwardRef<SampleTaskDetailHandle, {
                   {task.completion_warning || `Only teams that have completed ${chain.prev.title} can unlock ${task.title}.`}
                 </p>
                 <p className="text-white/50 text-xs font-bold mt-2">This card opens on its own once that one is approved.</p>
-              </div>
-              {/* The way to the card that opens this one, right under the reason it is shut. */}
-              <div className="mt-4">
-                <TaskLinkButtons hexCode={task.hex_code} heading="Do this card first"
-                  links={[{ id: 'chain-prev', label: chain.prev.title, url: '', onSelect: () => onJump(chain.prev!),
-                    icon: '🔒', sub: 'Complete this card first' }]} />
               </div>
               <button
                 onClick={onClose} data-remote="closeTask"
