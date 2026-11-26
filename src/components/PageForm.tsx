@@ -328,9 +328,9 @@ export function PageForm({ page, index, hexCode, onSave, onDelete, onMoveUp, onM
                         type="button"
                         onClick={() => exampleFileRefs.current[i]?.click()}
                         disabled={uploadingExample === i}
-                        className="px-2 py-1 text-xs bg-gray-100 text-gray-600 rounded hover:bg-gray-200 transition-colors disabled:opacity-50"
+                        className="px-4 py-3 text-xs font-bold bg-gray-50 text-gray-600 rounded-xl border-2 border-dashed border-gray-300 hover:border-violet-400 hover:bg-violet-50/60 transition-colors disabled:opacity-50"
                       >
-                        {uploadingExample === i ? 'Uploading...' : '+ Example image'}
+                        {uploadingExample === i ? 'Uploading...' : '🖼 Choose an example image or drop it here'}
                       </button>
                       <span className="text-[10px] text-gray-300">Max 2 MB · 600×400px</span>
                     </div>

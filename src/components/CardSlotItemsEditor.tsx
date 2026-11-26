@@ -130,8 +130,8 @@ export function CardSlotItemsEditor({ taskId, slotId, emoji, label }: {
                 <input defaultValue={item.label}
                   onBlur={e => { const v = e.target.value.trim(); if (v && v !== item.label) patch(item.id, { label: v }) }}
                   className="flex-1 min-w-0 px-2 py-1 border border-gray-200 rounded text-sm font-medium focus:outline-none focus:ring-2 focus:ring-violet-400" />
-                <label className="text-xs font-bold text-violet-600 hover:text-violet-800 cursor-pointer flex-shrink-0">
-                  {item.photo_url ? 'Replace photo' : 'Add photo'}
+                <label className="text-xs font-bold text-violet-600 hover:text-violet-800 hover:bg-violet-50 cursor-pointer flex-shrink-0 rounded-lg border-2 border-dashed border-violet-300 px-3 py-2 text-center">
+                  {item.photo_url ? 'Replace photo · drop here' : 'Add photo · drop here'}
                   <input type="file" accept="image/*" className="hidden"
                     onChange={e => { const f = e.target.files?.[0]; if (f) setPhoto(item.id, f) }} />
                 </label>

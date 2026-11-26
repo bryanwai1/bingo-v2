@@ -9,6 +9,7 @@ import { useBoardReset } from '../hooks/useBoardReset'
 import { ParticleBackground } from '../components/ParticleBackground'
 import { FitBoard } from '../components/FitBoard'
 import {
+  isPlaceKind,
   buildAwardSlides,
   normalizeSlideOrder,
   groupLabel,
@@ -19,6 +20,7 @@ import {
   evaluationName,
   evaluationQrs,
   type SlideText,
+  type MediaSlide,
   type PlaceKind,
   DEFAULT_PRIZE_COUNTS,
   type AwardSlideDescriptor,
@@ -140,6 +142,7 @@ function AwardShow({ sectionSlug }: { sectionSlug: string }) {
   const [loaded, setLoaded] = useState(false)
   const [slideIdx, setSlideIdx] = useState(0)
   const [showJudgePanel, setShowJudgePanel] = useState(false)
+  const [showPhotoPanel, setShowPhotoPanel] = useState(false)
   // ?export=1: the PowerPoint exporter drives this page in a hidden iframe.
   const [searchParams] = useSearchParams()
   const exportMode = searchParams.get('export') === '1'
@@ -156,6 +159,75 @@ function AwardShow({ sectionSlug }: { sectionSlug: string }) {
     const { error } = await supabase.from('bingo_teams')
       .update({ bonus_points: next, bonus_breakdown: breakdown }).eq('id', teamId)
     if (error) alert(`Could not save bonus: ${error.message}`)
+  }
+
+  // ── On-stage edits that live in slide_text (photo position, media slides) ──
+  // The show shows them at once (state) and saves when the presenter lets go,
+  // so dragging a slider does not write on every pixel or bounce back through
+  // the realtime refetch.
+  const configRef = useRef<BingoAwardConfig | null>(null)
+  configRef.current = config
+  const patchText = (patch: Partial<SlideText>) => {
+    if (!section) return
+    const c = configRef.current
+    const next = {
+      ...(c ?? ({ section_id: section.id } as BingoAwardConfig)),
+      slide_text: { ...readSlideText(c?.slide_text), ...patch },
+    }
+    configRef.current = next   // so a save right after reads this, not last render's
+    setConfig(next)
+  }
+  const persistText = async () => {
+    if (!section) return
+    const slide_text = readSlideText(configRef.current?.slide_text)
+    const id = configRef.current?.id
+    if (id) {
+      const { error } = await supabase.from('bingo_award_configs').update({ slide_text }).eq('id', id)
+      if (error) alert(`Could not save: ${error.message}`)
+    } else {
+      const { data, error } = await supabase.from('bingo_award_configs')
+        .insert({ section_id: section.id, slide_text }).select().single()
+      if (error || !data) alert(`Could not save: ${error?.message ?? 'unknown'}`)
+      else setConfig(data)
+    }
+  }
+
+  const [uploadingMedia, setUploadingMedia] = useState(false)
+  const uploadMedia = async (slideId: string, file: File) => {
+    if (!section) return
+    const isVideo = file.type.startsWith('video/')
+    if (!isVideo && !file.type.startsWith('image/')) { alert('Please choose a picture, GIF or video.'); return }
+    if (file.size > 50 * 1024 * 1024) { alert(`${file.name} is too large (max 50 MB).`); return }
+    setUploadingMedia(true)
+    try {
+      const ext = file.name.split('.').pop() || (isVideo ? 'mp4' : 'png')
+      const path = `bingo-media/award-photos/${section.id}-media-${Date.now()}.${ext}`
+      const { error } = await supabase.storage.from('media').upload(path, file)
+      if (error) { alert(`Upload failed: ${error.message}`); return }
+      const url = supabase.storage.from('media').getPublicUrl(path).data.publicUrl
+      const media = { ...readSlideText(configRef.current?.slide_text).media }
+      media[slideId] = { url, type: isVideo ? 'video' : 'image', fit: media[slideId]?.fit }
+      patchText({ media })
+      await persistText()
+    } finally {
+      setUploadingMedia(false)
+    }
+  }
+  const updateMedia = (slideId: string, next: MediaSlide | null) => {
+    const media = { ...readSlideText(configRef.current?.slide_text).media }
+    if (next) media[slideId] = next
+    else delete media[slideId]
+    patchText({ media })
+    void persistText()
+  }
+  const setPhotoY = (teamId: string, y: number) => {
+    const photo_y = { ...readSlideText(configRef.current?.slide_text).photo_y, [teamId]: Math.min(100, Math.max(0, Math.round(y))) }
+    patchText({ photo_y })
+  }
+  const setPhotoFit = (teamId: string, fit: 'contain' | 'cover') => {
+    const photo_fit = { ...readSlideText(configRef.current?.slide_text).photo_fit, [teamId]: fit }
+    patchText({ photo_fit })
+    void persistText()
   }
 
   const adjustBonus = (teamId: string, delta: number) => {
@@ -273,6 +345,11 @@ function AwardShow({ sectionSlug }: { sectionSlug: string }) {
         return
       }
       if (typing) return
+      if (e.key === 'p' || e.key === 'P') {
+        e.preventDefault()
+        setShowPhotoPanel(p => !p)
+        return
+      }
       if (e.key === 'ArrowRight' || e.key === ' ' || e.key === 'Enter') {
         e.preventDefault()
         setSlideIdx(i => Math.min(totalSlides - 1, i + 1))
@@ -281,12 +358,13 @@ function AwardShow({ sectionSlug }: { sectionSlug: string }) {
         setSlideIdx(i => Math.max(0, i - 1))
       } else if (e.key === 'Escape') {
         if (showJudgePanel) setShowJudgePanel(false)
+        else if (showPhotoPanel) setShowPhotoPanel(false)
         else if (window.confirm('Leave the award show?')) navigate('/bingo-dash/slides/awards')
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [navigate, showJudgePanel, totalSlides, exportMode])
+  }, [navigate, showJudgePanel, showPhotoPanel, totalSlides, exportMode])
 
   useEffect(preloadPlaceArt, [])
 
@@ -319,8 +397,15 @@ function AwardShow({ sectionSlug }: { sectionSlug: string }) {
     .map(r => ranked[r - 1])
     .filter((x): x is RankedTeam => !!x)
 
+  // The team whose photo the P panel adjusts: only on a place slide that has one.
+  const photoTeam = isPlaceKind(current.kind) ? teamsForSlide[0]?.team : undefined
+  const photoTeamHasPhoto = !!photoTeam?.photo_url
+  const isMedia = current.kind === 'media'
+
   const isHsbcSlide = current.kind === 'main' || current.kind === 'closing' || current.kind === 'evaluation'
-  const slideStyle = isHsbcSlide
+  const slideStyle = isMedia
+    ? { background: '#000', fontFamily: `system-ui, -apple-system, 'Segoe UI', Arial, sans-serif` }
+    : isHsbcSlide
     ? {
         background: current.kind === 'main' || current.kind === 'evaluation'
           ? mainBackground(config?.main_bg)
@@ -345,16 +430,28 @@ function AwardShow({ sectionSlug }: { sectionSlug: string }) {
       }}
       style={slideStyle}
     >
-      <AwardSlideRenderer
-        key={safeSlideIdx}
-        slideIdx={safeSlideIdx}
-        descriptor={current}
-        teamsForSlide={teamsForSlide}
-        config={config}
-        teams={teams}
-        ranked={ranked}
-        text={text}
-      />
+      {isMedia ? (
+        <MediaSlideView
+          key={current.id}
+          slideId={current.id}
+          item={text.media?.[current.id]}
+          editable={!exportMode}
+          uploading={uploadingMedia}
+          onUpload={file => void uploadMedia(current.id, file)}
+          onChange={next => updateMedia(current.id, next)}
+        />
+      ) : (
+        <AwardSlideRenderer
+          key={safeSlideIdx}
+          slideIdx={safeSlideIdx}
+          descriptor={current}
+          teamsForSlide={teamsForSlide}
+          config={config}
+          teams={teams}
+          ranked={ranked}
+          text={text}
+        />
+      )}
 
       {!exportMode && <>
       {/* Top nav */}
@@ -366,7 +463,7 @@ function AwardShow({ sectionSlug }: { sectionSlug: string }) {
         >
           ← Awards Home
         </a>
-        <span className="hidden sm:inline">{section.name} · Slide {safeSlideIdx + 1} / {totalSlides}</span>
+        <span className="hidden sm:inline">{section.name} · Slide {safeSlideIdx + 1} / {totalSlides}{text.names?.[current.id] ? ` · ${text.names[current.id]}` : ''}</span>
         <button
           onClick={e => { e.stopPropagation(); toggleFullscreen() }}
           className="hover:text-white transition-colors"
@@ -475,6 +572,67 @@ function AwardShow({ sectionSlug }: { sectionSlug: string }) {
             )}
           </div>
         </div>
+      )}
+
+      {/* Photo position: toggle with P, only on a place slide that has a team photo */}
+      {photoTeam && photoTeamHasPhoto && (
+        showPhotoPanel ? (
+          <div
+            onClick={e => e.stopPropagation()}
+            className="absolute bottom-12 right-6 w-[300px] max-w-[90vw] rounded-xl bg-gray-950/95 border border-white/15 text-white z-50 shadow-2xl p-4"
+            style={{ fontFamily: 'system-ui, -apple-system, Segoe UI, sans-serif' }}
+          >
+            <div className="flex items-center justify-between mb-3">
+              <p className="text-xs text-amber-400 font-bold uppercase tracking-widest">Team photo</p>
+              <button onClick={() => setShowPhotoPanel(false)} className="w-6 h-6 rounded-full bg-white/10 hover:bg-white/20 leading-none" title="Close (P)">×</button>
+            </div>
+            {(() => {
+              const y = text.photo_y?.[photoTeam.id] ?? 50
+              const fit = text.photo_fit?.[photoTeam.id] ?? 'cover'
+              const nudge = (d: number) => { setPhotoY(photoTeam.id, y + d); void persistText() }
+              return (
+                <>
+                  <div className="flex items-center gap-2">
+                    <button onClick={() => nudge(-5)} className="w-9 h-9 rounded bg-white/10 hover:bg-white/20 font-bold" title="Move photo down">▼</button>
+                    <input
+                      type="range" min={0} max={100} value={y}
+                      disabled={fit === 'contain'}
+                      onChange={e => setPhotoY(photoTeam.id, Number(e.target.value))}
+                      onPointerUp={() => void persistText()}
+                      onKeyUp={() => void persistText()}
+                      className="flex-1 accent-amber-400 disabled:opacity-30"
+                    />
+                    <button onClick={() => nudge(5)} className="w-9 h-9 rounded bg-white/10 hover:bg-white/20 font-bold" title="Move photo up">▲</button>
+                  </div>
+                  <div className="flex justify-between text-[10px] text-white/40 mt-1 px-11">
+                    <span>shows top</span><span>shows bottom</span>
+                  </div>
+                  <div className="flex gap-2 mt-3">
+                    <button
+                      onClick={() => setPhotoFit(photoTeam.id, fit === 'contain' ? 'cover' : 'contain')}
+                      className={`flex-1 py-1.5 rounded text-xs font-bold ${fit === 'contain' ? 'bg-amber-400 text-black' : 'bg-white/10 hover:bg-white/20'}`}
+                    >
+                      {fit === 'contain' ? '✓ Whole photo' : 'Fit whole photo'}
+                    </button>
+                    <button
+                      onClick={() => { setPhotoY(photoTeam.id, 50); void persistText() }}
+                      className="px-3 py-1.5 rounded text-xs font-bold bg-white/10 hover:bg-white/20"
+                    >Reset</button>
+                  </div>
+                  <p className="text-[10px] text-white/40 mt-2">Slide the photo until the faces show · saved automatically</p>
+                </>
+              )
+            })()}
+          </div>
+        ) : (
+          <button
+            onClick={e => { e.stopPropagation(); setShowPhotoPanel(true) }}
+            className="absolute bottom-4 right-[8.5rem] z-40 text-[10px] text-white/40 hover:text-amber-300 uppercase tracking-[0.3em] font-bold transition-colors"
+            title="Move the team photo up or down (P)"
+          >
+            ↕ Photo (P)
+          </button>
+        )
       )}
 
       {/* Judge toggle button */}
@@ -635,7 +793,7 @@ function AwardSlideRenderer({
   }
   // The six places use the PlaceSlide design; `consolation` keeps the
   // medal-ring PrizeSlide, which still suits honorable mentions.
-  if (descriptor.kind !== 'consolation') {
+  if (isPlaceKind(descriptor.kind)) {
     return (
       <PlaceSlide
         slideIdx={slideIdx}
@@ -1536,6 +1694,9 @@ function PlaceSlide({
   const team = ranked?.team
   const photo = placePhoto(team)
   const logo = customLogo(readSlideText(config?.slide_text).logo)
+  // Per-team: a portrait photo in the landscape frame needs sliding to its faces.
+  const photoY = (team && readSlideText(config?.slide_text).photo_y?.[team.id]) ?? 50
+  const fit = (team && readSlideText(config?.slide_text).photo_fit?.[team.id]) ?? 'cover'
   const slogan = config?.award_slogan?.trim() || ''
   const art = placeArt(kind)
   // Hold the photo and values back until the artwork is in, so the slide
@@ -1554,11 +1715,19 @@ function PlaceSlide({
         />
 
         {photo ? (
-          <img
-            src={photo}
-            alt={team?.name ?? ''}
-            style={{ position: 'absolute', ...photoBox, objectFit: 'cover' }}
-          />
+          fit === 'contain' ? (
+            // Whole photo: shown uncropped, its own blurred copy filling the sides.
+            <div style={{ position: 'absolute', ...photoBox, overflow: 'hidden', background: '#000' }}>
+              <img src={photo} alt="" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', filter: 'blur(28px) brightness(0.7)', transform: 'scale(1.2)' }} />
+              <img src={photo} alt={team?.name ?? ''} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'contain' }} />
+            </div>
+          ) : (
+            <img
+              src={photo}
+              alt={team?.name ?? ''}
+              style={{ position: 'absolute', ...photoBox, objectFit: 'cover', objectPosition: `50% ${photoY}%` }}
+            />
+          )
         ) : logo && (
           // No team photo: the ceremony logo on the main slide's colour.
           <div
@@ -1583,6 +1752,111 @@ function PlaceSlide({
         )}
         {slogan && <SlotText slot={SLOTS.slogan} value={slogan} max={38} weight={800} />}
       </SlideCanvas>
+    </div>
+  )
+}
+
+// ── Media slide: a blank slide for any picture, GIF or video ─────────────
+function MediaSlideView({
+  slideId, item, editable, uploading, onUpload, onChange,
+}: {
+  slideId: string
+  item: MediaSlide | undefined
+  editable: boolean
+  uploading: boolean
+  onUpload: (file: File) => void
+  onChange: (next: MediaSlide | null) => void
+}) {
+  const fileRef = useRef<HTMLInputElement>(null)
+  const videoRef = useRef<HTMLVideoElement>(null)
+  const [muted, setMuted] = useState(false)
+  const [playing, setPlaying] = useState(true)
+  const fit = item?.fit ?? 'contain'
+
+  // Start with sound (the click / key that brought us here counts as a gesture);
+  // if the browser refuses, fall back to muted rather than not playing at all.
+  useEffect(() => {
+    const v = videoRef.current
+    if (!v) return
+    v.play().catch(() => { v.muted = true; setMuted(true); void v.play().catch(() => {}) })
+  }, [item?.url])
+
+  const stop = (e: React.SyntheticEvent) => e.stopPropagation()
+
+  return (
+    <div className="absolute inset-0 award-slide-enter" data-slide-id={slideId}>
+      {item?.type === 'video' ? (
+        <video
+          ref={videoRef}
+          src={item.url}
+          loop
+          playsInline
+          muted={muted}
+          onPlay={() => setPlaying(true)}
+          onPause={() => setPlaying(false)}
+          className="absolute inset-0 w-full h-full"
+          style={{ objectFit: fit }}
+        />
+      ) : item ? (
+        <img src={item.url} alt="" className="absolute inset-0 w-full h-full" style={{ objectFit: fit }} />
+      ) : editable ? (
+        <div className="absolute inset-0 flex flex-col items-center justify-center text-center gap-4 px-6">
+          <p className="text-white/80 text-3xl font-black tracking-wide">Blank slide</p>
+          <p className="text-white/40 text-sm">Upload a picture, GIF or video to show here</p>
+          <button
+            onClick={e => { stop(e); fileRef.current?.click() }}
+            disabled={uploading}
+            className="w-full max-w-2xl px-10 py-14 rounded-3xl border-2 border-dashed border-white/30 hover:border-amber-300 hover:bg-white/5 text-white font-black tracking-wide disabled:opacity-50 transition-colors"
+          >
+            <span className="block text-5xl mb-3">{uploading ? '⏳' : '🖼'}</span>
+            <span className="block text-xl">{uploading ? 'Uploading…' : 'Choose a file or drop it here'}</span>
+            <span className="block text-sm font-bold text-white/50 mt-1">Picture, GIF or video</span>
+          </button>
+        </div>
+      ) : null}
+
+      {editable && (
+        <>
+          <input
+            ref={fileRef}
+            type="file"
+            accept="image/*,video/*"
+            className="hidden"
+            onClick={stop}
+            onChange={e => {
+              const f = e.target.files?.[0]
+              e.target.value = ''
+              if (f) onUpload(f)
+            }}
+          />
+          {item && (
+            <div
+              onClick={stop}
+              className="absolute bottom-10 left-1/2 -translate-x-1/2 z-40 flex items-center gap-2 rounded-full bg-black/70 border border-white/15 px-3 py-1.5 text-[11px] font-bold uppercase tracking-widest text-white/80"
+            >
+              <button onClick={() => fileRef.current?.click()} disabled={uploading} className="px-2 py-1 hover:text-amber-300 disabled:opacity-50">
+                {uploading ? 'Uploading…' : '⬆ Replace'}
+              </button>
+              <button onClick={() => onChange({ ...item, fit: fit === 'contain' ? 'cover' : 'contain' })} className="px-2 py-1 hover:text-amber-300">
+                {fit === 'contain' ? '⤢ Fill screen' : '⤡ Fit whole'}
+              </button>
+              {item.type === 'video' && (
+                <>
+                  <button onClick={() => { const v = videoRef.current; if (v) (v.paused ? void v.play() : v.pause()) }} className="px-2 py-1 hover:text-amber-300">
+                    {playing ? '⏸ Pause' : '▶ Play'}
+                  </button>
+                  <button onClick={() => setMuted(m => !m)} className="px-2 py-1 hover:text-amber-300">
+                    {muted ? '🔇 Unmute' : '🔊 Mute'}
+                  </button>
+                </>
+              )}
+              <button onClick={() => { if (window.confirm('Remove this picture / video from the slide?')) onChange(null) }} className="px-2 py-1 hover:text-red-400">
+                ✕ Remove
+              </button>
+            </div>
+          )}
+        </>
+      )}
     </div>
   )
 }

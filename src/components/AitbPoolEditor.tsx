@@ -138,8 +138,8 @@ export function AitbPoolEditor({ poolKey, emoji, label }: { poolKey: string; emo
                 </button>
               )}
 
-              <label className="text-xs font-bold text-violet-600 hover:text-violet-800 cursor-pointer flex-shrink-0">
-                {item.photo_url ? 'Replace' : 'Add photo'}
+              <label className="text-xs font-bold text-violet-600 hover:text-violet-800 hover:bg-violet-50 cursor-pointer flex-shrink-0 rounded-lg border-2 border-dashed border-violet-300 px-3 py-2 text-center">
+                {item.photo_url ? 'Replace · drop here' : 'Add photo · drop here'}
                 <input type="file" accept="image/*" className="hidden"
                   onChange={e => { const f = e.target.files?.[0]; if (f) replacePhoto(item.id, f) }} />
               </label>
@@ -163,8 +163,8 @@ export function AitbPoolEditor({ poolKey, emoji, label }: { poolKey: string; emo
           onKeyDown={e => { if (e.key === 'Enter') addItem() }}
           placeholder={`Add a new ${label.toLowerCase()} option…`}
           className="flex-1 px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-violet-500" />
-        <label className="text-xs font-bold text-gray-500 hover:text-gray-700 cursor-pointer px-2 whitespace-nowrap">
-          {newFile ? `📎 ${newFile.name.slice(0, 16)}` : '📎 Photo (optional)'}
+        <label className="text-xs font-bold text-gray-500 hover:text-violet-700 hover:bg-violet-50 cursor-pointer px-3 py-2 whitespace-nowrap rounded-lg border-2 border-dashed border-gray-300 hover:border-violet-400">
+          {newFile ? `📎 ${newFile.name.slice(0, 16)}` : '📎 Photo (optional) · drop here'}
           <input ref={fileInputRef} type="file" accept="image/*" className="hidden"
             onChange={e => setNewFile(e.target.files?.[0] ?? null)} />
         </label>

@@ -3,6 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useBingoAuth } from '../hooks/useBingoAuth'
 import { useBoardReset } from '../hooks/useBoardReset'
+import { UploadBox } from '../components/UploadBox'
 import type { BingoSection, BingoTeam } from '../types/database'
 import {
   DEFAULT_PRIZE_COUNTS,
@@ -185,7 +186,6 @@ export function BingoDashAwardAdmin() {
   }
   const setLogo = (logo: string) => setDraft(d => ({ ...d, slide_text: { ...d.slide_text, logo } }))
 
-  const logoFileRef = useRef<HTMLInputElement>(null)
   const [uploadingLogo, setUploadingLogo] = useState(false)
   const uploadLogo = async (file: File) => {
     if (file.size > 5 * 1024 * 1024) { alert(`${file.name} too large (max 5 MB).`); return }
@@ -385,8 +385,14 @@ export function BingoDashAwardAdmin() {
       const restPhotos = { ...d.slide_photos }
       delete restPoints[id]
       delete restPhotos[id]
+      // A removed media slide's upload goes too, so a reused id starts blank.
+      const restMedia = { ...d.slide_text.media }
+      delete restMedia[id]
+      const restNames = { ...d.slide_text.names }
+      delete restNames[id]
       return {
         ...d,
+        slide_text: { ...d.slide_text, media: restMedia, names: restNames },
         slide_order: removeSlide(d.slide_order, id),
         slide_points: restPoints,
         slide_photos: restPhotos,
@@ -561,17 +567,6 @@ export function BingoDashAwardAdmin() {
             />
 
             <label className="block text-sm font-semibold text-gray-700 mb-1 mt-4">Logo (main slide)</label>
-            <input
-              ref={logoFileRef}
-              type="file"
-              accept="image/*"
-              className="hidden"
-              onChange={e => {
-                const file = e.target.files?.[0]
-                e.target.value = ''
-                if (file) void uploadLogo(file)
-              }}
-            />
             <div className="flex items-center gap-3 flex-wrap">
               <div className="w-14 h-14 rounded-full p-2 overflow-hidden flex items-center justify-center shrink-0" style={{ background: draft.slide_text.logo_bg || '#ffffff' }}>
                 {draft.slide_text.logo && draft.slide_text.logo !== 'none' && draft.slide_text.logo !== 'default'
@@ -586,13 +581,14 @@ export function BingoDashAwardAdmin() {
                   Remove logo
                 </button>
               )}
-              <button
-                onClick={() => logoFileRef.current?.click()}
-                disabled={uploadingLogo}
-                className="px-3 py-1.5 rounded-lg border border-gray-300 text-sm font-bold text-gray-600 hover:bg-gray-50 disabled:opacity-50"
-              >
-                {uploadingLogo ? 'Uploading…' : draft.slide_text.logo && draft.slide_text.logo !== 'none' && draft.slide_text.logo !== 'default' ? 'Replace logo' : 'Upload logo'}
-              </button>
+              <UploadBox
+                className="flex-1 min-w-[16rem]"
+                busy={uploadingLogo}
+                icon="🏷"
+                title={draft.slide_text.logo && draft.slide_text.logo !== 'none' && draft.slide_text.logo !== 'default' ? 'Replace logo: choose a file or drop it here' : 'Choose a logo or drop it here'}
+                hint="PNG, JPG or SVG"
+                onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; if (f) void uploadLogo(f) }}
+              />
               <label className="flex items-center gap-2 text-sm font-bold text-gray-600">
                 Logo background
                 <input
@@ -763,13 +759,13 @@ export function BingoDashAwardAdmin() {
                   </div>
                 </div>
               ))}
-              <button
-                onClick={() => pickQr(null)}
-                disabled={uploadingQr}
-                className="px-3 py-1.5 rounded-lg border border-gray-300 text-sm font-bold text-gray-600 hover:bg-gray-50 disabled:opacity-50"
-              >
-                {uploadingQr ? 'Uploading…' : evaluationQrs(draft.slide_text).length ? '+ Add another QR' : 'Upload QR'}
-              </button>
+              <UploadBox
+                busy={uploadingQr}
+                icon="▦"
+                title={evaluationQrs(draft.slide_text).length ? 'Add another QR: choose a file or drop it here' : 'Choose a QR image or drop it here'}
+                hint="Max 5 MB"
+                onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; qrTargetRef.current = null; if (f) void uploadQr(f) }}
+              />
             </div>
           </SlideTextCard>
           )}
@@ -863,6 +859,10 @@ export function BingoDashAwardAdmin() {
                           ? `${teams.length} team${teams.length === 1 ? '' : 's'} ranked · final totals`
                           : s.kind === 'evaluation'
                             ? [`${evaluationQrs(draft.slide_text).length || 'no'} QR`, evaluationName(draft.slide_text)].filter(Boolean).join(' · ')
+                          : s.kind === 'media'
+                            ? (draft.slide_text.media?.[s.id]
+                                ? `${draft.slide_text.media[s.id].type === 'video' ? 'Video' : 'Picture / GIF'} uploaded`
+                                : 'Empty · upload it while presenting')
                           : s.kind === 'closing'
                             ? [draft.slide_text.closing?.title || draft.main_title, draft.slide_text.closing?.pretitle || SLIDE_TEXT_DEFAULTS.closing.pretitle].filter(Boolean).join(' · ')
                             : s.kind === 'consolation_group'
@@ -894,9 +894,22 @@ export function BingoDashAwardAdmin() {
                       {emoji}
                     </span>
                     <div className="flex-1 min-w-0">
-                      <p className="font-bold text-sm truncate">
-                        {label}{s.rank != null && s.rank > 1 ? ` · #${s.rank}` : ''}
-                      </p>
+                      <input
+                        value={draft.slide_text.names?.[s.id] ?? ''}
+                        placeholder={`${label}${s.rank != null && s.rank > 1 ? ` · #${s.rank}` : ''}`}
+                        onChange={e => {
+                          const v = e.target.value
+                          setDraft(d => {
+                            const names = { ...d.slide_text.names }
+                            if (v) names[s.id] = v; else delete names[s.id]
+                            return { ...d, slide_text: { ...d.slide_text, names } }
+                          })
+                        }}
+                        // Typing here must not start a row drag.
+                        onPointerDown={e => e.stopPropagation()}
+                        title="Click to rename this slide"
+                        className="w-full font-bold text-sm bg-transparent rounded px-1 -mx-1 border border-transparent hover:border-gray-300 focus:border-amber-400 focus:bg-white focus:outline-none truncate placeholder:text-gray-900 cursor-text"
+                      />
                       <p className="text-[11px] text-gray-500 truncate">{subtitle}</p>
                     </div>
 
@@ -1006,6 +1019,13 @@ export function BingoDashAwardAdmin() {
                 onClick={() => doAddSlide('evaluation')}
                 onEdit={() => toggleEditor('evaluation')}
                 editing={openEditors.has('evaluation')}
+              />
+              <AddButton
+                emoji="🖼"
+                label="+ Blank / Media"
+                sublabel={`Currently ${slides.filter(s => s.kind === 'media').length} · picture, GIF or video`}
+                accent="#fbcfe8"
+                onClick={() => doAddSlide('media')}
               />
               {(['first', 'second', 'third', 'fourth', 'fifth', 'sixth', 'consolation_group', 'consolation'] as PrizeKind[]).map(kind => {
                 const sublabel = kind === 'consolation_group'

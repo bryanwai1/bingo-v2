@@ -22,7 +22,9 @@ const NAV: { id: AdminView; icon: string; label: string; hint: string }[] = [
   { id: 'settings',    icon: '⚙️',  label: 'Settings',    hint: 'Board options' },
 ]
 
-export function AdminSidebar({ view, onView, email, isOwner, onSignOut, pending = 0, open = false, onClose, downloadOnly = false }: {
+export function AdminSidebar({ view, onView, email, isOwner, onSignOut, pending = 0, open = false, onClose, downloadOnly = false, progressSectionId }: {
+  /** The board whose public Progress page the link opens. */
+  progressSectionId?: string | null
   view: AdminView
   onView: (v: AdminView) => void
   /** Editor accounts see the Approvals tab only — nothing else is theirs to touch. */
@@ -48,6 +50,7 @@ export function AdminSidebar({ view, onView, email, isOwner, onSignOut, pending 
   // they came for, and the drawer covers it.
   const pick = (v: AdminView) => { onView(v); onClose?.() }
   const nav = downloadOnly ? NAV.filter(n => n.id === 'submissions') : NAV
+  const progressUrl = progressSectionId ? `/bingo-dash/progress/${progressSectionId}` : null
 
   return (
     <>
@@ -111,6 +114,23 @@ export function AdminSidebar({ view, onView, email, isOwner, onSignOut, pending 
             </button>
           )
         })}
+        {!downloadOnly && progressUrl && (
+          <div className="flex items-stretch gap-1">
+            <a
+              href={progressUrl}
+              target="_blank"
+              rel="noopener"
+              className="flex-1 min-w-0 flex items-center gap-3 px-3 py-2.5 rounded-xl text-left transition-all a-text-2 hover:a-surface-2"
+              title="Public live page for clients and committee. Opens in a new tab."
+            >
+              <span className="text-lg leading-none w-5 text-center flex-shrink-0">📊</span>
+              <span className="min-w-0 flex-1">
+                <span className="block text-sm font-bold leading-tight">Progress</span>
+                <span className="block text-[10px] leading-snug a-text-3">This board, public ↗</span>
+              </span>
+            </a>
+          </div>
+        )}
       </nav>
 
       <div className="px-3 py-3 border-t a-border space-y-1">

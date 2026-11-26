@@ -32,11 +32,14 @@ const pctColor = (pct: number) =>
  * `elapsedMs` is the live clock while the card is open, or the finished time
  * once `completed` — the bar then stops and shows what was earned.
  */
-export function CardBonusTimer({ elapsedMs, window, basePoints, completed, waiting = false, onStart }: {
+export function CardBonusTimer({ elapsedMs, window, basePoints, completed, submitted = false, waiting = false, onStart }: {
   elapsedMs: number
   window: BonusWindow
   basePoints: number
   completed: boolean
+  /** Everything has been sent but a marshal has not approved yet: the clock
+   *  is stopped at the moment of sending, and the points are not final. */
+  submitted?: boolean
   /** The clock is held at 0 and nothing animates. 'player': an observer before
    *  the player has pressed Start Challenge. 'marshal': a station card waiting
    *  for the station marshal's Start. It starts on its own once that happens. */
@@ -65,12 +68,12 @@ export function CardBonusTimer({ elapsedMs, window, basePoints, completed, waiti
     <div className="rounded-2xl px-4 py-3 mb-4" style={{ background: 'rgba(255,255,255,0.05)', border: '2px solid rgba(255,255,255,0.1)' }}>
       <div className="flex items-center justify-between mb-2">
         <div>
-          <div className="text-gray-400 text-xs font-bold uppercase tracking-wider">{completed ? 'Finished in' : waiting === 'player' ? '⏱ Waiting for your player' : waiting === 'marshal' ? '⏱ Station timer' : '⏱ Your team timer'}</div>
+          <div className="text-gray-400 text-xs font-bold uppercase tracking-wider">{completed ? 'Finished in' : submitted ? '✅ Submitted in' : waiting === 'player' ? '⏱ Waiting for your player' : waiting === 'marshal' ? '⏱ Station timer' : '⏱ Your team timer'}</div>
           <div className="font-black text-3xl tabular-nums text-white">{fmtElapsed(elapsedMs)}</div>
         </div>
         <div className="text-right">
-          <div className="text-gray-400 text-xs font-bold uppercase tracking-wider">{completed ? 'Points earned' : 'Finish NOW for'}</div>
-          <div className="font-black text-2xl transition-colors duration-700" style={{ color: completed ? '#34d399' : color }}>
+          <div className="text-gray-400 text-xs font-bold uppercase tracking-wider">{completed ? 'Points earned' : submitted ? 'You will earn' : 'Finish NOW for'}</div>
+          <div className="font-black text-2xl transition-colors duration-700" style={{ color: completed || submitted ? '#34d399' : color }}>
             {fmtPts(shown)} pts
           </div>
           <div className="text-xs font-black" style={{ color: timeUp ? '#9ca3af' : color }}>
@@ -86,7 +89,7 @@ export function CardBonusTimer({ elapsedMs, window, basePoints, completed, waiti
         ))}
         <div className="absolute left-0 top-0 bottom-0 rounded-full transition-all duration-1000 ease-linear"
           style={{ width: `${frac * 100}%`, background: `linear-gradient(90deg, ${color}55, ${color})`, minWidth: 10 }} />
-        {!completed && !timeUp && !waiting && (
+        {!completed && !submitted && !timeUp && !waiting && (
           <div className="absolute top-1/2" style={{ left: `${frac * 100}%`, color }}>
             <div className="aitb-tip absolute -translate-x-1/2 -translate-y-1/2 rounded-full"
               style={{ width: 14, height: 14, background: `radial-gradient(circle, #fff 15%, ${color} 60%)` }} />
@@ -115,7 +118,9 @@ export function CardBonusTimer({ elapsedMs, window, basePoints, completed, waiti
 
       {!completed && (
         <div className="text-gray-500 text-xs font-bold mt-1">
-          {waiting === 'player'
+          {submitted
+            ? '✅ Timer stopped — your time is locked in. Points are confirmed once the marshal approves.'
+            : waiting === 'player'
             ? '⏱ The timer starts when your player presses Start Challenge.'
             : waiting === 'marshal'
             ? '⏱ The timer starts when the station marshal presses Start.'

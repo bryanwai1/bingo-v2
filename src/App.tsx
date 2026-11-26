@@ -4,6 +4,7 @@ import { BingoAuthProvider } from './hooks/useBingoAuth'
 import { RequireBingoAdmin } from './components/RequireBingoAdmin'
 import { useAutoTranslate } from './lib/autoTranslate'
 import { ObserverFrame } from './components/ObserverFrame'
+import { PresenceBeacon } from './components/PresenceBeacon'
 
 const InstructionsSlide     = lazy(() => import('./pages/InstructionsSlide').then(m => ({ default: m.InstructionsSlide })))
 const InstructionsHub       = lazy(() => import('./pages/InstructionsHub').then(m => ({ default: m.InstructionsHub })))
@@ -31,6 +32,8 @@ const BingoDashAwardSlides  = lazy(() => import('./pages/BingoDashAwardSlides').
 const BingoDashAwardAdmin   = lazy(() => import('./pages/BingoDashAwardAdmin').then(m => ({ default: m.BingoDashAwardAdmin })))
 const BingoDashBriefingSlides = lazy(() => import('./pages/BingoDashBriefingSlides').then(m => ({ default: m.BingoDashBriefingSlides })))
 const BingoDashTeamMembers  = lazy(() => import('./pages/BingoDashTeamMembers').then(m => ({ default: m.BingoDashTeamMembers })))
+const BingoDashLocation     = lazy(() => import('./pages/BingoDashLocation').then(m => ({ default: m.BingoDashLocation })))
+const BingoDashProgress     = lazy(() => import('./pages/BingoDashProgress').then(m => ({ default: m.BingoDashProgress })))
 const BingoDashAllTeamsMembers = lazy(() => import('./pages/BingoDashAllTeamsMembers').then(m => ({ default: m.BingoDashAllTeamsMembers })))
 const BingoDashBoardPreview = lazy(() => import('./pages/BingoDashBoardPreview').then(m => ({ default: m.BingoDashBoardPreview })))
 const BingoDashAccounts     = lazy(() => import('./pages/BingoDashAccounts').then(m => ({ default: m.BingoDashAccounts })))
@@ -45,6 +48,7 @@ export default function App() {
   return (
     <BrowserRouter>
       <ObserverFrame />
+      <PresenceBeacon />
       <Suspense fallback={null}>
         <Routes>
           <Route path="/" element={<BingoDashHub />} />
@@ -91,6 +95,8 @@ export default function App() {
           <Route path="/bingo-dash/sample" element={<BingoDashSample />} />
           <Route path="/bingo-dash/colmar-intro" element={<BingoDashColmarIntro />} />
           <Route path="/bingo-dash/team/:teamId/members" element={<BingoDashTeamMembers />} />
+          <Route path="/bingo-dash/progress/:sectionId" element={<BingoDashProgress />} />
+          <Route path="/bingo-dash/location/:sectionId" element={<BingoDashLocation />} />
           <Route path="/bingo-dash/teams/:sectionSlug" element={<BingoDashAllTeamsMembers />} />
 
           {/* Anything else → the hub */}

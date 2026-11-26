@@ -41,8 +41,8 @@ export function BingoDashSlidesHub() {
     <div className="min-h-screen bg-gray-950 flex flex-col items-center justify-center relative overflow-x-hidden py-12">
       <ParticleBackground />
 
-      <a href="/" className="absolute top-6 left-6 z-20 text-xs text-gray-400 hover:text-white transition-colors uppercase tracking-widest font-semibold">
-        ← Game Hub
+      <a href="/bingo-dash/admin" className="absolute top-6 left-6 z-20 text-xs text-gray-400 hover:text-white transition-colors uppercase tracking-widest font-semibold">
+        ← Admin
       </a>
 
       <div className="relative z-10 text-center mb-14">

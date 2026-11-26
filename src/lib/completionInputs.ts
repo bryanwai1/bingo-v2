@@ -128,6 +128,29 @@ export function isComplete(inputs: CompletionInputs, done: InputProgress): boole
   return kinds.some(k => done[k])
 }
 
+/**
+ * When the team finished SENDING a card: the moment, walking their submissions
+ * oldest first, that every compulsory input had been sent (approved or still
+ * waiting for a marshal - a rejected one does not count). The bonus timer stops
+ * here, not at approval, so a slow marshal never costs a team points.
+ *
+ * `sentAt` is the earliest time each kind was sent (ms); use 0 for an input
+ * that was satisfied without a submission (an accepted typed answer).
+ * Null while the card is not yet fully sent.
+ */
+export function submittedAt(inputs: CompletionInputs, sentAt: InputTimes): number | null {
+  const times = (Object.entries(sentAt) as [InputKind, number][])
+    .filter(([k, t]) => inputs[k] && Number.isFinite(t))
+    .sort((a, b) => a[1] - b[1])
+  const done: InputProgress = {}
+  for (const [kind, t] of times) {
+    done[kind] = true
+    if (isComplete(inputs, done)) return t
+  }
+  return null
+}
+export type InputTimes = Partial<Record<InputKind, number>>
+
 /** What is still outstanding, for a one-line nudge on the card. */
 export function missingLabels(inputs: CompletionInputs, done: InputProgress): string[] {
   const kinds = inputKinds(inputs)

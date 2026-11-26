@@ -8,7 +8,7 @@ import { useBingoDashTeam } from '../hooks/useBingoDashTeam'
 import { useBingoTaskPages } from '../hooks/useBingoTaskPages'
 import {
   fileAccept, fileEmoji, fileHeading, fileNoun, inputKinds, isComplete, missingLabels,
-  effectiveInputs, usesInputs, hasOwnMechanism, isCompulsory, type InputKind,
+  effectiveInputs, usesInputs, hasOwnMechanism, isCompulsory, submittedAt, type InputKind, type InputTimes,
 } from '../lib/completionInputs'
 import { useBingoTaskPhotos } from '../hooks/useBingoTaskPhotos'
 import { useBingoScans } from '../hooks/useBingoScans'
@@ -125,11 +125,13 @@ export function BingoDashParticipant() {
 
   const [task, setTask] = useState<BingoTask | null>(null)
   const [showSplash, setShowSplash] = useState(!isSnakeLadder)
-  const [scanRecord, setScanRecord] = useState<{ id: string; completed: boolean; answerOk: boolean; words: string[]; stepsDone: number[]; scannedAt: string; timerStartedAt: string | null; completedAt: string | null } | null>(null)
+  const [scanRecord, setScanRecord] = useState<{ id: string; completed: boolean; answerOk: boolean; words: string[]; stepsDone: number[]; scannedAt: string; timerStartedAt: string | null; completedAt: string | null; overrideSecs: number | null } | null>(null)
   // The board's default bonus window, for cards that do not set their own.
   const [bonusDefaults, setBonusDefaults] = useState<BonusDefaults | null>(null)
   // Elapsed time at the last tick, so the timer can freeze on completion.
   const lastElapsed = useRef(0)
+  /** When each input of this card was first sent; see submittedAt(). */
+  const [sentTimes, setSentTimes] = useState<InputTimes>({})
   // Which of this card's inputs the team has already satisfied. Files count
   // once a marshal has approved them, which is why this is read back from the
   // submissions rather than from what was sent.
@@ -431,7 +433,7 @@ export function BingoDashParticipant() {
         { event: 'UPDATE', schema: 'public', table: 'bingo_scans', filter: `id=eq.${scanRecord.id}` },
         ({ new: updated }) => {
           const row = updated as BingoScan
-          setScanRecord(prev => (prev ? { ...prev, completed: row.completed, words: row.words ?? [], stepsDone: row.steps_done ?? [] } : prev))
+          setScanRecord(prev => (prev ? { ...prev, completed: row.completed, completedAt: row.completed_at ?? null, overrideSecs: row.time_override_seconds ?? null, words: row.words ?? [], stepsDone: row.steps_done ?? [] } : prev))
         }
       )
       .subscribe()
@@ -561,6 +563,7 @@ export function BingoDashParticipant() {
       id: scan.id, completed: scan.completed, answerOk: scan.answer_ok ?? false,
       words: scan.words ?? [], stepsDone: scan.steps_done ?? [], scannedAt: scan.scanned_at,
       timerStartedAt: scan.timer_started_at ?? null, completedAt: scan.completed_at ?? null,
+      overrideSecs: scan.time_override_seconds ?? null,
     })
   }, [])
 
@@ -677,6 +680,17 @@ export function BingoDashParticipant() {
           const rows = data ?? []
           const kindOf = (m: string | null | undefined) =>
             (m === 'video' || m === 'link' || m === 'versus' || m === 'text') ? m : 'photo' as const
+          // When each kind was first SENT (pending or approved, not rejected):
+          // the bonus timer stops there rather than waiting for the marshal.
+          const sent: InputTimes = {}
+          for (const r of rows) {
+            if (r.status === 'rejected') continue
+            const m = kindOf(r.media_type)
+            const k: InputKind = m === 'text' ? 'answer' : m
+            const t = Date.parse(r.created_at)
+            if (Number.isFinite(t) && (sent[k] === undefined || t < sent[k]!)) sent[k] = t
+          }
+          setSentTimes(sent)
           const approved = rows.filter(r => r.status === 'approved')
           setApprovedKinds({
             photo: approved.some(r => kindOf(r.media_type) === 'photo'),
@@ -1263,8 +1277,14 @@ export function BingoDashParticipant() {
           const opened = new Date((task.is_station ? scanRecord.timerStartedAt : null) ?? scanRecord.scannedAt).getTime()
           // Board pauses are taken off, so the clock stands still while the
           // admin has the board countdown paused.
-          if (!scanRecord.completed) lastElapsed.current = activeElapsedMs(opened, now, bonusDefaults)
+          // Everything the card needs has been sent but a marshal has not
+          // approved yet: the clock stops at the moment of sending.
+          const sentAt = scanRecord.completed ? null
+            : submittedAt(inputs, scanRecord.answerOk ? { ...sentTimes, answer: 0 } : sentTimes)
+          if (!scanRecord.completed) lastElapsed.current = activeElapsedMs(opened, sentAt ?? now, bonusDefaults)
+          // An admin's corrected time wins, so the phone matches the board.
           const elapsed = !scanRecord.completed ? lastElapsed.current
+            : scanRecord.overrideSecs != null ? scanRecord.overrideSecs * 1000
             : scanRecord.completedAt ? activeElapsedMs(opened, Date.parse(scanRecord.completedAt), bonusDefaults) : lastElapsed.current
           return (
             <CardBonusTimer
@@ -1272,6 +1292,7 @@ export function BingoDashParticipant() {
               window={resolveBonusWindow(task, bonusDefaults)}
               basePoints={task.points ?? 0}
               completed={scanRecord.completed}
+              submitted={sentAt !== null}
             />
           )
         })()}

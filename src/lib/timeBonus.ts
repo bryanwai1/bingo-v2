@@ -130,11 +130,12 @@ export function completionScan(
     ?? done.find(s => !s.board_card_id && s.task_id === taskId)
 }
 
-/** Elapsed ms between opening and completing, or null when either time is unknown. */
+/** Elapsed ms between opening and completing, or null when either time is unknown. An admin's corrected time wins. */
 export function scanElapsedMs(
-  scan: Pick<BingoScan, 'scanned_at' | 'completed_at'> | undefined,
+  scan: Pick<BingoScan, 'scanned_at' | 'completed_at' | 'time_override_seconds'> | undefined,
   board?: Pick<BonusDefaults, 'card_pauses'> | null,
 ): number | null {
+  if (scan?.time_override_seconds != null) return scan.time_override_seconds * 1000
   if (!scan?.scanned_at || !scan.completed_at) return null
   const from = Date.parse(scan.scanned_at)
   const to = Date.parse(scan.completed_at)
@@ -155,4 +156,14 @@ export function boxPoints(
   const elapsed = scanElapsedMs(completionScan(teamScans, task.placement_id, task.id), board)
   if (elapsed === null) return base
   return bonusPoints(base, elapsed, resolveBonusWindow(task, board))
+}
+
+/** "4:30" or "270" (seconds) to seconds; null when it is not a time. */
+export function parseTime(text: string): number | null {
+  const m = /^\s*(?:(\d+):)?(\d+)\s*$/.exec(text)
+  if (!m) return null
+  const mins = m[1] === undefined ? 0 : Number(m[1])
+  const secs = Number(m[2])
+  if (m[1] !== undefined && secs > 59) return null
+  return mins * 60 + secs
 }

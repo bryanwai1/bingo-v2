@@ -106,6 +106,10 @@ export interface BingoSection extends BoardTimer {
   scoreboard_theme?: string | null
   /** false hides the scoreboard from players' phones; missing/null means shown. See supabase/core-tables/20261120_player_scoreboard.sql */
   player_scoreboard_enabled?: boolean | null
+  /** Outdoor events: players share their position and the live map shows. See supabase/media-photos/049_gps_enabled.sql */
+  gps_enabled?: boolean | null
+  /** Who shares when gps_enabled: everyone, players only or observers only. See 050_gps_who.sql */
+  gps_who?: 'both' | 'player' | 'observer' | null
   /** default | grab — see src/lib/playerThemes.ts */
   player_theme?: string | null
   id: string
@@ -370,6 +374,8 @@ export interface BingoScan {
    *  The answer used to complete the tile outright, so it needed nowhere to
    *  live; alongside other inputs it does. */
   answer_ok?: boolean
+  /** Admin correction: the card's time, in seconds, replacing opened-to-completed. See 051_time_adjustments.sql */
+  time_override_seconds?: number | null
 }
 
 // A head-to-head duel on a contest card. The challenger scans the defender's QR

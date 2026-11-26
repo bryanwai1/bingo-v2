@@ -5,6 +5,7 @@
 import { useRef, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { removeMediaIfUnused } from '../lib/mediaCleanup'
+import { UploadBox } from './UploadBox'
 import { useTaskSamples, type TaskSample } from '../hooks/useTaskSamples'
 
 const MAX_IMAGE = 5 * 1024 * 1024
@@ -102,16 +103,19 @@ export function TaskSampleEditor({ taskId }: { taskId: string }) {
           >
             + Add Link
           </button>
-          <button
-            onClick={() => fileRef.current?.click()}
-            disabled={uploading}
-            className="px-4 py-2 bg-violet-600 text-white rounded-lg hover:bg-violet-700 text-sm transition-colors disabled:opacity-50"
-          >
-            {uploading ? 'Uploading…' : '+ Add Sample'}
-          </button>
         </div>
-        <input ref={fileRef} type="file" accept="image/*,video/*,.html,.htm,text/html" multiple className="hidden" onChange={handleUpload} />
       </div>
+
+      <UploadBox
+        className="mb-4"
+        inputRef={fileRef}
+        multiple
+        busy={uploading}
+        accept="image/*,video/*,.html,.htm,text/html"
+        icon="🎞"
+        hint="Photos, videos or an .html page"
+        onChange={handleUpload}
+      />
 
       {linkOpen && (
         <div className="mb-4 p-4 border border-violet-200 bg-violet-50/50 rounded-xl flex flex-col gap-2">
