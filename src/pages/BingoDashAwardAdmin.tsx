@@ -20,6 +20,7 @@ import {
   resetSlideOrder,
   SLIDE_TEXT_DEFAULTS,
   type SlideText,
+  type MediaSlide,
   type SlideTextBlock,
   type AwardSlideKind,
   type AwardSlideId,
@@ -199,6 +200,29 @@ export function BingoDashAwardAdmin() {
       setLogo(supabase.storage.from('media').getPublicUrl(path).data.publicUrl)
     } finally {
       setUploadingLogo(false)
+    }
+  }
+
+  // Picture / GIF / video for a Blank / Media slide, set here before the show.
+  const [uploadingMedia, setUploadingMedia] = useState<string | null>(null)
+  const setMedia = (slideId: string, next: MediaSlide | null) => setDraft(d => {
+    const media = { ...d.slide_text.media }
+    if (next) media[slideId] = next; else delete media[slideId]
+    return { ...d, slide_text: { ...d.slide_text, media } }
+  })
+  const uploadMedia = async (slideId: string, file: File) => {
+    const isVideo = file.type.startsWith('video/')
+    if (!isVideo && !file.type.startsWith('image/')) { alert('Please choose a picture, GIF or video.'); return }
+    if (file.size > 50 * 1024 * 1024) { alert(`${file.name} is too large (max 50 MB).`); return }
+    setUploadingMedia(slideId)
+    try {
+      const ext = file.name.split('.').pop() || (isVideo ? 'mp4' : 'png')
+      const path = `bingo-media/award-photos/${section?.id ?? 'board'}-media-${Date.now()}.${ext}`
+      const { error } = await supabase.storage.from('media').upload(path, file)
+      if (error) { alert(`Upload failed: ${error.message}`); return }
+      setMedia(slideId, { url: supabase.storage.from('media').getPublicUrl(path).data.publicUrl, type: isVideo ? 'video' : 'image', fit: draft.slide_text.media?.[slideId]?.fit })
+    } finally {
+      setUploadingMedia(null)
     }
   }
 
@@ -801,6 +825,58 @@ export function BingoDashAwardAdmin() {
           </SlideTextCard>
           )}
 
+          {openEditors.has('media') && (
+          <section id="editor-media" className="bg-white rounded-2xl border border-gray-200 p-6">
+            <h2 className="font-black text-gray-900 mb-1">Blank / Media slides</h2>
+            <p className="text-xs text-gray-400 mb-3">Upload a picture, GIF or video for each blank slide and choose how it fits. It is ready before you present.</p>
+            {slides.filter(s => s.kind === 'media').length === 0 && <p className="text-sm text-gray-400 italic">No blank slides yet. Use “+ Blank / Media” to add one.</p>}
+            <div className="space-y-4">
+              {slides.map((s, i) => {
+                if (s.kind !== 'media') return null
+                const m = draft.slide_text.media?.[s.id]
+                const fit = m?.fit ?? 'contain'
+                return (
+                  <div key={s.id} className="rounded-xl border border-gray-200 p-3">
+                    <p className="font-bold text-sm text-gray-800 mb-2">{draft.slide_text.names?.[s.id] || `Blank slide · #${i + 1}`}</p>
+                    {m && (
+                      <div className="w-full aspect-video rounded-lg bg-black overflow-hidden mb-2">
+                        {m.type === 'video'
+                          ? <video src={m.url} muted className="w-full h-full" style={{ objectFit: fit }} />
+                          : <img src={m.url} alt="" className="w-full h-full" style={{ objectFit: fit }} />}
+                      </div>
+                    )}
+                    <UploadBox
+                      accept="image/*,video/*"
+                      size="sm"
+                      busy={uploadingMedia === s.id}
+                      icon="🖼"
+                      title={m ? 'Replace: choose a file or drop it here' : 'Choose a picture, GIF or video or drop it here'}
+                      hint="Max 50 MB"
+                      onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; if (f) void uploadMedia(s.id, f) }}
+                    />
+                    {m && (
+                      <div className="flex gap-2 mt-2">
+                        <button
+                          onClick={() => setMedia(s.id, { ...m, fit: fit === 'contain' ? 'cover' : 'contain' })}
+                          className="min-h-[44px] px-3 rounded-lg border border-gray-300 text-sm font-bold text-gray-600 hover:bg-gray-50"
+                        >
+                          {fit === 'contain' ? 'Fill screen' : 'Fit whole'}
+                        </button>
+                        <button
+                          onClick={() => { if (window.confirm('Remove this picture / video from the slide?')) setMedia(s.id, null) }}
+                          className="min-h-[44px] px-3 rounded-lg border border-gray-300 text-sm font-bold text-gray-600 hover:bg-red-50 hover:text-red-600"
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          </section>
+          )}
+
           <section className="bg-white rounded-2xl border border-gray-200 p-6">
             <h2 className="font-black text-gray-900 mb-1">Total after bonus</h2>
             <p className="text-xs text-gray-400 mb-3">
@@ -862,7 +938,7 @@ export function BingoDashAwardAdmin() {
                           : s.kind === 'media'
                             ? (draft.slide_text.media?.[s.id]
                                 ? `${draft.slide_text.media[s.id].type === 'video' ? 'Video' : 'Picture / GIF'} uploaded`
-                                : 'Empty · upload it while presenting')
+                                : 'Empty · tap Edit to add a picture or video')
                           : s.kind === 'closing'
                             ? [draft.slide_text.closing?.title || draft.main_title, draft.slide_text.closing?.pretitle || SLIDE_TEXT_DEFAULTS.closing.pretitle].filter(Boolean).join(' · ')
                             : s.kind === 'consolation_group'
@@ -929,6 +1005,14 @@ export function BingoDashAwardAdmin() {
                         title="Move down"
                       >▼</button>
                     </div>
+                    {s.kind === 'media' && (
+                      <button
+                        onClick={() => toggleEditor('media')}
+                        onPointerDown={e => e.stopPropagation()}
+                        className="min-h-[44px] sm:min-h-0 sm:h-7 px-2 rounded bg-white border border-gray-200 hover:bg-gray-100 text-xs font-bold text-gray-600 shrink-0"
+                        title="Upload and set up this picture or video"
+                      >Edit</button>
+                    )}
                     <button
                       onClick={() => doRemoveSlide(s.id)}
                       className="w-7 h-7 rounded bg-white border border-gray-200 hover:bg-red-50 hover:border-red-300 hover:text-red-600 text-xs font-bold text-gray-500 flex items-center justify-center shrink-0"
@@ -1026,6 +1110,8 @@ export function BingoDashAwardAdmin() {
                 sublabel={`Currently ${slides.filter(s => s.kind === 'media').length} · picture, GIF or video`}
                 accent="#fbcfe8"
                 onClick={() => doAddSlide('media')}
+                onEdit={() => toggleEditor('media')}
+                editing={openEditors.has('media')}
               />
               {(['first', 'second', 'third', 'fourth', 'fifth', 'sixth', 'consolation_group', 'consolation'] as PrizeKind[]).map(kind => {
                 const sublabel = kind === 'consolation_group'
