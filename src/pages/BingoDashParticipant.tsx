@@ -13,7 +13,7 @@ import {
 import { useBingoTaskPhotos } from '../hooks/useBingoTaskPhotos'
 import { useBingoScans } from '../hooks/useBingoScans'
 import { useTaskLinks } from '../hooks/useTaskLinks'
-import { TaskLinkButtons, type LinkItem } from '../components/TaskLinkButtons'
+import { TaskLinkButtons } from '../components/TaskLinkButtons'
 import { InstructionPage } from '../components/InstructionPage'
 import { PageNavigator } from '../components/PageNavigator'
 import { SwipeablePages } from '../components/SwipeablePages'
@@ -1446,20 +1446,6 @@ export function BingoDashParticipant() {
 
         <ChainTrail hex={task.hex_code} steps={trail} currentId={task.id} onOpen={id => navigate(`/bingo-dash/task/${id}`)} />
 
-        {/* The hand-off to the next card sits under the whole trail, so the
-            team reads where they are first and the way forward last. */}
-        {(() => {
-          const submitted = !!scanRecord?.completed || photoSubmitted || photosSent > 0 || linkSent
-          if (!chain.next || chainLocked || !submitted) return null
-          const nextItem: LinkItem = { id: 'chain-next', label: chain.next.title, url: '', to: `/bingo-dash/task/${chain.next.id}`,
-            icon: '🎬', sub: scanRecord?.completed ? 'Unlocked - your next card' : 'Next card - opens once approved' }
-          return (
-            <div className="mt-4 animate-slide-up">
-              <TaskLinkButtons links={[nextItem]} hexCode={task.hex_code} heading="Next card" />
-            </div>
-          )
-        })()}
-
         {/* Observer notice */}
         {isObserver && (
           <div className="mt-8 p-4 rounded-2xl border-2 border-blue-400/40 bg-blue-400/10 text-center">
@@ -1919,7 +1905,7 @@ export function BingoDashParticipant() {
                   })()}
                   <p className="text-white/50 text-sm text-center mb-5">
                     {task.photo_multiple
-                      ? `Send as many ${fileNoun(inputs, true)} as the challenge needs — a marshal reviews each one.`
+                      ? `Add all your ${fileNoun(inputs, true)} first, then press Submit once. You can't add more after sending.`
                       : 'A marshal will review and approve your submission.'}
                   </p>
                   {photoSubmitted && staged.length === 0 && (
@@ -1936,7 +1922,7 @@ export function BingoDashParticipant() {
 
                   {/* Nothing leaves the phone until Submit, so a bad shot is
                       just removed from the tray and retaken. */}
-                  {(!photoSubmitted || task.photo_multiple) && (
+                  {!photoSubmitted && (
                     <>
                       <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                         {staged.map(item => (

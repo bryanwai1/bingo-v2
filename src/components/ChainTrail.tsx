@@ -55,11 +55,13 @@ export function ChainTrail({ steps, currentId, onOpen, hex = '#f59e0b' }: {
           )
 
           // The next card to do: the only tappable one.
+          // After the card being viewed it is the card this one just unlocked; before it, it is what is still owed.
+          const ahead = i > at
           if (i === next) return (
             <li key={s.id}>
               <button
                 onClick={() => onOpen(s.id)}
-                aria-label={`${s.title}: complete this first. Open this card`}
+                aria-label={`${s.title}: ${ahead ? 'unlocked, your next card' : 'complete this first'}. Open this card`}
                 className="group w-full rounded-2xl p-[2px] text-left transition-transform active:scale-[0.98]"
                 style={{ background: `linear-gradient(145deg, ${hex}, ${hex}99)`, boxShadow: `0 4px 0 ${hex}77, 0 6px 16px ${hex}44` }}
               >
@@ -68,7 +70,7 @@ export function ChainTrail({ steps, currentId, onOpen, hex = '#f59e0b' }: {
                   <span className={badge} style={{ background: `linear-gradient(135deg, ${hex}, ${hex}bb)`, color: '#111827' }}>{i + 1}</span>
                   <span className="min-w-0 flex-1">
                     <span className="block text-gray-900 font-black text-base leading-tight [overflow-wrap:anywhere]">{s.title}</span>
-                    <span className="block text-[11px] font-black uppercase tracking-wider" style={{ color: hex }}>Complete this first</span>
+                    <span className="block text-[11px] font-black uppercase tracking-wider" style={{ color: hex }}>{ahead ? 'Unlocked - your next card' : 'Complete this first'}</span>
                   </span>
                   <span aria-hidden className="shrink-0 w-10 h-10 rounded-full grid place-items-center transition-transform group-hover:translate-x-0.5"
                     style={{ background: `linear-gradient(135deg, ${hex}, ${hex}bb)`, boxShadow: `0 2px 6px ${hex}66` }}>

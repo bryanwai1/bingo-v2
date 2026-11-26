@@ -1236,6 +1236,30 @@ function SampleWaiting({ theme, boardName, teamName, onBack }: { theme: PlayerTh
 }
 
 /** The prize winner's page as the demo team would see it. The details are placeholders. */
+/** The lock screen a team sees on a card that is closed or not open yet. */
+function SampleScheduleLock({ task, sched, onClose }: { task: BingoTask; sched: ScheduleStatus; onClose: () => void }) {
+  return (
+    <div className="fixed inset-0 z-40 overflow-y-auto flex flex-col items-center justify-center bg-gray-950 text-center px-6" data-schedule-locked>
+      <ParticleBackground hexCode={task.hex_code} />
+      <div className="relative z-10 max-w-sm w-full">
+        <div className="text-6xl mb-4">🔒</div>
+        <h2 className="text-white text-2xl font-black mb-2 [overflow-wrap:anywhere]">{task.title}</h2>
+        <p className="text-amber-200 font-black text-lg leading-snug">{sched.text}</p>
+        {sched.state === 'before' && sched.opensInMs != null && (
+          <p className="mt-3 text-5xl font-black text-white tabular-nums">{sched.short}</p>
+        )}
+        <p className="text-white/50 text-xs font-bold mt-3">
+          {sched.state === 'before' ? 'This card opens on its own. Keep this page open.' : 'Teams that already started it can still finish.'}
+        </p>
+        <button onClick={onClose} data-remote="closeTask"
+          className="mt-6 w-full py-3 rounded-2xl text-white/80 font-bold border border-white/15 hover:bg-white/5 transition-colors">
+          ← Back to Board
+        </button>
+      </div>
+    </div>
+  )
+}
+
 function SamplePrizeReveal({ task, teamName, theme, onBack }: { task: BingoTask; teamName: string; theme: PlayerTheme; onBack: () => void }) {
   const { photos } = useBingoTaskPhotos(task.id)
   return (
@@ -1804,13 +1828,7 @@ export const SampleTaskDetail = forwardRef<SampleTaskDetailHandle, {
             view. In-app hops go through onJump so the demo swaps cards
             without leaving the page. */}
         {(() => {
-          const submitted = completed || photoSubmitted || sentCount > 0 || !!linkSent || versusSent || freeTextSent
           const items: LinkItem[] = [...links]
-          const next = chain.next
-          if (next && !chain.locked && submitted) {
-            items.push({ id: 'chain-next', label: next.title, url: '', onSelect: () => onJump(next),
-              icon: '🎬', sub: completed ? 'Unlocked - your next card' : 'Next card - opens once approved' })
-          }
           return items.length > 0 && (
             <div className="mt-8 animate-slide-up">
               <TaskLinkButtons links={items} hexCode={task.hex_code} heading="Use these links to complete your tasks" />
@@ -2014,7 +2032,7 @@ export const SampleTaskDetail = forwardRef<SampleTaskDetailHandle, {
                     <p className="text-white font-black text-lg text-center mb-4">{fileHeading(inputs)}</p>
                     <p className="text-white/50 text-sm text-center mb-5">
                       {task.photo_multiple
-                        ? `Send as many ${fileNoun(inputs, true)} as the challenge needs — a marshal reviews each one.`
+                        ? `Add all your ${fileNoun(inputs, true)} first, then press Submit once. You can't add more after sending.`
                         : 'A marshal will review and approve your submission.'}
                     </p>
                     {/* Same tray as the player view: files are held here, can be
@@ -2041,7 +2059,7 @@ export const SampleTaskDetail = forwardRef<SampleTaskDetailHandle, {
                       </div>
                     )}
 
-                    {(!photoSubmitted || task.photo_multiple) && (
+                    {!photoSubmitted && (
                       <>
                         <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                           {staged.map(item => (
@@ -2715,6 +2733,8 @@ function SampleProjector() {
   const detailRef = useRef<SampleTaskDetailHandle | null>(null)
 
   const selectedSection = sections.find(s => s.id === selectedId) ?? null
+  // Card schedule, read here too so a locked card cannot be opened. Alerts are the board's job, not this page's.
+  const { statusOf: schedOf } = useCardSchedules(selectedSection?.id, gridTasks, false)
   const marshalPassword = DEMO_MARSHAL_PASSWORD
 
   // Where this screen is scrolled to, as a fraction, so shared viewers can
@@ -3077,7 +3097,12 @@ function SampleProjector() {
         />
       )}
 
-      {openTask && view === 'board' && (
+      {/* Card schedule: a locked card shows the lock screen, as on a player's phone. Nothing on the card can be reached. */}
+      {openTask && view === 'board' && schedOf(openTask)?.locked && (
+        <SampleScheduleLock task={openTask} sched={schedOf(openTask)!} onClose={() => setOpenTask(null)} />
+      )}
+
+      {openTask && view === 'board' && !schedOf(openTask)?.locked && (
         <SampleTaskDetail
           key={openTask.id}
           ref={detailRef}
