@@ -68,10 +68,10 @@ export function EventSlide() {
           ) : (
             <button
               onClick={() => fileInputRef.current?.click()}
-              className="h-20 px-10 border-2 border-dashed border-white/15 rounded-2xl flex items-center justify-center gap-3 text-white/25 hover:border-white/35 hover:text-white/45 transition-all duration-300"
+              className="w-96 max-w-full h-36 px-10 border-2 border-dashed border-white/25 rounded-3xl flex flex-col items-center justify-center gap-1 text-white/45 hover:border-white/50 hover:text-white/70 hover:bg-white/5 transition-all duration-300"
             >
-              <span className="text-2xl">🏢</span>
-              <span className="text-sm font-semibold tracking-wider uppercase">Upload Client Logo</span>
+              <span className="text-4xl">🏢</span>
+              <span className="text-sm font-semibold tracking-wider uppercase">Choose a logo or drop it here</span>
             </button>
           )}
         </div>

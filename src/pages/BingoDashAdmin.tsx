@@ -12,7 +12,7 @@ import { announceBoardReset } from '../hooks/useBoardReset'
 import { SchedulePreview } from '../components/SchedulePreview'
 import { timerPatchForGame } from '../lib/gameClock'
 import type { BingoTask, BingoTeam, BingoScan, BingoSettings, BingoSection, BingoCategory, BingoChallengeSection, BingoMember, BingoPhotoSubmission, BingoBoardCard, BingoDuel, BonusItem, PauseSpan } from '../types/database'
-import { BINGO_LINES, buildBingoSlots, completedBingoLines, scoreWithBingoLines } from '../lib/bingoLines'
+import { buildBingoSlots, completedBingoLines, scoreWithBingoLines } from '../lib/bingoLines'
 import { boxPoints, resolveBonusWindow, BONUS_PRESETS, DEFAULT_BONUS_FULL_MIN, DEFAULT_BONUS_TIMER_MIN } from '../lib/timeBonus'
 import { TileFace } from '../components/BingoTileFace'
 import { SCOREBOARD_THEMES, getScoreboardTheme } from '../lib/scoreboardThemes'
@@ -26,6 +26,7 @@ import { AdminSection } from '../components/AdminSection'
 import { AdminSidebar, type AdminView } from '../components/AdminSidebar'
 import { activeFaces, faceName, faceColor, slotFor, normaliseFaceCount, TILES_PER_FACE } from '../lib/cubeFaces'
 import { CubeBoard } from '../components/CubeBoard'
+import { logAdjustment } from '../lib/adjustments'
 import { RunEventPanel, Step, LiveGamePanel } from '../components/RunEventPanel'
 import { CONTEST_GAMES, getContestGame } from '../lib/contestGames'
 import { SupportInbox } from '../components/SupportInbox'
@@ -1063,7 +1064,6 @@ export function BingoDashAdmin() {
   const [submissionBoardFilter, setSubmissionBoardFilter] = useState<'current' | 'all'>('all')
 
   // Team grid viewer modal
-  const [viewingTeam, setViewingTeam] = useState<BingoTeam | null>(null)
   // Per-team "live members link" share modal
   const [membersLinkTeam, setMembersLinkTeam] = useState<BingoTeam | null>(null)
   const [membersLinkCopied, setMembersLinkCopied] = useState(false)
@@ -1082,6 +1082,8 @@ export function BingoDashAdmin() {
   const [bulkBonusSaving, setBulkBonusSaving] = useState(false)
   // Section-wide "live teams link" share modal
   const [showAllTeamsLink, setShowAllTeamsLink] = useState(false)
+  const [showPasswords, setShowPasswords] = useState(false)
+  const [passwordsCopied, setPasswordsCopied] = useState(false)
   const [teamSizeSaved, setTeamSizeSaved] = useState(false)
   const [allTeamsLinkCopied, setAllTeamsLinkCopied] = useState(false)
   const [members, setMembers] = useState<BingoMember[]>([])
@@ -2147,6 +2149,30 @@ export function BingoDashAdmin() {
   // which is already scoped since state only ever holds this account's rows).
   const myTeamIdsRef = useRef<Set<string>>(new Set())
   useEffect(() => { myTeamIdsRef.current = new Set(teams.map(t => t.id)) }, [teams])
+  const pendingIdsRef = useRef<string[]>([])
+  useEffect(() => { pendingIdsRef.current = photoSubmissions.filter(s => s.status === 'pending').map(s => s.id) }, [photoSubmissions])
+  // Safety net for the live push: re-read what is waiting for approval. The
+  // push can silently stop (sleep, Wi-Fi blip, throttled tab) and a missed
+  // submission would otherwise stay hidden until the admin refreshed.
+  const resyncSubmissions = useRef(async () => {})
+  resyncSubmissions.current = async () => {
+    const teamIds = [...myTeamIdsRef.current]
+    if (teamIds.length === 0) return
+    const [pending, seen] = await Promise.all([
+      fetchSliceInChunks<BingoPhotoSubmission>('bingo_photo_submissions', 'team_id', teamIds, '*', { col: 'status', val: 'pending' }),
+      // rows we show as pending may have been approved or rejected elsewhere
+      fetchSliceInChunks<BingoPhotoSubmission>('bingo_photo_submissions', 'id', pendingIdsRef.current, '*'),
+    ])
+    const fresh = new Map<string, BingoPhotoSubmission>()
+    for (const r of [...seen, ...pending]) fresh.set(r.id, r)
+    setPhotoSubmissions(prev => {
+      const known = new Set(prev.map(s => s.id))
+      const merged = prev.map(s => fresh.get(s.id) ?? s)
+      const added = [...fresh.values()].filter(r => !known.has(r.id))
+      if (added.length === 0 && merged.every((s, i) => s === prev[i])) return prev
+      return [...added, ...merged].sort((a, b) => b.created_at.localeCompare(a.created_at))
+    })
+  }
   useEffect(() => {
     const channel = supabase
       .channel('bingo-submissions-admin')
@@ -2163,7 +2189,11 @@ export function BingoDashAdmin() {
       })
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'bingo_photo_submissions' }, ({ new: row }) => {
         const sub = row as BingoPhotoSubmission
-        if (!myTeamIdsRef.current.has(sub.team_id)) return
+        if (!myTeamIdsRef.current.has(sub.team_id)) {
+          // The team may have joined a moment ago and not be in our list yet.
+          setTimeout(() => { void resyncSubmissions.current() }, 2000)
+          return
+        }
         setPhotoSubmissions(prev => prev.some(s => s.id === sub.id) ? prev : [sub, ...prev])
       })
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'bingo_photo_submissions' }, ({ new: row }) => {
@@ -2174,8 +2204,17 @@ export function BingoDashAdmin() {
         const sub = row as BingoPhotoSubmission
         setPhotoSubmissions(prev => prev.filter(s => s.id !== sub.id))
       })
-      .subscribe()
-    return () => { supabase.removeChannel(channel) }
+      .subscribe(status => { if (status === 'SUBSCRIBED') void resyncSubmissions.current() })
+    const poll = setInterval(() => { if (!document.hidden) void resyncSubmissions.current() }, 10000)
+    const onVisible = () => { if (!document.hidden) void resyncSubmissions.current() }
+    document.addEventListener('visibilitychange', onVisible)
+    window.addEventListener('online', onVisible)
+    return () => {
+      supabase.removeChannel(channel)
+      clearInterval(poll)
+      document.removeEventListener('visibilitychange', onVisible)
+      window.removeEventListener('online', onVisible)
+    }
   }, [])
 
   // Countdown tick
@@ -3061,7 +3100,7 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
     return reply === null ? undefined : reply.trim() || null
   }
 
-  const bulkSetStatus = async (subs: BingoPhotoSubmission[], status: 'approved' | 'rejected', note?: string | null) => {
+  const bulkSetStatus = async (subs: BingoPhotoSubmission[], status: 'approved' | 'rejected' | 'pending', note?: string | null) => {
     if (subs.length === 0) return
     let review_note: string | null = null
     if (status === 'rejected') {
@@ -3077,7 +3116,7 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
       await supabase.from('bingo_photo_submissions').update({ status, review_note }).in('id', ids)
       // Breakout Hunt rows point back at a puzzle: mirror the decision onto the
       // team's progress so the card can show "approved" or offer a retake.
-      const breakout = subs.filter(s => s.puzzle_id)
+      const breakout = status === 'pending' ? [] : subs.filter(s => s.puzzle_id)
       if (breakout.length > 0) {
         await Promise.all(breakout.map(s =>
           supabase.from('bingo_breakout_progress')
@@ -3110,18 +3149,37 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
           if (isComplete(inputs, done)) scansToComplete.push(sub.scan_id)
         }
       }
-      const scansToUncomplete = subs.filter(s => s.scan_id && status === 'rejected' && s.status === 'approved').map(s => s.scan_id!)
-      if (scansToComplete.length > 0) {
-        await supabase.from('bingo_scans').update({ completed: true, completed_at: new Date().toISOString() }).in('id', scansToComplete)
-        setScans(prev => prev.map(s => scansToComplete.includes(s.id) ? { ...s, completed: true } : s))
+      const scansToUncomplete = subs.filter(s => s.scan_id && status !== 'approved' && s.status === 'approved').map(s => s.scan_id!)
+      // The clock stops when the group SENT the proof, not when the admin got
+      // round to approving it (never before the card was opened).
+      for (const id of scansToComplete) {
+        const scan = scans.find(x => x.id === id)
+        const sent = subs.filter(x => x.scan_id === id).map(x => x.created_at).sort().pop()
+        const at = new Date(Math.max(new Date(sent ?? Date.now()).getTime(), scan ? new Date(scan.scanned_at).getTime() : 0)).toISOString()
+        await supabase.from('bingo_scans').update({ completed: true, completed_at: at }).eq('id', id)
+        setScans(prev => prev.map(s => s.id === id ? { ...s, completed: true, completed_at: at } : s))
       }
       if (scansToUncomplete.length > 0) {
-        await supabase.from('bingo_scans').update({ completed: false, completed_at: null }).in('id', scansToUncomplete)
-        setScans(prev => prev.map(s => scansToUncomplete.includes(s.id) ? { ...s, completed: false } : s))
+        // Un-completing also drops any edited time: the card is open again.
+        await supabase.from('bingo_scans').update({ completed: false, completed_at: null, time_override_seconds: null }).in('id', scansToUncomplete)
+        setScans(prev => prev.map(s => scansToUncomplete.includes(s.id) ? { ...s, completed: false, completed_at: null, time_override_seconds: null } : s))
       }
     } finally {
       setBulkActioning(false)
     }
+  }
+
+  // Put a decided submission back to pending (the card re-opens if it had finished).
+  const undoSubmission = async (sub: BingoPhotoSubmission) => {
+    const was = sub.status
+    await bulkSetStatus([sub], 'pending')
+    const task = tasks.find(t => t.id === sub.task_id)
+    const team = teams.find(t => t.id === sub.team_id)
+    await logAdjustment({
+      section_id: team?.section_id ?? '', team_id: sub.team_id, task_id: sub.task_id,
+      kind: was === 'approved' ? 'undo_approval' : 'undo_rejection',
+      detail: `${team?.name ?? 'Group'}: ${task?.title ?? 'card'} is back to pending review`, reason: null,
+    })
   }
 
   const [downloadingZip, setDownloadingZip] = useState(false)
@@ -3421,6 +3479,7 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
         open={navOpen}
         onClose={() => setNavOpen(false)}
         downloadOnly={!!account?.download_only}
+        progressSectionId={currentBoard?.id ?? currentSectionId}
       />
       <div className="flex-1 min-w-0 overflow-x-clip">
       {/* Header */}
@@ -3472,6 +3531,8 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                 href={playerViewPath} />
               <MenuItem icon="📺" label="Scoreboard" hint="Projector display"
                 href={currentBoard ? `/bingo-dash/projector/${currentBoard.slug}` : '/bingo-dash/projector'} />
+              {currentBoard && <MenuItem icon="📍" label="Live location" hint="Projector map"
+                onClick={() => window.open(`/bingo-dash/location/${currentBoard.id}`, '_blank', 'noopener,noreferrer')} />}
               <MenuItem icon="🎬" label="Event slides" hint="Briefing, groupings, awards"
                 to="/bingo-dash/slides" />
             </Menu>
@@ -5116,6 +5177,32 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
         
         </AdminSection>
 
+        <AdminSection icon="📍" title="Live Location"
+          blurb="Outdoor events: players and observers share their position automatically and it shows on the map."
+          summary={<>{currentBoard?.gps_enabled ? 'On' : 'Off'}</>}>
+          <div className="flex flex-wrap items-center justify-between gap-4 p-4 rounded-lg border a-border a-surface/50">
+            <div>
+              <p className="text-sm font-bold a-text">Share live location</p>
+              <p className="text-xs a-text-3 mt-0.5">Players are asked to allow location once. The map appears on the Progress page and the projector (Open, Live location). Sharing stops when this is OFF or the timer ends. Phones must stay unlocked to keep reporting.</p>
+            </div>
+            <button
+              onClick={() => { if (currentBoard) updateBoardSettings({ gps_enabled: !currentBoard.gps_enabled }) }}
+              role="switch" aria-checked={!!currentBoard?.gps_enabled} aria-label="Share live location"
+              className={`relative shrink-0 w-14 h-8 rounded-full transition-colors ${currentBoard?.gps_enabled ? 'bg-teal-500' : 'bg-gray-600'}`}>
+              <span className={`absolute top-1 left-1 w-6 h-6 rounded-full a-surface shadow transition-transform ${currentBoard?.gps_enabled ? 'translate-x-6' : 'translate-x-0'}`} />
+            </button>
+          </div>
+          <div className="mt-3 p-4 rounded-lg border a-border a-surface/50">
+            <p className="text-sm font-bold a-text mb-2">Who shares</p>
+            <div className="flex gap-2 flex-wrap">
+              {([['both', 'Players and observers'], ['player', 'Players only'], ['observer', 'Observers only']] as const).map(([v, label]) => (
+                <button key={v} onClick={() => updateBoardSettings({ gps_who: v })}
+                  className={`min-h-[44px] px-4 rounded-lg text-sm font-bold border ${(currentBoard?.gps_who ?? 'both') === v ? 'bg-teal-500 text-white border-teal-500' : 'a-border a-text-2'}`}>{label}</button>
+              ))}
+            </div>
+          </div>
+        </AdminSection>
+
         {/* ── Board Note (shown below the bingo board on the player page) ──── */}
         <AdminSection icon="📌" title="Board Note"
           blurb="Shown under the bingo board on the player page — leave empty to hide it."
@@ -5759,6 +5846,15 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                         <Ico d="link" />Live teams link
                       </button>
                       {sectionTeams.length > 0 && (
+                        <button
+                          onClick={() => { setShowPasswords(true); setPasswordsCopied(false) }}
+                          className="a-btn a-btn-brand !py-2 text-sm"
+                          title="List every group with its password, to copy and send"
+                        >
+                          <Ico d="link" />Share passwords
+                        </button>
+                      )}
+                      {sectionTeams.length > 0 && (
                         <button onClick={openBulkBonus} className="a-btn a-btn-live !py-2 text-sm"
                           title="Give one activity's bonus or deduction to many groups at once">
                           <Ico d="star" />Bulk bonus
@@ -5859,14 +5955,14 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                               <div className="flex items-center gap-2.5">
                                 <div className="relative group/photo shrink-0">
                                   <label
-                                    className={`block w-9 h-9 rounded-full overflow-hidden border-2 ${team.photo_url ? 'border-teal-500/60' : 'border-dashed a-border'} a-surface-2 cursor-pointer hover:border-teal-500 transition-colors ${uploadingTeamPhoto === team.id ? 'opacity-60' : ''}`}
-                                    title={team.photo_url ? 'Click to replace photo' : 'Click to upload photo'}
+                                    className={`block ${team.photo_url ? 'w-9 h-9 rounded-full' : 'w-24 h-12 rounded-xl'} overflow-hidden border-2 ${team.photo_url ? 'border-teal-500/60' : 'border-dashed a-border'} a-surface-2 cursor-pointer hover:border-teal-500 transition-colors ${uploadingTeamPhoto === team.id ? 'opacity-60' : ''}`}
+                                    title={team.photo_url ? 'Click or drop a photo to replace' : 'Choose a photo or drop it here'}
                                   >
                                     {team.photo_url ? (
                                       <img src={team.photo_url} alt={`${team.name} photo`} className="w-full h-full object-cover" />
                                     ) : (
-                                      <div className="w-full h-full flex items-center justify-center a-text-3">
-                                        {uploadingTeamPhoto === team.id ? '…' : <Ico d="plus" className="w-3.5 h-3.5" />}
+                                      <div className="w-full h-full flex flex-col items-center justify-center gap-0.5 a-text-3 text-[10px] font-bold leading-tight text-center px-1">
+                                        {uploadingTeamPhoto === team.id ? 'Uploading…' : <><Ico d="plus" className="w-3.5 h-3.5" />Drop photo</>}
                                       </div>
                                     )}
                                     <input
@@ -6002,16 +6098,15 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                             {/* Actions */}
                             <td className="col-span-3 md:px-2.5 md:py-2 md:align-middle whitespace-nowrap">
                               <div className="flex items-center gap-1.5 md:justify-end">
-                                <button onClick={() => setViewingTeam(team)} className="a-btn a-btn-brand flex-1 md:flex-none">
-                                  <Ico d="grid" />Grid
-                                </button>
-                                <button
-                                  onClick={() => { setMembersLinkTeam(team); setMembersLinkCopied(false) }}
+                                <a
+                                  href={`/bingo-dash/team/${team.id}/members`}
+                                  target="_blank"
+                                  rel="noopener"
                                   className="a-btn a-btn-ok flex-1 md:flex-none"
-                                  title="Share a live link to this group's player list"
+                                  title="Open this group's live player list: see who the players and observers are, and remove someone who is offline"
                                 >
-                                  <Ico d="qr" />Share
-                                </button>
+                                  <Ico d="qr" />Players &amp; Observers
+                                </a>
                                 <details className="a-details relative">
                                   <summary className="a-btn a-btn-ghost px-2" aria-label={`More actions for ${team.name}`}>
                                     <Ico d="dots" />
@@ -6358,12 +6453,21 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
                                 <span className="block text-[11px] font-bold a-text-3 truncate" title={sub.review_note}>“{sub.review_note}”</span>
                               )}
                             </span>
-                            <button
-                              onClick={() => bulkSetStatus([sub], sub.status === 'approved' ? 'rejected' : 'approved')}
-                              className="text-[11px] a-text-3 hover:a-text underline"
-                            >
-                              Change
-                            </button>
+                            <span className="flex items-center gap-3">
+                              <button
+                                onClick={() => undoSubmission(sub)}
+                                disabled={bulkActioning}
+                                className="text-[11px] a-text-3 hover:a-text underline"
+                              >
+                                Undo
+                              </button>
+                              <button
+                                onClick={() => bulkSetStatus([sub], sub.status === 'approved' ? 'rejected' : 'approved')}
+                                className="text-[11px] a-text-3 hover:a-text underline"
+                              >
+                                Change
+                              </button>
+                            </span>
                           </div>
                         )}
                       </div>
@@ -6658,126 +6762,36 @@ Their scans${teamSubs.length > 0 ? ` and ${teamSubs.length} submitted photo${tea
         </div>
       )}
 
-      {/* ── Team Grid Viewer Modal ──────────────────────────────────────────── */}
-      {viewingTeam && (() => {
-        const team = viewingTeam
-        const teamScans = scans.filter(s => s.team_id === team.id)
-        const gridTasksForTeam = boardTasksForSection(team.section_id)
-        const gridTaskIdSet = new Set(gridTasksForTeam.map(t => t.id))
-        // A card placed in several boxes on this board completes per box
-        // (scan.board_card_id); scans from before that column existed have
-        // none and still count toward every box sharing their task_id — see
-        // supabase/scan-completion/20260910_scan_board_card_id.sql.
-        const completedPlacementIds = new Set(
-          teamScans.filter(s => s.completed && s.board_card_id).map(s => s.board_card_id as string),
-        )
-        const legacyCompletedTaskIds = new Set(
-          teamScans.filter(s => s.completed && !s.board_card_id && gridTaskIdSet.has(s.task_id)).map(s => s.task_id),
-        )
-        const scannedPlacementIds = new Set(teamScans.filter(s => s.board_card_id).map(s => s.board_card_id as string))
-        const legacyScannedTaskIds = new Set(teamScans.filter(s => !s.board_card_id).map(s => s.task_id))
-        const isPlacementCompleted = (t: PlacedCard) => completedPlacementIds.has(t.placementId) || legacyCompletedTaskIds.has(t.id)
-        const isPlacementScanned = (t: PlacedCard) => scannedPlacementIds.has(t.placementId) || legacyScannedTaskIds.has(t.id)
-        const completedPlacements = gridTasksForTeam.filter(isPlacementCompleted)
-        const completedIds = new Set(completedPlacements.map(t => t.placementId))
-        const slots = buildBingoSlots(gridTasksForTeam)
-        const lineSlots = slots.map(t => t ? { ...t, id: t.placementId } : null)
-        const completedLineIdx = completedBingoLines(lineSlots, completedIds)
-        const bingoSlotSet = new Set<number>()
-        completedLineIdx.forEach(i => BINGO_LINES[i].forEach(idx => bingoSlotSet.add(idx)))
-        const tasksDone = completedPlacements.length
-        // Same rule as the scoreboard: replayed in completion order so each
-        // line lifts the running total at the point it landed.
-        const modalCompletedAt = new Map<string, number>()
-        for (const sc of teamScans) {
-          if (!sc.completed) continue
-          const when = sc.completed_at ? Date.parse(sc.completed_at) : 0
-          const key = sc.board_card_id ?? sc.task_id
-          modalCompletedAt.set(key, Math.min(modalCompletedAt.get(key) ?? Infinity, when))
+      {/* ── Share passwords: every group of this board with its PIN ───────── */}
+      {showPasswords && (() => {
+        const list = teams.filter(tm => tm.section_id === currentSectionId)
+          .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }))
+        const text = list.map(tm => `${tm.name}: ${tm.password || '(not set)'}`).join('\n')
+        const copy = () => {
+          void navigator.clipboard.writeText(text).then(() => { setPasswordsCopied(true); setTimeout(() => setPasswordsCopied(false), 2000) })
         }
-        const points = scoreWithBingoLines(
-          completedPlacements.map(t => ({
-            id: t.placementId,
-            points: boxPoints({ ...t, placement_id: t.placementId }, teamScans, currentBoard),
-            at: modalCompletedAt.get(t.placementId) ?? modalCompletedAt.get(t.id) ?? 0,
-          })),
-          lineSlots,
-        ).total
         return (
-          <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 px-4"
-            onClick={() => setViewingTeam(null)}>
-            <div className="a-surface rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] flex flex-col animate-bounce-in"
-              onClick={e => e.stopPropagation()}>
+          <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 px-4" onClick={() => setShowPasswords(false)}>
+            <div className="a-surface rounded-2xl shadow-2xl w-full max-w-md max-h-[90vh] flex flex-col animate-bounce-in" onClick={e => e.stopPropagation()}>
               <div className="px-5 py-4 border-b a-border flex items-center justify-between">
                 <div>
-                  <p className="text-[10px] font-black text-teal-500 uppercase tracking-widest">Team Grid</p>
-                  <h3 className="font-black a-text text-lg">{team.name}</h3>
+                  <h3 className="text-lg font-bold a-text">Group passwords</h3>
+                  <p className="text-xs a-text-2 mt-0.5">{list.length} group{list.length === 1 ? '' : 's'}</p>
                 </div>
-                <button onClick={() => setViewingTeam(null)} className="a-text-2 hover:a-text-3 text-2xl font-light">&times;</button>
+                <button onClick={() => setShowPasswords(false)} className="a-text-2 hover:a-text-3 text-2xl font-light" aria-label="Close">&times;</button>
               </div>
-
-              {/* Stats */}
-              <div className="px-5 py-3 border-b a-border grid grid-cols-3 gap-3">
-                <div className="text-center">
-                  <p className="text-xs a-text-2 font-bold uppercase tracking-wider">Points</p>
-                  <p className="text-2xl font-black a-text">{points.toFixed(2)}</p>
-                </div>
-                <div className="text-center">
-                  <p className="text-xs a-text-2 font-bold uppercase tracking-wider">Bingos</p>
-                  <p className="text-2xl font-black text-amber-600">{completedLineIdx.length}<span className="text-sm a-text-2">/12</span></p>
-                </div>
-                <div className="text-center">
-                  <p className="text-xs a-text-2 font-bold uppercase tracking-wider">Done</p>
-                  <p className="text-2xl font-black text-green-600">{tasksDone}</p>
-                </div>
-              </div>
-
-              {/* Grid */}
               <div className="p-5 overflow-y-auto">
-                {gridTasksForTeam.length === 0 ? (
-                  <p className="text-center a-text-2 py-8 text-sm">No grid configured for this section.</p>
-                ) : (
-                  <div className="grid grid-cols-5 gap-1.5">
-                    {slots.map((t, i) => {
-                      if (!t) {
-                        return <div key={`e-${i}`} className="aspect-square rounded-lg a-surface-2 border border-dashed a-border" />
-                      }
-                      const isCompleted = isPlacementCompleted(t)
-                      const isScanned = !isCompleted && isPlacementScanned(t)
-                      const inLine = bingoSlotSet.has(i)
-                      return (
-                        <div
-                          key={t.placementId}
-                          title={t.title}
-                          className="relative aspect-square rounded-lg flex items-center justify-center text-center px-1 overflow-hidden"
-                          style={{
-                            backgroundColor: t.hex_code,
-                            opacity: isCompleted ? 1 : isScanned ? 0.55 : 0.22,
-                            boxShadow: inLine ? '0 0 0 2px #fbbf24, 0 0 8px #fbbf24aa' : 'none',
-                          }}
-                        >
-                          <span className="a-text text-[9px] font-black leading-tight line-clamp-3 drop-shadow">
-                            {t.title}
-                          </span>
-                          {isCompleted && (
-                            <div className="absolute top-0.5 right-0.5 a-surface/90 rounded-full w-4 h-4 flex items-center justify-center">
-                              <span className="text-green-600 text-[10px] font-black">✓</span>
-                            </div>
-                          )}
-                          {isScanned && (
-                            <div className="absolute top-0.5 right-0.5 w-2.5 h-2.5 rounded-full border-2 border-white/90" />
-                          )}
-                        </div>
-                      )
-                    })}
+                {list.map(tm => (
+                  <div key={tm.id} className="flex items-center justify-between gap-3 py-2 border-b a-border last:border-b-0">
+                    <span className="font-bold a-text truncate">{tm.name}</span>
+                    <span className={`font-mono text-lg font-black tracking-[0.2em] ${tm.password ? 'a-text' : 'text-amber-500 text-sm tracking-normal'}`}>{tm.password || 'not set'}</span>
                   </div>
-                )}
-                <div className="flex justify-center gap-4 text-[11px] a-text-2 mt-4">
-                  <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-gray-300" />Locked</span>
-                  <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full border-2 border-gray-400" />Scanned</span>
-                  <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-green-500" />Completed</span>
-                  <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm bg-amber-400" />Bingo</span>
-                </div>
+                ))}
+              </div>
+              <div className="px-5 py-4 border-t a-border">
+                <button onClick={copy} className="a-btn a-btn-ok w-full !py-2.5 text-sm">
+                  {passwordsCopied ? '✓ Copied' : 'Copy all as text'}
+                </button>
               </div>
             </div>
           </div>

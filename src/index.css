@@ -1004,3 +1004,20 @@ html.observer-on #root {
 }
 html.observer-on #root .h-screen { height: 100%; }
 html.observer-on #root .min-h-screen { min-height: 100%; }
+
+/* A file input's control while a file is dragged over it (see lib/fileDrop.ts). */
+.file-drop-active {
+  outline: 2px dashed #8b5cf6 !important;
+  outline-offset: 3px;
+  background-color: rgba(139, 92, 246, 0.12) !important;
+  border-radius: 0.75rem;
+  transition: background-color 0.15s;
+}
+
+/* A group picked in the live map legend: its dots blink so they are easy to spot. */
+@keyframes loc-pulse {
+  0% { box-shadow: 0 0 0 0 rgba(251,191,36,.95); transform: scale(1); }
+  70% { box-shadow: 0 0 0 16px rgba(251,191,36,0); transform: scale(1.5); }
+  100% { box-shadow: 0 0 0 0 rgba(251,191,36,0); transform: scale(1); }
+}
+.loc-pulse { animation: loc-pulse 1s ease-out 4; }

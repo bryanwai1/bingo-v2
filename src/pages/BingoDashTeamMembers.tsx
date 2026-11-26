@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
+import { useIsAdmin } from '../hooks/useIsAdmin'
 import { ParticleBackground } from '../components/ParticleBackground'
 import type { BingoTeam, BingoMember, BingoSection } from '../types/database'
 
@@ -12,6 +13,40 @@ export function BingoDashTeamMembers() {
   const [members, setMembers] = useState<BingoMember[]>([])
   const [loading, setLoading] = useState(true)
   const [notFound, setNotFound] = useState(false)
+  // This page is a public, view-only link, so the kick buttons only appear for
+  // a signed-in, approved Bingo Dash admin (the same browser they run the game in).
+  const isAdmin = useIsAdmin()
+
+  // Everyone removed since this page opened, newest first, so a slip can be undone.
+  const [removed, setRemoved] = useState<BingoMember[]>([])
+  const [restoring, setRestoring] = useState<string | null>(null)
+  const restore = async (m: BingoMember) => {
+    setRestoring(m.id)
+    // The same row goes back with the same id, so the player's own device still recognises it.
+    const { error } = await supabase.from('bingo_members').insert(m)
+    setRestoring(null)
+    if (error) {
+      alert(error.message?.includes('TEAM_FULL') ? 'That seat has been taken since, so they cannot be put back.' : `Could not undo: ${error.message}`)
+      return
+    }
+    setRemoved(prev => prev.filter(x => x.id !== m.id))
+    const { data } = await supabase.from('bingo_members').select('*').eq('team_id', teamId!).order('created_at')
+    if (data) setMembers(data)
+  }
+
+  const kick = async (m: BingoMember) => {
+    if (!confirm(`Take "${m.name}" out of ${team?.name ?? 'the team'}?
+
+Their scans stay with the team.`)) return
+    setMembers(prev => prev.filter(x => x.id !== m.id))
+    const { error } = await supabase.from('bingo_members').delete().eq('id', m.id)
+    if (!error) setRemoved(prev => [m, ...prev.filter(x => x.id !== m.id)])
+    if (error) {
+      alert('Failed to remove')
+      const { data } = await supabase.from('bingo_members').select('*').eq('team_id', teamId!).order('created_at')
+      if (data) setMembers(data)
+    }
+  }
 
   // Initial load
   useEffect(() => {
@@ -127,7 +162,13 @@ export function BingoDashTeamMembers() {
                   <div className="w-9 h-9 rounded-full bg-violet-100 text-violet-600 flex items-center justify-center font-black text-base flex-shrink-0">
                     {m.name.trim().charAt(0).toUpperCase() || '?'}
                   </div>
-                  <span className="font-bold text-gray-900 truncate">{m.name}</span>
+                  <span className="font-bold text-gray-900 truncate flex-1">{m.name}</span>
+                  {isAdmin && (
+                    <button onClick={() => void kick(m)} title={`Remove ${m.name}`} aria-label={`Remove ${m.name}`}
+                      className="w-7 h-7 rounded-full flex items-center justify-center text-gray-400 hover:text-white hover:bg-red-500 transition-colors flex-shrink-0 text-lg leading-none">
+                      &times;
+                    </button>
+                  )}
                 </li>
               ))}
               {Array.from({ length: Math.max(0, maxPlayers - players.length) }).map((_, i) => (
@@ -154,12 +195,35 @@ export function BingoDashTeamMembers() {
                     className="px-2.5 py-1 rounded-full bg-blue-50 border border-blue-100 text-blue-600 text-xs font-bold flex items-center gap-1">
                     <span>👁</span>
                     <span className="truncate max-w-[120px]">{m.name}</span>
+                    {isAdmin && (
+                      <button onClick={() => void kick(m)} title={`Remove ${m.name}`} aria-label={`Remove ${m.name}`}
+                        className="ml-0.5 w-4 h-4 rounded-full flex items-center justify-center text-blue-400 hover:text-white hover:bg-red-500 transition-colors text-sm leading-none">
+                        &times;
+                      </button>
+                    )}
                   </li>
                 ))}
               </ul>
             </div>
           )}
         </div>
+
+        {isAdmin && removed.length > 0 && (
+          <div className="w-full mt-4 rounded-2xl border border-amber-400/40 bg-amber-400/10 p-4">
+            <p className="text-[11px] font-black text-amber-300 uppercase tracking-widest mb-2">Recently removed</p>
+            <ul className="flex flex-col gap-2">
+              {removed.map(m => (
+                <li key={m.id} className="flex items-center gap-3 text-sm text-white">
+                  <span className="flex-1 truncate font-bold">{m.name} <span className="text-white/40 font-medium">· {m.role}</span></span>
+                  <button onClick={() => void restore(m)} disabled={restoring === m.id}
+                    className="px-3 py-1 rounded-lg bg-amber-400 hover:bg-amber-300 text-black text-xs font-black disabled:opacity-50">
+                    {restoring === m.id ? 'Restoring…' : '↩ Undo'}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
 
         <p className="text-[11px] text-gray-600 mt-5 text-center">
           This page updates live as players join.

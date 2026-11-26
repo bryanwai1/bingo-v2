@@ -29,7 +29,12 @@ export type PrizeKind =
   | 'second'
   | 'first'
 type SingletonKind = 'main' | 'intro' | 'holding' | 'lineup' | 'scoreboard' | 'closing' | 'evaluation'
-export type AwardSlideKind = SingletonKind | PrizeKind
+/** Free-form slide ("media:<n>") holding any uploaded picture, GIF or video. Can be added many times. */
+export type AwardSlideKind = SingletonKind | PrizeKind | 'media'
+
+function isMediaId(id: string): boolean {
+  return /^media:\d+$/.test(id)
+}
 
 /** Teams shown on a single consolation_group slide. */
 const CONSOLATION_GROUP_SIZE = 3
@@ -103,7 +108,8 @@ export const SLIDE_LABELS: Record<AwardSlideKind, { label: string; emoji: string
   scoreboard:        { label: 'Full scoreboard',    emoji: '📊', accent: '#86efac' },
   closing:           { label: 'Closing slide',       emoji: '🎬', accent: '#fca5a5' },
   evaluation:        { label: 'Evaluation',          emoji: '📝', accent: '#bae6fd' },
-  first:             { label: 'Grand Champion',     emoji: '🏆', accent: '#fde047' },
+  media:             { label: 'Blank / Media',       emoji: '🖼', accent: '#fbcfe8' },
+  first:            { label: 'Grand Champion',     emoji: '🏆', accent: '#fde047' },
   second:            { label: 'First Runner-Up',    emoji: '🥈', accent: '#e5e7eb' },
   third:             { label: 'Second Runner-Up',   emoji: '🥉', accent: '#f59e0b' },
   fourth:            { label: 'Fourth Place',        emoji: '🎗', accent: '#93c5fd' },
@@ -199,6 +205,7 @@ export function normalizeSlideOrder(
     if (isSingletonKind(raw)) {
       out.push(raw); seen.add(raw); continue
     }
+    if (isMediaId(raw)) { out.push(raw); seen.add(raw); continue }
     const idx = raw.lastIndexOf(':')
     if (idx < 0) continue
     const kind = raw.slice(0, idx)
@@ -228,7 +235,7 @@ export function normalizeSlideOrder(
 }
 
 /** Next unused numeric suffix for a given prize kind. */
-function nextPrizeId(order: AwardSlideId[], kind: PrizeKind): AwardSlideId {
+function nextPrizeId(order: AwardSlideId[], kind: PrizeKind | 'media'): AwardSlideId {
   let max = -1
   for (const id of order) {
     if (isSingletonKind(id)) continue
@@ -272,6 +279,12 @@ export function resetSlideOrder(order: AwardSlideId[]): AwardSlideId[] {
   for (const extra of ['intro', 'lineup', 'evaluation'] as const) {
     if (order.includes(extra)) out = addSlide(out, extra)
   }
+  // Media slides keep their exact ids, or their uploads would lose their slide.
+  for (const id of order) {
+    if (!isMediaId(id)) continue
+    const at = out.findIndex(x => singletonRank(x) > singletonRank(id))
+    out = at < 0 ? [...out, id] : [...out.slice(0, at), id, ...out.slice(at)]
+  }
   return out
 }
 
@@ -295,7 +308,7 @@ export function buildAwardSlides(order: AwardSlideId[]): AwardSlideDescriptor[] 
     consolation: [], consolation_group: [],
   }
   for (const id of order) {
-    if (isSingletonKind(id)) continue
+    if (isSingletonKind(id) || isMediaId(id)) continue
     const idx = id.lastIndexOf(':')
     if (idx < 0) continue
     const kind = id.slice(0, idx)
@@ -328,6 +341,10 @@ export function buildAwardSlides(order: AwardSlideId[]): AwardSlideDescriptor[] 
 
   return order.map(id => {
     if (isSingletonKind(id)) return { id, kind: id, rank: null, teamRanks: null }
+    if (isMediaId(id)) {
+      const n = order.filter(x => isMediaId(x)).indexOf(id) + 1
+      return { id, kind: 'media' as const, rank: n, teamRanks: null }
+    }
     const idx = id.lastIndexOf(':')
     const kind = id.slice(0, idx) as PrizeKind
     const posInKind = byKind[kind].indexOf(id)
@@ -385,7 +402,17 @@ export type SlideTextBlock = {
   bg?: string
 }
 export type EvalQr = { url: string; title?: string }
+/** What a free-form media slide shows. */
+export type MediaSlide = { url: string; type: 'image' | 'video'; fit?: 'contain' | 'cover' }
 export type SlideText = {
+  /** Free-form media slides, keyed by slide id ("media:0"). */
+  media?: Record<string, MediaSlide>
+  /** Custom slide names, keyed by slide id. Blank = the built-in label. */
+  names?: Record<string, string>
+  /** Place slides: where the team photo sits vertically, 0 (top) - 100 (bottom), keyed by team id. 50 = centred. */
+  photo_y?: Record<string, number>
+  /** Place slides: "cover" (default, fills the frame) or "contain" (whole photo, blurred sides), keyed by team id. */
+  photo_fit?: Record<string, 'contain' | 'cover'>
   /** Set by the editor; see normalizeSlideOrder's injectEndSlides. */
   v?: number
   /** Main + closing logo: "default" emblem, "none", or an image URL. */

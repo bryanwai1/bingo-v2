@@ -110,8 +110,10 @@ export function BreakoutHuntAdminPanel({ taskId }: { taskId: string }) {
                       ?
                     </div>
                   )}
-                  <label className="mt-1 block text-center text-[11px] font-bold text-violet-600 cursor-pointer hover:text-violet-800">
-                    {p.image_url ? 'Replace' : 'Upload image'}
+                  <label className={p.image_url
+                    ? 'mt-1 block text-center text-[11px] font-bold text-violet-600 cursor-pointer hover:text-violet-800'
+                    : 'mt-1 block text-center text-xs font-black text-gray-600 cursor-pointer rounded-xl border-2 border-dashed border-gray-300 hover:border-violet-400 hover:bg-violet-50/60 px-2 py-4 transition-colors'}>
+                    {p.image_url ? 'Replace' : <><span className="block text-2xl mb-1">🖼</span>Choose an image or drop it here</>}
                     <input type="file" accept="image/*" className="hidden" disabled={busy}
                       onChange={e => {
                         const f = e.target.files?.[0]; e.target.value = ''
